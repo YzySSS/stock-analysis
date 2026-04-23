@@ -1,0 +1,15 @@
+{
+  "run_id": "V13_RegimeV1_2024",
+  "start_date": "2024-01-01",
+  "end_date": "2024-12-31",
+  "total_trades": 285,
+  "bull_days": 145,
+  "bear_days": 97,
+  "win_rate": 38.94736842105263,
+  "avg_return": -0.812766561317235,
+  "total_return": -95.06805650619292,
+  "bull_win_rate": 41.0377358490566,
+  "bull_return": -79.37642636618536,
+  "bear_win_rate": 32.87671232876712,
+  "bear_return": -152.26204360922665
+}

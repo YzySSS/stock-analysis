@@ -1,0 +1,2309 @@
+{
+  "hold_days": 5,
+  "total_trades": 230,
+  "win_rate": 0.5478,
+  "avg_return": 0.010027,
+  "total_return": 5.7035,
+  "trades": [
+    {
+      "entry_date": "2025-01-09",
+      "exit_date": "2025-01-16",
+      "code": "000651",
+      "entry_price": 43.2564,
+      "exit_price": 42.3419,
+      "gross_return": -0.021141380235063408,
+      "net_return": -0.025141380235063408,
+      "score": 86.09209270791882
+    },
+    {
+      "entry_date": "2025-01-09",
+      "exit_date": "2025-01-16",
+      "code": "002049",
+      "entry_price": 59.0072,
+      "exit_price": 59.0272,
+      "gross_return": 0.0003389416884719683,
+      "net_return": -0.0036610583115280317,
+      "score": 77.96410156915393
+    },
+    {
+      "entry_date": "2025-01-09",
+      "exit_date": "2025-01-16",
+      "code": "600420",
+      "entry_price": 10.9973,
+      "exit_price": 11.0071,
+      "gross_return": 0.0008911278222836745,
+      "net_return": -0.0031088721777163255,
+      "score": 71.0293958054724
+    },
+    {
+      "entry_date": "2025-01-09",
+      "exit_date": "2025-01-16",
+      "code": "600618",
+      "entry_price": 11.003,
+      "exit_price": 11.7287,
+      "gross_return": 0.06595473961646822,
+      "net_return": 0.06195473961646822,
+      "score": 70.95248661303022
+    },
+    {
+      "entry_date": "2025-01-09",
+      "exit_date": "2025-01-16",
+      "code": "000899",
+      "entry_price": 7.7323,
+      "exit_price": 7.8962,
+      "gross_return": 0.0211967978479883,
+      "net_return": 0.0171967978479883,
+      "score": 70.36313213678015
+    },
+    {
+      "entry_date": "2025-01-10",
+      "exit_date": "2025-01-17",
+      "code": "002166",
+      "entry_price": 7.3867,
+      "exit_price": 7.5349,
+      "gross_return": 0.02006308635791356,
+      "net_return": 0.01606308635791356,
+      "score": 71.21821080352964
+    },
+    {
+      "entry_date": "2025-01-10",
+      "exit_date": "2025-01-17",
+      "code": "603130",
+      "entry_price": 20.4804,
+      "exit_price": 20.4305,
+      "gross_return": -0.0024364758500810993,
+      "net_return": -0.0064364758500811,
+      "score": 71.1820965120253
+    },
+    {
+      "entry_date": "2025-01-10",
+      "exit_date": "2025-01-17",
+      "code": "603097",
+      "entry_price": 21.989,
+      "exit_price": 20.6308,
+      "gross_return": -0.061767247259993635,
+      "net_return": -0.06576724725999364,
+      "score": 70.95635035259903
+    },
+    {
+      "entry_date": "2025-01-10",
+      "exit_date": "2025-01-17",
+      "code": "002052",
+      "entry_price": 6.45,
+      "exit_price": 6.4,
+      "gross_return": -0.007751937984496096,
+      "net_return": -0.011751937984496096,
+      "score": 70.61189716130565
+    },
+    {
+      "entry_date": "2025-01-10",
+      "exit_date": "2025-01-17",
+      "code": "002275",
+      "entry_price": 13.1735,
+      "exit_price": 13.0772,
+      "gross_return": -0.007310130185599967,
+      "net_return": -0.011310130185599968,
+      "score": 69.89616684676065
+    },
+    {
+      "entry_date": "2025-01-13",
+      "exit_date": "2025-01-20",
+      "code": "688685",
+      "entry_price": 31.9065,
+      "exit_price": 35.0373,
+      "gross_return": 0.09812420666635327,
+      "net_return": 0.09412420666635327,
+      "score": 69.49848362198506
+    },
+    {
+      "entry_date": "2025-01-13",
+      "exit_date": "2025-01-20",
+      "code": "603155",
+      "entry_price": 11.355,
+      "exit_price": 12.5964,
+      "gross_return": 0.10932628797886382,
+      "net_return": 0.10532628797886381,
+      "score": 69.44588064817117
+    },
+    {
+      "entry_date": "2025-01-13",
+      "exit_date": "2025-01-20",
+      "code": "600351",
+      "entry_price": 5.3642,
+      "exit_price": 5.5769,
+      "gross_return": 0.0396517654077029,
+      "net_return": 0.0356517654077029,
+      "score": 69.24161508912835
+    },
+    {
+      "entry_date": "2025-01-13",
+      "exit_date": "2025-01-20",
+      "code": "600267",
+      "entry_price": 7.4679,
+      "exit_price": 8.0153,
+      "gross_return": 0.0733003923459071,
+      "net_return": 0.0693003923459071,
+      "score": 68.90870242292243
+    },
+    {
+      "entry_date": "2025-01-13",
+      "exit_date": "2025-01-20",
+      "code": "688676",
+      "entry_price": 36.3188,
+      "exit_price": 41.3792,
+      "gross_return": 0.13933279733911896,
+      "net_return": 0.13533279733911896,
+      "score": 68.62305253983422
+    },
+    {
+      "entry_date": "2025-01-14",
+      "exit_date": "2025-01-21",
+      "code": "600887",
+      "entry_price": 26.7914,
+      "exit_price": 26.0176,
+      "gross_return": -0.028882402562016088,
+      "net_return": -0.03288240256201609,
+      "score": 72.94659950358489
+    },
+    {
+      "entry_date": "2025-01-14",
+      "exit_date": "2025-01-21",
+      "code": "002120",
+      "entry_price": 7.0887,
+      "exit_price": 7.2441,
+      "gross_return": 0.02192221422827884,
+      "net_return": 0.01792221422827884,
+      "score": 69.10382099904795
+    },
+    {
+      "entry_date": "2025-01-14",
+      "exit_date": "2025-01-21",
+      "code": "003043",
+      "entry_price": 27.9605,
+      "exit_price": 28.8487,
+      "gross_return": 0.03176624166234514,
+      "net_return": 0.027766241662345138,
+      "score": 68.61938382759124
+    },
+    {
+      "entry_date": "2025-01-14",
+      "exit_date": "2025-01-21",
+      "code": "002927",
+      "entry_price": 12.3261,
+      "exit_price": 12.635,
+      "gross_return": 0.02506064367480383,
+      "net_return": 0.02106064367480383,
+      "score": 68.55144627148096
+    },
+    {
+      "entry_date": "2025-01-14",
+      "exit_date": "2025-01-21",
+      "code": "603396",
+      "entry_price": 24.053,
+      "exit_price": 25.3849,
+      "gross_return": 0.05537355007691337,
+      "net_return": 0.05137355007691337,
+      "score": 68.44586999216185
+    },
+    {
+      "entry_date": "2025-01-15",
+      "exit_date": "2025-01-22",
+      "code": "000651",
+      "entry_price": 41.6285,
+      "exit_price": 40.2934,
+      "gross_return": -0.03207177774841765,
+      "net_return": -0.03607177774841765,
+      "score": 85.90340827592351
+    },
+    {
+      "entry_date": "2025-01-15",
+      "exit_date": "2025-01-22",
+      "code": "600420",
+      "entry_price": 11.192,
+      "exit_price": 11.2504,
+      "gross_return": 0.0052180128663331556,
+      "net_return": 0.0012180128663331555,
+      "score": 72.15408618113091
+    },
+    {
+      "entry_date": "2025-01-15",
+      "exit_date": "2025-01-22",
+      "code": "600618",
+      "entry_price": 11.817,
+      "exit_price": 10.6304,
+      "gross_return": -0.10041465685030045,
+      "net_return": -0.10441465685030045,
+      "score": 72.06071517141022
+    },
+    {
+      "entry_date": "2025-01-15",
+      "exit_date": "2025-01-22",
+      "code": "000899",
+      "entry_price": 7.8287,
+      "exit_price": 7.9348,
+      "gross_return": 0.013552697127236914,
+      "net_return": 0.009552697127236914,
+      "score": 71.47936744278503
+    },
+    {
+      "entry_date": "2025-01-15",
+      "exit_date": "2025-01-22",
+      "code": "002049",
+      "entry_price": 59.6751,
+      "exit_price": 59.4857,
+      "gross_return": -0.003173853081100813,
+      "net_return": -0.007173853081100813,
+      "score": 69.92790224736791
+    },
+    {
+      "entry_date": "2025-01-16",
+      "exit_date": "2025-01-23",
+      "code": "002166",
+      "entry_price": 7.525,
+      "exit_price": 7.4855,
+      "gross_return": -0.005249169435215988,
+      "net_return": -0.009249169435215988,
+      "score": 71.58537226692943
+    },
+    {
+      "entry_date": "2025-01-16",
+      "exit_date": "2025-01-23",
+      "code": "603130",
+      "entry_price": 20.4206,
+      "exit_price": 20.0719,
+      "gross_return": -0.017075893950226774,
+      "net_return": -0.021075893950226774,
+      "score": 71.54719188311347
+    },
+    {
+      "entry_date": "2025-01-16",
+      "exit_date": "2025-01-23",
+      "code": "603097",
+      "entry_price": 20.8191,
+      "exit_price": 21.414,
+      "gross_return": 0.028574722250241495,
+      "net_return": 0.024574722250241494,
+      "score": 71.3132997750441
+    },
+    {
+      "entry_date": "2025-01-16",
+      "exit_date": "2025-01-23",
+      "code": "002052",
+      "entry_price": 6.7,
+      "exit_price": 6.41,
+      "gross_return": -0.04328358208955224,
+      "net_return": -0.047283582089552245,
+      "score": 70.97924247154873
+    },
+    {
+      "entry_date": "2025-01-16",
+      "exit_date": "2025-01-23",
+      "code": "002275",
+      "entry_price": 12.8461,
+      "exit_price": 12.952,
+      "gross_return": 0.008243747129478994,
+      "net_return": 0.004243747129478994,
+      "score": 70.294138004175
+    },
+    {
+      "entry_date": "2025-01-17",
+      "exit_date": "2025-01-24",
+      "code": "002885",
+      "entry_price": 12.4019,
+      "exit_price": 12.981,
+      "gross_return": 0.04669445810722554,
+      "net_return": 0.04269445810722554,
+      "score": 68.63047650940649
+    },
+    {
+      "entry_date": "2025-01-17",
+      "exit_date": "2025-01-24",
+      "code": "600452",
+      "entry_price": 9.2599,
+      "exit_price": 9.1905,
+      "gross_return": -0.007494681368049321,
+      "net_return": -0.01149468136804932,
+      "score": 68.56210678329782
+    },
+    {
+      "entry_date": "2025-01-17",
+      "exit_date": "2025-01-24",
+      "code": "603332",
+      "entry_price": 8.5242,
+      "exit_price": 9.3549,
+      "gross_return": 0.09745196030125997,
+      "net_return": 0.09345196030125996,
+      "score": 68.51920594838984
+    },
+    {
+      "entry_date": "2025-01-17",
+      "exit_date": "2025-01-24",
+      "code": "605268",
+      "entry_price": 7.8431,
+      "exit_price": 7.8138,
+      "gross_return": -0.0037357677448968014,
+      "net_return": -0.0077357677448968015,
+      "score": 68.48140962558224
+    },
+    {
+      "entry_date": "2025-01-17",
+      "exit_date": "2025-01-24",
+      "code": "603345",
+      "entry_price": 72.8085,
+      "exit_price": 73.3438,
+      "gross_return": 0.007352163552332579,
+      "net_return": 0.003352163552332579,
+      "score": 67.30794510362884
+    },
+    {
+      "entry_date": "2025-01-20",
+      "exit_date": "2025-01-27",
+      "code": "688685",
+      "entry_price": 33.6713,
+      "exit_price": 38.0585,
+      "gross_return": 0.13029493960732136,
+      "net_return": 0.12629493960732135,
+      "score": 69.13596257180355
+    },
+    {
+      "entry_date": "2025-01-20",
+      "exit_date": "2025-01-27",
+      "code": "603155",
+      "entry_price": 12.4905,
+      "exit_price": 13.2892,
+      "gross_return": 0.06394459789439962,
+      "net_return": 0.05994459789439961,
+      "score": 69.0627590332986
+    },
+    {
+      "entry_date": "2025-01-20",
+      "exit_date": "2025-01-27",
+      "code": "600351",
+      "entry_price": 5.5399,
+      "exit_price": 5.5769,
+      "gross_return": 0.006678820917345064,
+      "net_return": 0.002678820917345064,
+      "score": 68.85121688771922
+    },
+    {
+      "entry_date": "2025-01-20",
+      "exit_date": "2025-01-27",
+      "code": "600267",
+      "entry_price": 8.0349,
+      "exit_price": 8.377,
+      "gross_return": 0.04257675888934526,
+      "net_return": 0.03857675888934527,
+      "score": 68.5288692700643
+    },
+    {
+      "entry_date": "2025-01-20",
+      "exit_date": "2025-01-27",
+      "code": "688676",
+      "entry_price": 40.2568,
+      "exit_price": 39.0852,
+      "gross_return": -0.029103157727390108,
+      "net_return": -0.03310315772739011,
+      "score": 68.26281522599538
+    },
+    {
+      "entry_date": "2025-01-21",
+      "exit_date": "2025-02-05",
+      "code": "000651",
+      "entry_price": 41.5005,
+      "exit_price": 40.083,
+      "gross_return": -0.03415621498536171,
+      "net_return": -0.03815621498536172,
+      "score": 85.39099456492016
+    },
+    {
+      "entry_date": "2025-01-21",
+      "exit_date": "2025-02-05",
+      "code": "600420",
+      "entry_price": 11.4061,
+      "exit_price": 11.3769,
+      "gross_return": -0.0025600336661962654,
+      "net_return": -0.0065600336661962655,
+      "score": 71.8855225645022
+    },
+    {
+      "entry_date": "2025-01-21",
+      "exit_date": "2025-02-05",
+      "code": "600618",
+      "entry_price": 10.9148,
+      "exit_price": 10.9736,
+      "gross_return": 0.005387180708762391,
+      "net_return": 0.0013871807087623908,
+      "score": 71.79392429602377
+    },
+    {
+      "entry_date": "2025-01-21",
+      "exit_date": "2025-02-05",
+      "code": "000899",
+      "entry_price": 8.0601,
+      "exit_price": 7.8095,
+      "gross_return": -0.03109142566469403,
+      "net_return": -0.03509142566469403,
+      "score": 71.22310566073027
+    },
+    {
+      "entry_date": "2025-01-21",
+      "exit_date": "2025-02-05",
+      "code": "002049",
+      "entry_price": 60.303,
+      "exit_price": 60.602,
+      "gross_return": 0.004958293948891424,
+      "net_return": 0.0009582939488914236,
+      "score": 69.74194458702051
+    },
+    {
+      "entry_date": "2025-01-22",
+      "exit_date": "2025-02-06",
+      "code": "002166",
+      "entry_price": 7.6336,
+      "exit_price": 7.4855,
+      "gross_return": -0.019401068958289712,
+      "net_return": -0.023401068958289712,
+      "score": 71.21826358251816
+    },
+    {
+      "entry_date": "2025-01-22",
+      "exit_date": "2025-02-06",
+      "code": "603130",
+      "entry_price": 20.4505,
+      "exit_price": 21.4167,
+      "gross_return": 0.047245788611525244,
+      "net_return": 0.04324578861152524,
+      "score": 71.18154230245989
+    },
+    {
+      "entry_date": "2025-01-22",
+      "exit_date": "2025-02-06",
+      "code": "603097",
+      "entry_price": 21.3446,
+      "exit_price": 21.3446,
+      "gross_return": 0.0,
+      "net_return": -0.004,
+      "score": 70.95434514124224
+    },
+    {
+      "entry_date": "2025-01-22",
+      "exit_date": "2025-02-06",
+      "code": "002052",
+      "entry_price": 6.5,
+      "exit_price": 5.23,
+      "gross_return": -0.19538461538461532,
+      "net_return": -0.19938461538461533,
+      "score": 70.61889311728848
+    },
+    {
+      "entry_date": "2025-01-22",
+      "exit_date": "2025-02-06",
+      "code": "002275",
+      "entry_price": 13.0387,
+      "exit_price": 13.1157,
+      "gross_return": 0.005905496713629423,
+      "net_return": 0.0019054967136294225,
+      "score": 69.92630026122751
+    },
+    {
+      "entry_date": "2025-01-23",
+      "exit_date": "2025-02-07",
+      "code": "605268",
+      "entry_price": 8.274,
+      "exit_price": 7.9606,
+      "gross_return": -0.037877689146724534,
+      "net_return": -0.04187768914672453,
+      "score": 68.21070971783791
+    },
+    {
+      "entry_date": "2025-01-23",
+      "exit_date": "2025-02-07",
+      "code": "600452",
+      "entry_price": 9.4285,
+      "exit_price": 9.5078,
+      "gross_return": 0.00841066977780134,
+      "net_return": 0.00441066977780134,
+      "score": 68.19916142958367
+    },
+    {
+      "entry_date": "2025-01-23",
+      "exit_date": "2025-02-07",
+      "code": "003043",
+      "entry_price": 28.8558,
+      "exit_price": 30.1561,
+      "gross_return": 0.045061997934557355,
+      "net_return": 0.04106199793455735,
+      "score": 68.12006422399907
+    },
+    {
+      "entry_date": "2025-01-23",
+      "exit_date": "2025-02-07",
+      "code": "603332",
+      "entry_price": 9.4736,
+      "exit_price": 9.5922,
+      "gross_return": 0.012519000168890465,
+      "net_return": 0.008519000168890465,
+      "score": 68.11844503359151
+    },
+    {
+      "entry_date": "2025-01-23",
+      "exit_date": "2025-02-07",
+      "code": "603396",
+      "entry_price": 25.2159,
+      "exit_price": 27.005,
+      "gross_return": 0.07095126487652623,
+      "net_return": 0.06695126487652622,
+      "score": 68.03809611102605
+    },
+    {
+      "entry_date": "2025-01-24",
+      "exit_date": "2025-02-10",
+      "code": "002885",
+      "entry_price": 12.7114,
+      "exit_price": 13.3804,
+      "gross_return": 0.05262992274651104,
+      "net_return": 0.04862992274651104,
+      "score": 68.42879414529422
+    },
+    {
+      "entry_date": "2025-01-24",
+      "exit_date": "2025-02-10",
+      "code": "002927",
+      "entry_price": 12.635,
+      "exit_price": 13.3425,
+      "gross_return": 0.05599525128610998,
+      "net_return": 0.051995251286109975,
+      "score": 68.39638500307233
+    },
+    {
+      "entry_date": "2025-01-24",
+      "exit_date": "2025-02-10",
+      "code": "601330",
+      "entry_price": 5.8563,
+      "exit_price": 6.0291,
+      "gross_return": 0.029506685108344793,
+      "net_return": 0.025506685108344793,
+      "score": 67.82751377251056
+    },
+    {
+      "entry_date": "2025-01-24",
+      "exit_date": "2025-02-10",
+      "code": "603345",
+      "entry_price": 71.9304,
+      "exit_price": 73.9827,
+      "gross_return": 0.028531747355777085,
+      "net_return": 0.024531747355777084,
+      "score": 67.68959091132838
+    },
+    {
+      "entry_date": "2025-01-24",
+      "exit_date": "2025-02-10",
+      "code": "603312",
+      "entry_price": 32.4237,
+      "exit_price": 33.4728,
+      "gross_return": 0.032355961842726245,
+      "net_return": 0.028355961842726245,
+      "score": 67.6168793629634
+    },
+    {
+      "entry_date": "2025-01-27",
+      "exit_date": "2025-02-11",
+      "code": "000651",
+      "entry_price": 40.6683,
+      "exit_price": 39.9276,
+      "gross_return": -0.01821320291234214,
+      "net_return": -0.02221320291234214,
+      "score": 84.29509996512274
+    },
+    {
+      "entry_date": "2025-01-27",
+      "exit_date": "2025-02-11",
+      "code": "600420",
+      "entry_price": 11.338,
+      "exit_price": 11.3088,
+      "gross_return": -0.002575410125242499,
+      "net_return": -0.006575410125242499,
+      "score": 71.53060492774418
+    },
+    {
+      "entry_date": "2025-01-27",
+      "exit_date": "2025-02-11",
+      "code": "600618",
+      "entry_price": 11.1992,
+      "exit_price": 10.4539,
+      "gross_return": -0.06654939638545597,
+      "net_return": -0.07054939638545597,
+      "score": 71.4358658013793
+    },
+    {
+      "entry_date": "2025-01-27",
+      "exit_date": "2025-02-11",
+      "code": "000899",
+      "entry_price": 7.9059,
+      "exit_price": 7.9734,
+      "gross_return": 0.00853792737069782,
+      "net_return": 0.00453792737069782,
+      "score": 70.88107367362561
+    },
+    {
+      "entry_date": "2025-01-27",
+      "exit_date": "2025-02-11",
+      "code": "603155",
+      "entry_price": 13.4336,
+      "exit_price": 13.4143,
+      "gross_return": -0.0014366960457360223,
+      "net_return": -0.005436696045736022,
+      "score": 68.28507663904246
+    },
+    {
+      "entry_date": "2025-02-05",
+      "exit_date": "2025-02-12",
+      "code": "000651",
+      "entry_price": 40.7323,
+      "exit_price": 40.019,
+      "gross_return": -0.017511900874735867,
+      "net_return": -0.021511900874735868,
+      "score": 84.10203273445164
+    },
+    {
+      "entry_date": "2025-02-05",
+      "exit_date": "2025-02-12",
+      "code": "600420",
+      "entry_price": 11.4937,
+      "exit_price": 11.2406,
+      "gross_return": -0.022020759198517436,
+      "net_return": -0.026020759198517436,
+      "score": 71.25123895171645
+    },
+    {
+      "entry_date": "2025-02-05",
+      "exit_date": "2025-02-12",
+      "code": "600618",
+      "entry_price": 11.2286,
+      "exit_price": 10.6402,
+      "gross_return": -0.05240190228523592,
+      "net_return": -0.05640190228523592,
+      "score": 71.15875323655679
+    },
+    {
+      "entry_date": "2025-02-05",
+      "exit_date": "2025-02-12",
+      "code": "000899",
+      "entry_price": 7.9059,
+      "exit_price": 8.0698,
+      "gross_return": 0.020731352534183435,
+      "net_return": 0.016731352534183435,
+      "score": 70.60562907481645
+    },
+    {
+      "entry_date": "2025-02-05",
+      "exit_date": "2025-02-12",
+      "code": "002166",
+      "entry_price": 7.3966,
+      "exit_price": 7.7126,
+      "gross_return": 0.04272233188221613,
+      "net_return": 0.03872233188221613,
+      "score": 70.07840298943312
+    },
+    {
+      "entry_date": "2025-02-06",
+      "exit_date": "2025-02-13",
+      "code": "002049",
+      "entry_price": 60.2033,
+      "exit_price": 63.4727,
+      "gross_return": 0.05430599319306424,
+      "net_return": 0.05030599319306424,
+      "score": 77.39972772372352
+    },
+    {
+      "entry_date": "2025-02-06",
+      "exit_date": "2025-02-13",
+      "code": "600887",
+      "entry_price": 25.3287,
+      "exit_price": 25.9515,
+      "gross_return": 0.024588707671534583,
+      "net_return": 0.020588707671534583,
+      "score": 71.1016454681008
+    },
+    {
+      "entry_date": "2025-02-06",
+      "exit_date": "2025-02-13",
+      "code": "603693",
+      "entry_price": 9.4805,
+      "exit_price": 9.8562,
+      "gross_return": 0.0396287115658457,
+      "net_return": 0.0356287115658457,
+      "score": 70.62963785202383
+    },
+    {
+      "entry_date": "2025-02-06",
+      "exit_date": "2025-02-13",
+      "code": "603130",
+      "entry_price": 20.5401,
+      "exit_price": 25.4211,
+      "gross_return": 0.23763272817561748,
+      "net_return": 0.23363272817561748,
+      "score": 70.34106582525251
+    },
+    {
+      "entry_date": "2025-02-06",
+      "exit_date": "2025-02-13",
+      "code": "603097",
+      "entry_price": 20.829,
+      "exit_price": 21.8502,
+      "gross_return": 0.04902779778193866,
+      "net_return": 0.04502779778193866,
+      "score": 70.13685980891327
+    },
+    {
+      "entry_date": "2025-02-07",
+      "exit_date": "2025-02-14",
+      "code": "601390",
+      "entry_price": 5.6128,
+      "exit_price": 5.6987,
+      "gross_return": 0.015304304446978272,
+      "net_return": 0.011304304446978271,
+      "score": 76.33855406866647
+    },
+    {
+      "entry_date": "2025-02-07",
+      "exit_date": "2025-02-14",
+      "code": "002275",
+      "entry_price": 13.1157,
+      "exit_price": 13.3468,
+      "gross_return": 0.017620104149988155,
+      "net_return": 0.013620104149988155,
+      "score": 69.70069455285886
+    },
+    {
+      "entry_date": "2025-02-07",
+      "exit_date": "2025-02-14",
+      "code": "688685",
+      "entry_price": 43.1635,
+      "exit_price": 59.027,
+      "gross_return": 0.3675211695066434,
+      "net_return": 0.36352116950664337,
+      "score": 69.35907998768114
+    },
+    {
+      "entry_date": "2025-02-07",
+      "exit_date": "2025-02-14",
+      "code": "000597",
+      "entry_price": 5.0014,
+      "exit_price": 5.1485,
+      "gross_return": 0.029411764705882353,
+      "net_return": 0.025411764705882352,
+      "score": 69.12178014181814
+    },
+    {
+      "entry_date": "2025-02-07",
+      "exit_date": "2025-02-14",
+      "code": "601186",
+      "entry_price": 8.1573,
+      "exit_price": 8.2152,
+      "gross_return": 0.007097936817329272,
+      "net_return": 0.003097936817329272,
+      "score": 69.08628913498985
+    },
+    {
+      "entry_date": "2025-02-10",
+      "exit_date": "2025-02-17",
+      "code": "002592",
+      "entry_price": 5.0487,
+      "exit_price": 4.9317,
+      "gross_return": -0.02317428248856141,
+      "net_return": -0.02717428248856141,
+      "score": 72.39817434833984
+    },
+    {
+      "entry_date": "2025-02-10",
+      "exit_date": "2025-02-17",
+      "code": "002052",
+      "entry_price": 5.41,
+      "exit_price": 5.25,
+      "gross_return": -0.029574861367837362,
+      "net_return": -0.03357486136783736,
+      "score": 70.7873787929905
+    },
+    {
+      "entry_date": "2025-02-10",
+      "exit_date": "2025-02-17",
+      "code": "603155",
+      "entry_price": 13.5972,
+      "exit_price": 13.2411,
+      "gross_return": -0.0261892154267056,
+      "net_return": -0.0301892154267056,
+      "score": 69.2485814113637
+    },
+    {
+      "entry_date": "2025-02-10",
+      "exit_date": "2025-02-17",
+      "code": "600351",
+      "entry_price": 5.7249,
+      "exit_price": 5.6879,
+      "gross_return": -0.006462994986811983,
+      "net_return": -0.010462994986811983,
+      "score": 69.05237660594594
+    },
+    {
+      "entry_date": "2025-02-10",
+      "exit_date": "2025-02-17",
+      "code": "600267",
+      "entry_price": 8.6409,
+      "exit_price": 8.5725,
+      "gross_return": -0.007915842099781327,
+      "net_return": -0.011915842099781327,
+      "score": 68.72476694949117
+    },
+    {
+      "entry_date": "2025-02-11",
+      "exit_date": "2025-02-18",
+      "code": "000651",
+      "entry_price": 40.211,
+      "exit_price": 39.3514,
+      "gross_return": -0.021377235084927018,
+      "net_return": -0.02537723508492702,
+      "score": 85.99301178456251
+    },
+    {
+      "entry_date": "2025-02-11",
+      "exit_date": "2025-02-18",
+      "code": "600420",
+      "entry_price": 11.3769,
+      "exit_price": 10.9973,
+      "gross_return": -0.03336585537360792,
+      "net_return": -0.037365855373607926,
+      "score": 72.30508254209434
+    },
+    {
+      "entry_date": "2025-02-11",
+      "exit_date": "2025-02-18",
+      "code": "600618",
+      "entry_price": 10.7285,
+      "exit_price": 9.9831,
+      "gross_return": -0.06947849186745585,
+      "net_return": -0.07347849186745585,
+      "score": 72.20987709148527
+    },
+    {
+      "entry_date": "2025-02-11",
+      "exit_date": "2025-02-18",
+      "code": "000899",
+      "entry_price": 8.0023,
+      "exit_price": 8.0023,
+      "gross_return": 0.0,
+      "net_return": -0.004,
+      "score": 71.62690954430445
+    },
+    {
+      "entry_date": "2025-02-11",
+      "exit_date": "2025-02-18",
+      "code": "002166",
+      "entry_price": 7.8212,
+      "exit_price": 7.525,
+      "gross_return": -0.03787142637958367,
+      "net_return": -0.04187142637958367,
+      "score": 71.09775689091727
+    },
+    {
+      "entry_date": "2025-02-12",
+      "exit_date": "2025-02-19",
+      "code": "603130",
+      "entry_price": 26.1981,
+      "exit_price": 29.5849,
+      "gross_return": 0.1292765505895466,
+      "net_return": 0.1252765505895466,
+      "score": 70.75794756409441
+    },
+    {
+      "entry_date": "2025-02-12",
+      "exit_date": "2025-02-19",
+      "code": "603097",
+      "entry_price": 21.6717,
+      "exit_price": 22.4153,
+      "gross_return": 0.03431202905171247,
+      "net_return": 0.03031202905171247,
+      "score": 70.53014580962599
+    },
+    {
+      "entry_date": "2025-02-12",
+      "exit_date": "2025-02-19",
+      "code": "600475",
+      "entry_price": 8.7864,
+      "exit_price": 8.6893,
+      "gross_return": -0.011051169989984642,
+      "net_return": -0.015051169989984643,
+      "score": 68.12233917974476
+    },
+    {
+      "entry_date": "2025-02-12",
+      "exit_date": "2025-02-19",
+      "code": "688676",
+      "entry_price": 36.7027,
+      "exit_price": 39.8236,
+      "gross_return": 0.08503189138673718,
+      "net_return": 0.08103189138673718,
+      "score": 67.927013304931
+    },
+    {
+      "entry_date": "2025-02-12",
+      "exit_date": "2025-02-19",
+      "code": "605268",
+      "entry_price": 8.176,
+      "exit_price": 8.1956,
+      "gross_return": 0.0023972602739726644,
+      "net_return": -0.0016027397260273356,
+      "score": 67.9051662956328
+    },
+    {
+      "entry_date": "2025-02-13",
+      "exit_date": "2025-02-20",
+      "code": "002049",
+      "entry_price": 65.0575,
+      "exit_price": 63.353,
+      "gross_return": -0.026199900088383396,
+      "net_return": -0.030199900088383396,
+      "score": 78.05158277797206
+    },
+    {
+      "entry_date": "2025-02-13",
+      "exit_date": "2025-02-20",
+      "code": "600887",
+      "entry_price": 25.6118,
+      "exit_price": 26.2629,
+      "gross_return": 0.025421875854098486,
+      "net_return": 0.021421875854098486,
+      "score": 71.56679582920609
+    },
+    {
+      "entry_date": "2025-02-13",
+      "exit_date": "2025-02-20",
+      "code": "688685",
+      "entry_price": 57.8305,
+      "exit_price": 61.6194,
+      "gross_return": 0.06551733082024189,
+      "net_return": 0.06151733082024188,
+      "score": 68.94828495600889
+    },
+    {
+      "entry_date": "2025-02-13",
+      "exit_date": "2025-02-20",
+      "code": "000597",
+      "entry_price": 5.119,
+      "exit_price": 5.0112,
+      "gross_return": -0.021058800546981855,
+      "net_return": -0.025058800546981855,
+      "score": 68.71464237546371
+    },
+    {
+      "entry_date": "2025-02-13",
+      "exit_date": "2025-02-20",
+      "code": "002120",
+      "entry_price": 7.3315,
+      "exit_price": 7.011,
+      "gross_return": -0.04371547432312624,
+      "net_return": -0.04771547432312624,
+      "score": 68.01265025640338
+    },
+    {
+      "entry_date": "2025-02-14",
+      "exit_date": "2025-02-21",
+      "code": "002275",
+      "entry_price": 13.2409,
+      "exit_price": 13.212,
+      "gross_return": -0.0021826310900316557,
+      "net_return": -0.006182631090031656,
+      "score": 70.09381423087915
+    },
+    {
+      "entry_date": "2025-02-14",
+      "exit_date": "2025-02-21",
+      "code": "003043",
+      "entry_price": 29.8505,
+      "exit_price": 31.023,
+      "gross_return": 0.03927907405236091,
+      "net_return": 0.035279074052360915,
+      "score": 68.9006101057887
+    },
+    {
+      "entry_date": "2025-02-14",
+      "exit_date": "2025-02-21",
+      "code": "002927",
+      "entry_price": 13.9702,
+      "exit_price": 14.1396,
+      "gross_return": 0.012125810654106567,
+      "net_return": 0.008125810654106566,
+      "score": 68.84104302505918
+    },
+    {
+      "entry_date": "2025-02-14",
+      "exit_date": "2025-02-21",
+      "code": "603396",
+      "entry_price": 26.6174,
+      "exit_price": 26.8162,
+      "gross_return": 0.007468798605423465,
+      "net_return": 0.003468798605423465,
+      "score": 68.71834923791512
+    },
+    {
+      "entry_date": "2025-02-14",
+      "exit_date": "2025-02-21",
+      "code": "002885",
+      "entry_price": 13.4803,
+      "exit_price": 13.8597,
+      "gross_return": 0.028144774226092923,
+      "net_return": 0.024144774226092923,
+      "score": 68.55296724648409
+    },
+    {
+      "entry_date": "2025-02-17",
+      "exit_date": "2025-02-24",
+      "code": "000651",
+      "entry_price": 40.0647,
+      "exit_price": 37.7419,
+      "gross_return": -0.057976223458555805,
+      "net_return": -0.0619762234585558,
+      "score": 88.13321139925924
+    },
+    {
+      "entry_date": "2025-02-17",
+      "exit_date": "2025-02-24",
+      "code": "600420",
+      "entry_price": 11.2406,
+      "exit_price": 11.0265,
+      "gross_return": -0.01904702595946837,
+      "net_return": -0.02304702595946837,
+      "score": 72.3458452565945
+    },
+    {
+      "entry_date": "2025-02-17",
+      "exit_date": "2025-02-24",
+      "code": "600618",
+      "entry_price": 9.9537,
+      "exit_price": 10.042,
+      "gross_return": 0.008871073068306284,
+      "net_return": 0.004871073068306284,
+      "score": 72.26441763634543
+    },
+    {
+      "entry_date": "2025-02-17",
+      "exit_date": "2025-02-24",
+      "code": "600998",
+      "entry_price": 5.0045,
+      "exit_price": 4.9275,
+      "gross_return": -0.015386152462783485,
+      "net_return": -0.019386152462783485,
+      "score": 71.99338587847087
+    },
+    {
+      "entry_date": "2025-02-17",
+      "exit_date": "2025-02-24",
+      "code": "000899",
+      "entry_price": 7.9541,
+      "exit_price": 7.983,
+      "gross_return": 0.003633346324536938,
+      "net_return": -0.000366653675463062,
+      "score": 71.64517692865022
+    },
+    {
+      "entry_date": "2025-02-18",
+      "exit_date": "2025-02-25",
+      "code": "002166",
+      "entry_price": 7.8212,
+      "exit_price": 7.5941,
+      "gross_return": -0.029036464992584266,
+      "net_return": -0.033036464992584266,
+      "score": 71.36601703981277
+    },
+    {
+      "entry_date": "2025-02-18",
+      "exit_date": "2025-02-25",
+      "code": "603130",
+      "entry_price": 27.1843,
+      "exit_price": 28.4593,
+      "gross_return": 0.04690207215194059,
+      "net_return": 0.042902072151940585,
+      "score": 71.33425607070902
+    },
+    {
+      "entry_date": "2025-02-18",
+      "exit_date": "2025-02-25",
+      "code": "603097",
+      "entry_price": 22.4847,
+      "exit_price": 22.8316,
+      "gross_return": 0.015428269000698321,
+      "net_return": 0.011428269000698321,
+      "score": 71.12175961368376
+    },
+    {
+      "entry_date": "2025-02-18",
+      "exit_date": "2025-02-25",
+      "code": "002052",
+      "entry_price": 5.3,
+      "exit_price": 4.52,
+      "gross_return": -0.14716981132075477,
+      "net_return": -0.15116981132075477,
+      "score": 70.73069602248971
+    },
+    {
+      "entry_date": "2025-02-18",
+      "exit_date": "2025-02-25",
+      "code": "603155",
+      "entry_price": 13.2411,
+      "exit_price": 13.1256,
+      "gross_return": -0.008722840247411398,
+      "net_return": -0.012722840247411398,
+      "score": 69.24051253805321
+    },
+    {
+      "entry_date": "2025-02-19",
+      "exit_date": "2025-02-26",
+      "code": "002049",
+      "entry_price": 62.0174,
+      "exit_price": 65.7353,
+      "gross_return": 0.05994930455001327,
+      "net_return": 0.055949304550013276,
+      "score": 78.14397766649651
+    },
+    {
+      "entry_date": "2025-02-19",
+      "exit_date": "2025-02-26",
+      "code": "600887",
+      "entry_price": 25.7628,
+      "exit_price": 25.8855,
+      "gross_return": 0.0047626810750384975,
+      "net_return": 0.0007626810750384974,
+      "score": 71.62026330565674
+    },
+    {
+      "entry_date": "2025-02-19",
+      "exit_date": "2025-02-26",
+      "code": "688685",
+      "entry_price": 60.9115,
+      "exit_price": 58.8276,
+      "gross_return": -0.034211930423647424,
+      "net_return": -0.03821193042364743,
+      "score": 68.953408149497
+    },
+    {
+      "entry_date": "2025-02-19",
+      "exit_date": "2025-02-26",
+      "code": "600351",
+      "entry_price": 5.5954,
+      "exit_price": 5.6139,
+      "gross_return": 0.0033062873074311766,
+      "net_return": -0.0006937126925688234,
+      "score": 68.29511040922539
+    },
+    {
+      "entry_date": "2025-02-19",
+      "exit_date": "2025-02-26",
+      "code": "002120",
+      "entry_price": 7.2052,
+      "exit_price": 7.0499,
+      "gross_return": -0.021553877754954695,
+      "net_return": -0.025553877754954695,
+      "score": 68.05657882038408
+    },
+    {
+      "entry_date": "2025-02-20",
+      "exit_date": "2025-02-27",
+      "code": "601390",
+      "entry_price": 5.6414,
+      "exit_price": 5.6605,
+      "gross_return": 0.0033856844045804047,
+      "net_return": -0.0006143155954195954,
+      "score": 76.5371326849917
+    },
+    {
+      "entry_date": "2025-02-20",
+      "exit_date": "2025-02-27",
+      "code": "603693",
+      "entry_price": 9.955,
+      "exit_price": 9.6782,
+      "gross_return": -0.02780512305374181,
+      "net_return": -0.03180512305374181,
+      "score": 71.48719767469399
+    },
+    {
+      "entry_date": "2025-02-20",
+      "exit_date": "2025-02-27",
+      "code": "002275",
+      "entry_price": 13.2312,
+      "exit_price": 13.0579,
+      "gross_return": -0.013097829372997109,
+      "net_return": -0.017097829372997107,
+      "score": 69.75951545337509
+    },
+    {
+      "entry_date": "2025-02-20",
+      "exit_date": "2025-02-27",
+      "code": "601186",
+      "entry_price": 8.1187,
+      "exit_price": 8.1573,
+      "gross_return": 0.004754455762621954,
+      "net_return": 0.0007544557626219537,
+      "score": 69.2487701578734
+    },
+    {
+      "entry_date": "2025-02-20",
+      "exit_date": "2025-02-27",
+      "code": "003043",
+      "entry_price": 30.0708,
+      "exit_price": 32.6928,
+      "gross_return": 0.08719422163693683,
+      "net_return": 0.08319422163693682,
+      "score": 68.49279717771128
+    },
+    {
+      "entry_date": "2025-02-21",
+      "exit_date": "2025-02-28",
+      "code": "600267",
+      "entry_price": 8.4063,
+      "exit_price": 8.3281,
+      "gross_return": -0.009302546899349383,
+      "net_return": -0.013302546899349383,
+      "score": 68.6270091622761
+    },
+    {
+      "entry_date": "2025-02-21",
+      "exit_date": "2025-02-28",
+      "code": "002927",
+      "entry_price": 14.02,
+      "exit_price": 14.03,
+      "gross_return": 0.0007132667617688864,
+      "net_return": -0.0032867332382311137,
+      "score": 68.62443786356963
+    },
+    {
+      "entry_date": "2025-02-21",
+      "exit_date": "2025-02-28",
+      "code": "600475",
+      "entry_price": 8.5922,
+      "exit_price": 8.6505,
+      "gross_return": 0.006785223807639386,
+      "net_return": 0.002785223807639386,
+      "score": 68.53572397653915
+    },
+    {
+      "entry_date": "2025-02-21",
+      "exit_date": "2025-02-28",
+      "code": "603396",
+      "entry_price": 26.6174,
+      "exit_price": 26.6273,
+      "gross_return": 0.0003719371538918826,
+      "net_return": -0.0036280628461081176,
+      "score": 68.52708046161673
+    },
+    {
+      "entry_date": "2025-02-21",
+      "exit_date": "2025-02-28",
+      "code": "688676",
+      "entry_price": 39.607,
+      "exit_price": 40.1682,
+      "gross_return": 0.014169212512939618,
+      "net_return": 0.010169212512939618,
+      "score": 68.50110172650966
+    },
+    {
+      "entry_date": "2025-02-24",
+      "exit_date": "2025-03-03",
+      "code": "000651",
+      "entry_price": 37.6413,
+      "exit_price": 37.0926,
+      "gross_return": -0.014577073586725319,
+      "net_return": -0.01857707358672532,
+      "score": 87.44663586175015
+    },
+    {
+      "entry_date": "2025-02-24",
+      "exit_date": "2025-03-03",
+      "code": "600420",
+      "entry_price": 10.9973,
+      "exit_price": 10.8903,
+      "gross_return": -0.00972966091677042,
+      "net_return": -0.01372966091677042,
+      "score": 72.01451362274616
+    },
+    {
+      "entry_date": "2025-02-24",
+      "exit_date": "2025-03-03",
+      "code": "600618",
+      "entry_price": 9.8655,
+      "exit_price": 9.993,
+      "gross_return": 0.012923825452333839,
+      "net_return": 0.008923825452333839,
+      "score": 71.93384786465296
+    },
+    {
+      "entry_date": "2025-02-24",
+      "exit_date": "2025-03-03",
+      "code": "002592",
+      "entry_price": 5.0097,
+      "exit_price": 5.2144,
+      "gross_return": 0.04086073018344428,
+      "net_return": 0.03686073018344428,
+      "score": 71.84354085753877
+    },
+    {
+      "entry_date": "2025-02-24",
+      "exit_date": "2025-03-03",
+      "code": "000899",
+      "entry_price": 7.8962,
+      "exit_price": 7.9059,
+      "gross_return": 0.0012284389959726955,
+      "net_return": -0.0027715610040273046,
+      "score": 71.32653686391453
+    },
+    {
+      "entry_date": "2025-02-25",
+      "exit_date": "2025-03-04",
+      "code": "002049",
+      "entry_price": 64.0906,
+      "exit_price": 67.7587,
+      "gross_return": 0.05723304197495436,
+      "net_return": 0.05323304197495436,
+      "score": 78.15997287480802
+    },
+    {
+      "entry_date": "2025-02-25",
+      "exit_date": "2025-03-04",
+      "code": "600887",
+      "entry_price": 25.876,
+      "exit_price": 26.2063,
+      "gross_return": 0.012764724068634934,
+      "net_return": 0.008764724068634934,
+      "score": 71.60948780442082
+    },
+    {
+      "entry_date": "2025-02-25",
+      "exit_date": "2025-03-04",
+      "code": "002166",
+      "entry_price": 7.5645,
+      "exit_price": 7.4657,
+      "gross_return": -0.013061008658867047,
+      "net_return": -0.017061008658867047,
+      "score": 70.65484637379832
+    },
+    {
+      "entry_date": "2025-02-25",
+      "exit_date": "2025-03-04",
+      "code": "603130",
+      "entry_price": 29.3857,
+      "exit_price": 26.7958,
+      "gross_return": -0.08813470497554933,
+      "net_return": -0.09213470497554933,
+      "score": 70.62400193831002
+    },
+    {
+      "entry_date": "2025-02-25",
+      "exit_date": "2025-03-04",
+      "code": "603097",
+      "entry_price": 22.6334,
+      "exit_price": 23.4959,
+      "gross_return": 0.038107398800003404,
+      "net_return": 0.03410739880000341,
+      "score": 70.4183035244545
+    },
+    {
+      "entry_date": "2025-02-26",
+      "exit_date": "2025-03-05",
+      "code": "688685",
+      "entry_price": 58.5085,
+      "exit_price": 63.8429,
+      "gross_return": 0.09117307741610198,
+      "net_return": 0.08717307741610197,
+      "score": 69.74508912488488
+    },
+    {
+      "entry_date": "2025-02-26",
+      "exit_date": "2025-03-05",
+      "code": "603155",
+      "entry_price": 13.1545,
+      "exit_price": 13.1256,
+      "gross_return": -0.0021969668174389102,
+      "net_return": -0.00619696681743891,
+      "score": 69.39914788058513
+    },
+    {
+      "entry_date": "2025-02-26",
+      "exit_date": "2025-03-05",
+      "code": "002120",
+      "entry_price": 6.9916,
+      "exit_price": 7.1664,
+      "gross_return": 0.02500143028777394,
+      "net_return": 0.02100143028777394,
+      "score": 69.0841445393309
+    },
+    {
+      "entry_date": "2025-02-26",
+      "exit_date": "2025-03-05",
+      "code": "600351",
+      "entry_price": 5.5954,
+      "exit_price": 5.5862,
+      "gross_return": -0.001644207742073824,
+      "net_return": -0.005644207742073824,
+      "score": 69.02428431269414
+    },
+    {
+      "entry_date": "2025-02-26",
+      "exit_date": "2025-03-05",
+      "code": "003043",
+      "entry_price": 31.6767,
+      "exit_price": 34.3413,
+      "gross_return": 0.08411861084014423,
+      "net_return": 0.08011861084014422,
+      "score": 68.77785372778828
+    },
+    {
+      "entry_date": "2025-02-27",
+      "exit_date": "2025-03-06",
+      "code": "002927",
+      "entry_price": 14.1994,
+      "exit_price": 14.7474,
+      "gross_return": 0.038593179993520854,
+      "net_return": 0.03459317999352085,
+      "score": 68.707265919039
+    },
+    {
+      "entry_date": "2025-02-27",
+      "exit_date": "2025-03-06",
+      "code": "600267",
+      "entry_price": 8.5431,
+      "exit_price": 8.3281,
+      "gross_return": -0.025166508644403274,
+      "net_return": -0.029166508644403275,
+      "score": 68.69780970829889
+    },
+    {
+      "entry_date": "2025-02-27",
+      "exit_date": "2025-03-06",
+      "code": "603396",
+      "entry_price": 27.7504,
+      "exit_price": 27.1143,
+      "gross_return": -0.02292219211254609,
+      "net_return": -0.02692219211254609,
+      "score": 68.60586704387794
+    },
+    {
+      "entry_date": "2025-02-27",
+      "exit_date": "2025-03-06",
+      "code": "688676",
+      "entry_price": 42.9347,
+      "exit_price": 41.1232,
+      "gross_return": -0.042191979913682925,
+      "net_return": -0.04619197991368293,
+      "score": 68.57456099051271
+    },
+    {
+      "entry_date": "2025-02-27",
+      "exit_date": "2025-03-06",
+      "code": "600452",
+      "entry_price": 9.25,
+      "exit_price": 9.4781,
+      "gross_return": 0.02465945945945941,
+      "net_return": 0.02065945945945941,
+      "score": 68.45736231098873
+    },
+    {
+      "entry_date": "2025-02-28",
+      "exit_date": "2025-03-07",
+      "code": "601390",
+      "entry_price": 5.651,
+      "exit_price": 5.5555,
+      "gross_return": -0.016899663776322682,
+      "net_return": -0.020899663776322682,
+      "score": 76.91756170586419
+    },
+    {
+      "entry_date": "2025-02-28",
+      "exit_date": "2025-03-07",
+      "code": "002275",
+      "entry_price": 13.029,
+      "exit_price": 13.0387,
+      "gross_return": 0.0007444930539565957,
+      "net_return": -0.0032555069460434042,
+      "score": 70.04794277156662
+    },
+    {
+      "entry_date": "2025-02-28",
+      "exit_date": "2025-03-07",
+      "code": "601186",
+      "entry_price": 8.1283,
+      "exit_price": 8.0028,
+      "gross_return": -0.015439882878338501,
+      "net_return": -0.0194398828783385,
+      "score": 69.55765153150972
+    },
+    {
+      "entry_date": "2025-02-28",
+      "exit_date": "2025-03-07",
+      "code": "002885",
+      "entry_price": 14.0994,
+      "exit_price": 14.2192,
+      "gross_return": 0.008496815467324954,
+      "net_return": 0.004496815467324954,
+      "score": 68.44952436453505
+    },
+    {
+      "entry_date": "2025-02-28",
+      "exit_date": "2025-03-07",
+      "code": "603332",
+      "entry_price": 9.3549,
+      "exit_price": 9.3846,
+      "gross_return": 0.003174806785748651,
+      "net_return": -0.000825193214251349,
+      "score": 68.41821480829157
+    },
+    {
+      "entry_date": "2025-03-03",
+      "exit_date": "2025-03-10",
+      "code": "000651",
+      "entry_price": 37.3486,
+      "exit_price": 38.6381,
+      "gross_return": 0.03452605987908527,
+      "net_return": 0.030526059879085268,
+      "score": 86.26923770067549
+    },
+    {
+      "entry_date": "2025-03-03",
+      "exit_date": "2025-03-10",
+      "code": "002049",
+      "entry_price": 61.4692,
+      "exit_price": 70.3402,
+      "gross_return": 0.1443161778581793,
+      "net_return": 0.1403161778581793,
+      "score": 76.6275042692612
+    },
+    {
+      "entry_date": "2025-03-03",
+      "exit_date": "2025-03-10",
+      "code": "600420",
+      "entry_price": 10.9097,
+      "exit_price": 10.9681,
+      "gross_return": 0.0053530344555761285,
+      "net_return": 0.0013530344555761284,
+      "score": 71.45416550400049
+    },
+    {
+      "entry_date": "2025-03-03",
+      "exit_date": "2025-03-10",
+      "code": "600618",
+      "entry_price": 9.9831,
+      "exit_price": 10.0714,
+      "gross_return": 0.0088449479620559,
+      "net_return": 0.004844947962055901,
+      "score": 71.37406007662915
+    },
+    {
+      "entry_date": "2025-03-03",
+      "exit_date": "2025-03-10",
+      "code": "002592",
+      "entry_price": 5.1657,
+      "exit_price": 5.3216,
+      "gross_return": 0.030179840099115302,
+      "net_return": 0.026179840099115302,
+      "score": 71.2843803715038
+    },
+    {
+      "entry_date": "2025-03-04",
+      "exit_date": "2025-03-11",
+      "code": "600887",
+      "entry_price": 26.2346,
+      "exit_price": 26.0836,
+      "gross_return": -0.005755757663543557,
+      "net_return": -0.009755757663543557,
+      "score": 72.78571619520932
+    },
+    {
+      "entry_date": "2025-03-04",
+      "exit_date": "2025-03-11",
+      "code": "000899",
+      "entry_price": 7.9251,
+      "exit_price": 7.9348,
+      "gross_return": 0.0012239593191253721,
+      "net_return": -0.002776040680874628,
+      "score": 71.48208098916135
+    },
+    {
+      "entry_date": "2025-03-04",
+      "exit_date": "2025-03-11",
+      "code": "002166",
+      "entry_price": 7.4756,
+      "exit_price": 7.4164,
+      "gross_return": -0.007919096794906055,
+      "net_return": -0.011919096794906055,
+      "score": 71.17350665369324
+    },
+    {
+      "entry_date": "2025-03-04",
+      "exit_date": "2025-03-11",
+      "code": "603130",
+      "entry_price": 25.6602,
+      "exit_price": 26.1981,
+      "gross_return": 0.020962424299109144,
+      "net_return": 0.016962424299109144,
+      "score": 71.14264186662895
+    },
+    {
+      "entry_date": "2025-03-04",
+      "exit_date": "2025-03-11",
+      "code": "603097",
+      "entry_price": 22.3657,
+      "exit_price": 23.0497,
+      "gross_return": 0.030582543805917142,
+      "net_return": 0.026582543805917142,
+      "score": 70.93440484831213
+    },
+    {
+      "entry_date": "2025-03-05",
+      "exit_date": "2025-03-12",
+      "code": "688685",
+      "entry_price": 60.3232,
+      "exit_price": 62.3074,
+      "gross_return": 0.0328928173571694,
+      "net_return": 0.028892817357169403,
+      "score": 69.69751512777006
+    },
+    {
+      "entry_date": "2025-03-05",
+      "exit_date": "2025-03-12",
+      "code": "603155",
+      "entry_price": 12.9909,
+      "exit_price": 13.6164,
+      "gross_return": 0.04814908897766903,
+      "net_return": 0.04414908897766903,
+      "score": 69.33392102177656
+    },
+    {
+      "entry_date": "2025-03-05",
+      "exit_date": "2025-03-12",
+      "code": "002120",
+      "entry_price": 7.1178,
+      "exit_price": 7.1178,
+      "gross_return": 0.0,
+      "net_return": -0.004,
+      "score": 69.2560074506479
+    },
+    {
+      "entry_date": "2025-03-05",
+      "exit_date": "2025-03-12",
+      "code": "600351",
+      "entry_price": 5.6047,
+      "exit_price": 5.6602,
+      "gross_return": 0.009902403340053783,
+      "net_return": 0.0059024033400537825,
+      "score": 68.94890554786701
+    },
+    {
+      "entry_date": "2025-03-05",
+      "exit_date": "2025-03-12",
+      "code": "003043",
+      "entry_price": 33.0978,
+      "exit_price": 34.3981,
+      "gross_return": 0.03928659910930636,
+      "net_return": 0.03528659910930636,
+      "score": 68.73603555169417
+    },
+    {
+      "entry_date": "2025-03-06",
+      "exit_date": "2025-03-13",
+      "code": "002927",
+      "entry_price": 14.6677,
+      "exit_price": 16.1524,
+      "gross_return": 0.10122241387538607,
+      "net_return": 0.09722241387538606,
+      "score": 68.89052148750618
+    },
+    {
+      "entry_date": "2025-03-06",
+      "exit_date": "2025-03-13",
+      "code": "600267",
+      "entry_price": 8.3379,
+      "exit_price": 8.201,
+      "gross_return": -0.01641900238669196,
+      "net_return": -0.020419002386691962,
+      "score": 68.88077768934286
+    },
+    {
+      "entry_date": "2025-03-06",
+      "exit_date": "2025-03-13",
+      "code": "603396",
+      "entry_price": 26.6074,
+      "exit_price": 26.9752,
+      "gross_return": 0.01382322211114211,
+      "net_return": 0.00982322211114211,
+      "score": 68.78804731808486
+    },
+    {
+      "entry_date": "2025-03-06",
+      "exit_date": "2025-03-13",
+      "code": "688676",
+      "entry_price": 40.247,
+      "exit_price": 42.9249,
+      "gross_return": 0.06653663627102643,
+      "net_return": 0.06253663627102643,
+      "score": 68.75634368931097
+    },
+    {
+      "entry_date": "2025-03-06",
+      "exit_date": "2025-03-13",
+      "code": "600452",
+      "entry_price": 9.6069,
+      "exit_price": 9.3591,
+      "gross_return": -0.025793960590825324,
+      "net_return": -0.029793960590825324,
+      "score": 68.63795989665097
+    },
+    {
+      "entry_date": "2025-03-07",
+      "exit_date": "2025-03-14",
+      "code": "002885",
+      "entry_price": 14.5088,
+      "exit_price": 15.1179,
+      "gross_return": 0.041981418173797955,
+      "net_return": 0.03798141817379795,
+      "score": 68.6052925847379
+    },
+    {
+      "entry_date": "2025-03-07",
+      "exit_date": "2025-03-14",
+      "code": "603332",
+      "entry_price": 9.2263,
+      "exit_price": 9.4637,
+      "gross_return": 0.025730791324799666,
+      "net_return": 0.021730791324799666,
+      "score": 68.55084342433153
+    },
+    {
+      "entry_date": "2025-03-07",
+      "exit_date": "2025-03-14",
+      "code": "605268",
+      "entry_price": 8.3915,
+      "exit_price": 8.5775,
+      "gross_return": 0.022165286301614722,
+      "net_return": 0.018165286301614722,
+      "score": 68.53686145169134
+    },
+    {
+      "entry_date": "2025-03-07",
+      "exit_date": "2025-03-14",
+      "code": "001872",
+      "entry_price": 17.9511,
+      "exit_price": 18.1536,
+      "gross_return": 0.01128064575429921,
+      "net_return": 0.00728064575429921,
+      "score": 68.00292366073084
+    },
+    {
+      "entry_date": "2025-03-07",
+      "exit_date": "2025-03-14",
+      "code": "603345",
+      "entry_price": 75.4059,
+      "exit_price": 83.0345,
+      "gross_return": 0.10116715005059275,
+      "net_return": 0.09716715005059275,
+      "score": 67.37220328378136
+    },
+    {
+      "entry_date": "2025-03-10",
+      "exit_date": "2025-03-17",
+      "code": "000651",
+      "entry_price": 38.2814,
+      "exit_price": 39.5983,
+      "gross_return": 0.0344005182673571,
+      "net_return": 0.0304005182673571,
+      "score": 86.50003484183638
+    },
+    {
+      "entry_date": "2025-03-10",
+      "exit_date": "2025-03-17",
+      "code": "002049",
+      "entry_price": 69.5927,
+      "exit_price": 68.4364,
+      "gross_return": -0.01661524843841362,
+      "net_return": -0.02061524843841362,
+      "score": 77.40188360686962
+    },
+    {
+      "entry_date": "2025-03-10",
+      "exit_date": "2025-03-17",
+      "code": "600420",
+      "entry_price": 11.0168,
+      "exit_price": 11.2212,
+      "gross_return": 0.01855348195483259,
+      "net_return": 0.014553481954832592,
+      "score": 71.51709041244463
+    },
+    {
+      "entry_date": "2025-03-10",
+      "exit_date": "2025-03-17",
+      "code": "600618",
+      "entry_price": 10.0714,
+      "exit_price": 10.1106,
+      "gross_return": 0.0038922096232896354,
+      "net_return": -0.0001077903767103647,
+      "score": 71.43784498611915
+    },
+    {
+      "entry_date": "2025-03-10",
+      "exit_date": "2025-03-17",
+      "code": "002592",
+      "entry_price": 5.3118,
+      "exit_price": 5.2631,
+      "gross_return": -0.009168266877518014,
+      "net_return": -0.013168266877518015,
+      "score": 71.34912807019211
+    },
+    {
+      "entry_date": "2025-03-11",
+      "exit_date": "2025-03-18",
+      "code": "600887",
+      "entry_price": 25.6684,
+      "exit_price": 27.1878,
+      "gross_return": 0.05919340512069319,
+      "net_return": 0.05519340512069319,
+      "score": 72.80312514345923
+    },
+    {
+      "entry_date": "2025-03-11",
+      "exit_date": "2025-03-18",
+      "code": "000899",
+      "entry_price": 7.8866,
+      "exit_price": 8.3783,
+      "gross_return": 0.06234625821012855,
+      "net_return": 0.05834625821012855,
+      "score": 71.6699393048549
+    },
+    {
+      "entry_date": "2025-03-11",
+      "exit_date": "2025-03-18",
+      "code": "002166",
+      "entry_price": 7.3472,
+      "exit_price": 7.6336,
+      "gross_return": 0.03898083623693386,
+      "net_return": 0.03498083623693386,
+      "score": 71.35201143362455
+    },
+    {
+      "entry_date": "2025-03-11",
+      "exit_date": "2025-03-18",
+      "code": "603130",
+      "entry_price": 25.8993,
+      "exit_price": 26.9253,
+      "gross_return": 0.039614970288772276,
+      "net_return": 0.03561497028877228,
+      "score": 71.32068722984019
+    },
+    {
+      "entry_date": "2025-03-11",
+      "exit_date": "2025-03-18",
+      "code": "603097",
+      "entry_price": 22.7523,
+      "exit_price": 23.476,
+      "gross_return": 0.03180777328006387,
+      "net_return": 0.027807773280063872,
+      "score": 71.11002765689784
+    },
+    {
+      "entry_date": "2025-03-12",
+      "exit_date": "2025-03-19",
+      "code": "688685",
+      "entry_price": 64.1919,
+      "exit_price": 61.0511,
+      "gross_return": -0.04892829157572849,
+      "net_return": -0.052928291575728495,
+      "score": 69.53851547187607
+    },
+    {
+      "entry_date": "2025-03-12",
+      "exit_date": "2025-03-19",
+      "code": "603155",
+      "entry_price": 13.6645,
+      "exit_price": 13.4143,
+      "gross_return": -0.018310219912912987,
+      "net_return": -0.022310219912912987,
+      "score": 69.19818683552404
+    },
+    {
+      "entry_date": "2025-03-12",
+      "exit_date": "2025-03-19",
+      "code": "002120",
+      "entry_price": 7.1178,
+      "exit_price": 7.2344,
+      "gross_return": 0.01638146618337127,
+      "net_return": 0.01238146618337127,
+      "score": 68.83699083058629
+    },
+    {
+      "entry_date": "2025-03-12",
+      "exit_date": "2025-03-19",
+      "code": "600351",
+      "entry_price": 5.6324,
+      "exit_price": 5.7619,
+      "gross_return": 0.022991975001775473,
+      "net_return": 0.018991975001775473,
+      "score": 68.8275859758765
+    },
+    {
+      "entry_date": "2025-03-12",
+      "exit_date": "2025-03-19",
+      "code": "003043",
+      "entry_price": 34.391,
+      "exit_price": 35.4213,
+      "gross_return": 0.029958419353900846,
+      "net_return": 0.025958419353900846,
+      "score": 68.57580420961655
+    },
+    {
+      "entry_date": "2025-03-13",
+      "exit_date": "2025-03-20",
+      "code": "603693",
+      "entry_price": 9.9056,
+      "exit_price": 10.6273,
+      "gross_return": 0.07285777741883381,
+      "net_return": 0.06885777741883381,
+      "score": 71.53080613842351
+    },
+    {
+      "entry_date": "2025-03-13",
+      "exit_date": "2025-03-20",
+      "code": "002275",
+      "entry_price": 13.2024,
+      "exit_price": 13.5105,
+      "gross_return": 0.023336666060716202,
+      "net_return": 0.019336666060716202,
+      "score": 69.79674120600747
+    },
+    {
+      "entry_date": "2025-03-13",
+      "exit_date": "2025-03-20",
+      "code": "600267",
+      "entry_price": 8.2401,
+      "exit_price": 8.4552,
+      "gross_return": 0.026104052135289574,
+      "net_return": 0.022104052135289574,
+      "score": 68.4707539188707
+    },
+    {
+      "entry_date": "2025-03-13",
+      "exit_date": "2025-03-20",
+      "code": "002927",
+      "entry_price": 15.6044,
+      "exit_price": 18.803,
+      "gross_return": 0.20498064648432499,
+      "net_return": 0.20098064648432498,
+      "score": 68.45022796696902
+    },
+    {
+      "entry_date": "2025-03-13",
+      "exit_date": "2025-03-20",
+      "code": "603396",
+      "entry_price": 27.2336,
+      "exit_price": 27.7902,
+      "gross_return": 0.020437988367310953,
+      "net_return": 0.016437988367310953,
+      "score": 68.35887662065883
+    },
+    {
+      "entry_date": "2025-03-14",
+      "exit_date": "2025-03-21",
+      "code": "601390",
+      "entry_price": 5.5173,
+      "exit_price": 5.5651,
+      "gross_return": 0.008663657948634388,
+      "net_return": 0.004663657948634388,
+      "score": 76.7476131491713
+    },
+    {
+      "entry_date": "2025-03-14",
+      "exit_date": "2025-03-21",
+      "code": "601186",
+      "entry_price": 7.9352,
+      "exit_price": 7.9739,
+      "gross_return": 0.00487700373021479,
+      "net_return": 0.00087700373021479,
+      "score": 69.40307262894282
+    },
+    {
+      "entry_date": "2025-03-14",
+      "exit_date": "2025-03-21",
+      "code": "688676",
+      "entry_price": 42.5409,
+      "exit_price": 42.1176,
+      "gross_return": -0.009950424180024342,
+      "net_return": -0.013950424180024342,
+      "score": 68.45640577347692
+    },
+    {
+      "entry_date": "2025-03-14",
+      "exit_date": "2025-03-21",
+      "code": "600452",
+      "entry_price": 9.3393,
+      "exit_price": 9.8746,
+      "gross_return": 0.05731692953433335,
+      "net_return": 0.053316929534333354,
+      "score": 68.34147313472691
+    },
+    {
+      "entry_date": "2025-03-14",
+      "exit_date": "2025-03-21",
+      "code": "002885",
+      "entry_price": 14.9082,
+      "exit_price": 15.5173,
+      "gross_return": 0.04085670973021557,
+      "net_return": 0.03685670973021557,
+      "score": 68.31539324887332
+    },
+    {
+      "entry_date": "2025-03-17",
+      "exit_date": "2025-03-24",
+      "code": "000651",
+      "entry_price": 39.5983,
+      "exit_price": 41.1347,
+      "gross_return": 0.038799645439324425,
+      "net_return": 0.03479964543932443,
+      "score": 86.52023999154592
+    },
+    {
+      "entry_date": "2025-03-17",
+      "exit_date": "2025-03-24",
+      "code": "002049",
+      "entry_price": 69.4332,
+      "exit_price": 65.8848,
+      "gross_return": -0.051105234959644676,
+      "net_return": -0.05510523495964467,
+      "score": 77.11563318665526
+    },
+    {
+      "entry_date": "2025-03-17",
+      "exit_date": "2025-03-24",
+      "code": "600420",
+      "entry_price": 11.338,
+      "exit_price": 11.1628,
+      "gross_return": -0.01545246075145515,
+      "net_return": -0.01945246075145515,
+      "score": 71.53094860726628
+    },
+    {
+      "entry_date": "2025-03-17",
+      "exit_date": "2025-03-24",
+      "code": "600618",
+      "entry_price": 10.2773,
+      "exit_price": 10.2872,
+      "gross_return": 0.0009632880231189144,
+      "net_return": -0.0030367119768810857,
+      "score": 71.45085025283478
+    },
+    {
+      "entry_date": "2025-03-17",
+      "exit_date": "2025-03-24",
+      "code": "002592",
+      "entry_price": 5.2436,
+      "exit_price": 5.0097,
+      "gross_return": -0.04460675871538642,
+      "net_return": -0.04860675871538642,
+      "score": 71.36117846601385
+    },
+    {
+      "entry_date": "2025-03-18",
+      "exit_date": "2025-03-25",
+      "code": "600887",
+      "entry_price": 27.5086,
+      "exit_price": 26.782,
+      "gross_return": -0.026413557941880036,
+      "net_return": -0.030413557941880037,
+      "score": 71.82212699083667
+    },
+    {
+      "entry_date": "2025-03-18",
+      "exit_date": "2025-03-25",
+      "code": "000899",
+      "entry_price": 8.3686,
+      "exit_price": 9.0821,
+      "gross_return": 0.08525918313696433,
+      "net_return": 0.08125918313696433,
+      "score": 71.3072277906713
+    },
+    {
+      "entry_date": "2025-03-18",
+      "exit_date": "2025-03-25",
+      "code": "002166",
+      "entry_price": 7.6139,
+      "exit_price": 8.4434,
+      "gross_return": 0.10894548129079713,
+      "net_return": 0.10494548129079713,
+      "score": 70.97092810553414
+    },
+    {
+      "entry_date": "2025-03-18",
+      "exit_date": "2025-03-25",
+      "code": "603130",
+      "entry_price": 25.7399,
+      "exit_price": 24.6143,
+      "gross_return": -0.04372977361994408,
+      "net_return": -0.047729773619944085,
+      "score": 70.93934445094814
+    },
+    {
+      "entry_date": "2025-03-18",
+      "exit_date": "2025-03-25",
+      "code": "603097",
+      "entry_price": 22.901,
+      "exit_price": 22.7424,
+      "gross_return": -0.006925461770228368,
+      "net_return": -0.010925461770228368,
+      "score": 70.72917830588734
+    },
+    {
+      "entry_date": "2025-03-19",
+      "exit_date": "2025-03-26",
+      "code": "603693",
+      "entry_price": 10.0836,
+      "exit_price": 13.0493,
+      "gross_return": 0.2941112301162283,
+      "net_return": 0.2901112301162283,
+      "score": 71.51381341710209
+    },
+    {
+      "entry_date": "2025-03-19",
+      "exit_date": "2025-03-26",
+      "code": "002052",
+      "entry_price": 6.02,
+      "exit_price": 6.57,
+      "gross_return": 0.0913621262458473,
+      "net_return": 0.0873621262458473,
+      "score": 70.61213133530369
+    },
+    {
+      "entry_date": "2025-03-19",
+      "exit_date": "2025-03-26",
+      "code": "688685",
+      "entry_price": 61.6792,
+      "exit_price": 56.5343,
+      "gross_return": -0.08341385750787947,
+      "net_return": -0.08741385750787947,
+      "score": 69.42159240811839
+    },
+    {
+      "entry_date": "2025-03-19",
+      "exit_date": "2025-03-26",
+      "code": "603155",
+      "entry_price": 13.4432,
+      "exit_price": 14.1457,
+      "gross_return": 0.05225690311830521,
+      "net_return": 0.04825690311830522,
+      "score": 69.12137967334613
+    },
+    {
+      "entry_date": "2025-03-19",
+      "exit_date": "2025-03-26",
+      "code": "600351",
+      "entry_price": 5.7527,
+      "exit_price": 5.7527,
+      "gross_return": 0.0,
+      "net_return": -0.004,
+      "score": 68.77465255689292
+    },
+    {
+      "entry_date": "2025-03-20",
+      "exit_date": "2025-03-27",
+      "code": "002275",
+      "entry_price": 13.6068,
+      "exit_price": 13.7416,
+      "gross_return": 0.009906811300232255,
+      "net_return": 0.005906811300232255,
+      "score": 69.75155245464066
+    },
+    {
+      "entry_date": "2025-03-20",
+      "exit_date": "2025-03-27",
+      "code": "002120",
+      "entry_price": 7.0887,
+      "exit_price": 6.7585,
+      "gross_return": -0.04658117849535182,
+      "net_return": -0.05058117849535182,
+      "score": 68.66008537736978
+    },
+    {
+      "entry_date": "2025-03-20",
+      "exit_date": "2025-03-27",
+      "code": "003043",
+      "entry_price": 35.2437,
+      "exit_price": 37.6738,
+      "gross_return": 0.06895133030867938,
+      "net_return": 0.06495133030867938,
+      "score": 68.47482117032783
+    },
+    {
+      "entry_date": "2025-03-20",
+      "exit_date": "2025-03-27",
+      "code": "600267",
+      "entry_price": 8.4454,
+      "exit_price": 8.6409,
+      "gross_return": 0.02314869633173099,
+      "net_return": 0.01914869633173099,
+      "score": 68.427307579514
+    },
+    {
+      "entry_date": "2025-03-20",
+      "exit_date": "2025-03-27",
+      "code": "002927",
+      "entry_price": 20.0386,
+      "exit_price": 14.6976,
+      "gross_return": -0.26653558631840546,
+      "net_return": -0.27053558631840546,
+      "score": 68.39753107474675
+    },
+    {
+      "entry_date": "2025-03-21",
+      "exit_date": "2025-03-28",
+      "code": "600475",
+      "entry_price": 8.8543,
+      "exit_price": 9.2524,
+      "gross_return": 0.04496120529008498,
+      "net_return": 0.040961205290084984,
+      "score": 68.58865726109603
+    },
+    {
+      "entry_date": "2025-03-21",
+      "exit_date": "2025-03-28",
+      "code": "603396",
+      "entry_price": 27.5914,
+      "exit_price": 26.5577,
+      "gross_return": -0.03746457229426559,
+      "net_return": -0.04146457229426559,
+      "score": 68.57053871399947
+    },
+    {
+      "entry_date": "2025-03-21",
+      "exit_date": "2025-03-28",
+      "code": "688676",
+      "entry_price": 41.7434,
+      "exit_price": 39.5381,
+      "gross_return": -0.05282990844061579,
+      "net_return": -0.05682990844061579,
+      "score": 68.5508651162839
+    },
+    {
+      "entry_date": "2025-03-21",
+      "exit_date": "2025-03-28",
+      "code": "600452",
+      "entry_price": 9.6664,
+      "exit_price": 9.4681,
+      "gross_return": -0.020514359016800432,
+      "net_return": -0.024514359016800432,
+      "score": 68.43508611440618
+    },
+    {
+      "entry_date": "2025-03-21",
+      "exit_date": "2025-03-28",
+      "code": "002885",
+      "entry_price": 15.0979,
+      "exit_price": 13.9895,
+      "gross_return": -0.07341418342948355,
+      "net_return": -0.07741418342948356,
+      "score": 68.41083744491155
+    }
+  ]
+}

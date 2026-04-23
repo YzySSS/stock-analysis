@@ -1,0 +1,22 @@
+{
+  "version": "V12-StockPicker",
+  "hold_days": 1,
+  "total_picks": 5420,
+  "avg_score": 68.02,
+  "win_rate_1d": 0.4533,
+  "avg_return_1d": -0.000315,
+  "avg_excess_1d": -0.000315,
+  "top10_return_1d": 0.003238,
+  "top10_excess_1d": 0.003238,
+  "ic_1d": 0.0008,
+  "win_rate_3d": 0.4587,
+  "avg_return_3d": -0.001202,
+  "avg_excess_3d": -0.001202,
+  "ic_3d": -0.0212,
+  "factor_weights": {
+    "quality": 0.3,
+    "valuation": 0.25,
+    "combined_trend": 0.25,
+    "reversal": 0.2
+  }
+}

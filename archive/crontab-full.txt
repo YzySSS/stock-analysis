@@ -1,0 +1,47 @@
+# 股票分析项目 - 完整定时任务配置
+# 包含：盘前/早盘/午盘/下午/收盘前
+# 
+# 安装到crontab:
+#   crontab crontab-full.txt
+# 或追加:
+#   cat crontab-full.txt >> /etc/crontab
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+PROJECT_DIR=/workspace/projects/workspace/股票分析项目
+
+# ============================================
+# 盘前分析（最重要）
+# 8:50 - AI选股 + 今日策略制定
+# ============================================
+50 8 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 intraday_scheduler.py --mode premarket >> logs/premarket.log 2>&1
+
+# ============================================
+# 早盘监控
+# 10:00 - 监控开盘后走势
+# ============================================
+0 10 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 intraday_scheduler.py --mode realtime >> logs/morning.log 2>&1
+
+# ============================================
+# 午间简报
+# 11:30 - 上午收盘总结
+# ============================================
+30 11 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 intraday_scheduler.py --mode noon >> logs/noon.log 2>&1
+
+# ============================================
+# 下午盘中监控
+# 14:00 - 监控下午异动
+# ============================================
+0 14 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 intraday_scheduler.py --mode afternoon >> logs/afternoon.log 2>&1
+
+# ============================================
+# 收盘前简报
+# 14:50 - 下午收盘前总结 + 明日预判
+# ============================================
+50 14 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 intraday_scheduler.py --mode preclose >> logs/preclose.log 2>&1
+
+# ============================================
+# 盘后分析
+# 15:05 - 收盘后完整分析
+# ============================================
+5 15 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 main.py >> logs/close.log 2>&1

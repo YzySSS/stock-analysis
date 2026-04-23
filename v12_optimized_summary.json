@@ -1,0 +1,16 @@
+{
+  "version": "V12_Optimized",
+  "changes": [
+    "MA20_filter_0.90",
+    "score_max_50_threshold_30",
+    "turnover_50M",
+    "fixed_value_factor"
+  ],
+  "period": "2026-02-13 至 2026-04-03",
+  "total_trades": 90,
+  "trade_days": 30,
+  "win_rate": 47.8,
+  "avg_return": 0.14,
+  "max_return": 10.41,
+  "min_return": -5.55
+}

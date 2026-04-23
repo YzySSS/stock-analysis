@@ -1,0 +1,15 @@
+{
+  "run_id": "V13_RegimeV1_2025",
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "total_trades": 259,
+  "bull_days": 99,
+  "bear_days": 144,
+  "win_rate": 44.4015444015444,
+  "avg_return": -0.13619681433495162,
+  "total_return": -50.20998414318674,
+  "bull_win_rate": 44.099378881987576,
+  "bull_return": 0.5379797885239901,
+  "bear_win_rate": 44.89795918367347,
+  "bear_return": -35.81295470127645
+}

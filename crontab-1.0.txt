@@ -1,0 +1,28 @@
+# 股票分析项目 1.0 - 定时任务配置
+# ================================
+# V8选股 + V10+报告 整合版本
+#
+# 安装: crontab crontab-1.0.txt
+# 查看: crontab -l
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+PROJECT_DIR=/workspace/projects/workspace/股票分析项目
+
+# ============================================
+# 盘前分析（最重要）
+# 8:50 - V8选股 + V10+报告
+# ============================================
+50 8 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 main.py --mode premarket --top 5 >> logs/premarket.log 2>&1
+
+# ============================================
+# 盘中简报（上午收盘后）
+# 12:30 - 上午收盘总结 + 下午选股分析
+# ============================================
+30 12 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 main.py --mode noon >> logs/noon.log 2>&1
+
+# ============================================
+# 盘后深度复盘
+# 15:50 - V10+深度复盘（收盘后）
+# ============================================
+50 15 * * 1-5 cd $PROJECT_DIR && source config/env.sh && python3 main.py --mode postmarket >> logs/postmarket.log 2>&1

@@ -1,0 +1,15 @@
+{
+  "run_id": "V12_2Year_20260414_153408",
+  "start_date": "2024-01-02",
+  "end_date": "2025-12-31",
+  "total_trades": 2416,
+  "win_trades": 1107,
+  "win_rate": 45.8,
+  "avg_return": -0.0,
+  "total_return": -99.87,
+  "annualized": -96.87,
+  "max_return": 19.75,
+  "min_return": -20.28,
+  "max_drawdown": 653.18,
+  "sharpe": -0.15
+}

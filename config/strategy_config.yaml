@@ -1,0 +1,75 @@
+# 策略配置文件
+# =============
+# 通过修改此文件切换选股策略，无需修改代码
+
+# 当前使用的策略
+CURRENT_STRATEGY: "V11_DYNAMIC"  # 可选: V10_5FACTOR, V11_DYNAMIC
+
+# 策略配置
+STRATEGIES:
+  
+  V10_5FACTOR:
+    name: "V10 5因子固定权重"
+    description: "经典5因子策略，适合稳定市场"
+    
+    # 因子权重配置
+    factor_weights:
+      technical: 0.25   # 技术面
+      sentiment: 0.20   # 情绪面
+      sector: 0.30      # 板块轮动
+      capital: 0.15     # 资金流向
+      risk: 0.10        # 风险因子
+    
+    # 选股参数
+    parameters:
+      pick_count: 3           # 选股数量
+      min_score: 55           # 最低分数阈值
+      filter_st: true         # 过滤ST股
+      filter_new: true        # 过滤新股(上市<60天)
+  
+  V11_DYNAMIC:
+    name: "V11 动态权重版"
+    description: "根据市场强弱智能调整因子权重"
+    
+    # 基础权重（会被动态调整）
+    base_weights:
+      technical: 0.35
+      sentiment: 0.20
+      sector: 0.30
+      capital: 0.15
+      risk: 0.10
+    
+    # 动态调整参数
+    dynamic_params:
+      strong_threshold: 60    # 市场强势阈值(>60)
+      weak_threshold: 40      # 市场弱势阈值(<40)
+      offensive_boost: 1.05   # 强势时进攻因子 boost
+      defensive_boost: 1.20   # 弱势时防御因子 boost
+    
+    # 选股参数
+    parameters:
+      pick_count: 3
+      min_score: 55
+      use_tech_levels: true   # 启用技术位分析
+
+# 回测专用配置
+BACKTEST:
+  # 收益率计算方式
+  return_calculation:
+    day1: "open_to_open"     # 一日收益: 当日开盘买入 → 次日开盘卖出
+    day3: "open_to_close"    # 三日收益: 当日开盘买入 → 第3日收盘卖出
+  
+  # 默认回测参数
+  default:
+    days: 30                 # 默认回测30天
+    benchmark: "000001"      # 对比基准: 上证指数
+    skip_missing: true       # 缺失数据时跳过
+
+# 实盘交易配置（预留）
+LIVE_TRADING:
+  # 交易参数
+  trading:
+    position_size: 0.33      # 单只股票仓位(33%)
+    max_positions: 3         # 最大持仓数
+    stop_loss: 0.05          # 止损比例(5%)
+    take_profit: 0.10        # 止盈比例(10%)

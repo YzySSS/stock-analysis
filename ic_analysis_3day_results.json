@@ -1,0 +1,68 @@
+{
+  "value_pe": {
+    "n": 120,
+    "ic_mean": -0.0008,
+    "ic_std": 0.1186,
+    "ic_abs_mean": 0.0946,
+    "ir": -0.0068,
+    "t_stat": -0.0748,
+    "p_value": 0.9404,
+    "significant": "",
+    "win_rate": 0.5
+  },
+  "quality_roe": {
+    "n": 120,
+    "ic_mean": -0.0065,
+    "ic_std": 0.0697,
+    "ic_abs_mean": 0.0558,
+    "ir": -0.0928,
+    "t_stat": -1.0162,
+    "p_value": 0.3095,
+    "significant": "",
+    "win_rate": 0.4333
+  },
+  "momentum_20d": {
+    "n": 120,
+    "ic_mean": -0.0822,
+    "ic_std": 0.1584,
+    "ic_abs_mean": 0.1419,
+    "ir": -0.5191,
+    "t_stat": -5.6868,
+    "p_value": 0.0,
+    "significant": "***",
+    "win_rate": 0.2917
+  },
+  "reversal_20d": {
+    "n": 120,
+    "ic_mean": 0.0822,
+    "ic_std": 0.1584,
+    "ic_abs_mean": 0.1419,
+    "ir": 0.5191,
+    "t_stat": 5.6868,
+    "p_value": 0.0,
+    "significant": "***",
+    "win_rate": 0.7083
+  },
+  "lowvol_60d": {
+    "n": 120,
+    "ic_mean": 0.0427,
+    "ic_std": 0.1763,
+    "ic_abs_mean": 0.1454,
+    "ir": 0.2423,
+    "t_stat": 2.6545,
+    "p_value": 0.0079,
+    "significant": "***",
+    "win_rate": 0.625
+  },
+  "turnover": {
+    "n": 120,
+    "ic_mean": 0.0921,
+    "ic_std": 0.1388,
+    "ic_abs_mean": 0.1372,
+    "ir": 0.6633,
+    "t_stat": 7.2656,
+    "p_value": 0.0,
+    "significant": "***",
+    "win_rate": 0.7917
+  }
+}

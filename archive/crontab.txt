@@ -1,0 +1,11 @@
+# 股票分析项目 - Crontab配置
+# 安装: crontab crontab.txt
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin:/workspace/projects/workspace/股票分析项目
+
+# 每日盘前8:50分析（工作日）
+50 8 * * 1-5 cd /workspace/projects/workspace/股票分析项目 && source config/env.sh && python3 main.py >> logs/cron.log 2>&1
+
+# 收盘后15:05分析（工作日）
+5 15 * * 1-5 cd /workspace/projects/workspace/股票分析项目 && source config/env.sh && python3 main.py >> logs/cron.log 2>&1

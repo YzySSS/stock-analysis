@@ -1,0 +1,7 @@
+﻿date,rank,code,score,buy,sell,return,factors
+2026-04-02,1,000028,21.0,26.6,27.0,1.5,"{'trend': 25, 'momentum': 25, 'quality': 20, 'sentiment': 20, 'value': 5}"
+2026-04-02,2,000049,21.0,26.0,25.67,-1.27,"{'trend': 25, 'momentum': 25, 'quality': 20, 'sentiment': 20, 'value': 5}"
+2026-04-02,3,600054,21.0,13.48,13.18,-2.23,"{'trend': 25, 'momentum': 25, 'quality': 20, 'sentiment': 20, 'value': 5}"
+2026-04-03,1,000028,21.0,26.7,26.4,-1.12,"{'trend': 25, 'momentum': 25, 'quality': 20, 'sentiment': 20, 'value': 5}"
+2026-04-03,2,600066,21.0,38.5,37.15,-3.51,"{'trend': 25, 'momentum': 25, 'quality': 20, 'sentiment': 20, 'value': 5}"
+2026-04-03,3,600598,21.0,16.63,16.0,-3.79,"{'trend': 25, 'momentum': 25, 'quality': 20, 'sentiment': 20, 'value': 5}"

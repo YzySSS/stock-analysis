@@ -1,0 +1,21 @@
+{
+  "version": "V10-P0",
+  "total_trades": 25,
+  "win_rate": 0.56,
+  "avg_gross_return": 0.284038,
+  "avg_net_return": 0.280038,
+  "final_value": 2.8231,
+  "total_return": 1.8231,
+  "max_drawdown": 0.0296,
+  "risk_metrics": {
+    "current_drawdown": 0.0296,
+    "max_drawdown": 0.0296,
+    "consecutive_losses": 7,
+    "peak_value": 1.0,
+    "is_stop_trading": true,
+    "stop_until": "2026-04-11",
+    "stop_reason": "\u8fde\u7eed\u4e8f\u635f7\u6b21",
+    "weekly_return": -0.022,
+    "monthly_return": 0.0
+  }
+}

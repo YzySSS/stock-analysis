@@ -1,0 +1,22 @@
+# 股票分析项目依赖
+# 安装: pip install -r requirements.txt
+
+# 数据处理
+pandas>=1.5.0
+numpy>=1.21.0
+
+# 数据源
+akshare>=1.10.0
+
+# HTTP请求
+requests>=2.28.0
+
+# 新闻搜索（可选但推荐）
+# tavily-python>=0.3.0
+# newspaper3k>=0.2.8
+
+# 数据验证（可选）
+# pydantic>=2.0.0
+
+# 工具
+python-dateutil>=2.8.0
