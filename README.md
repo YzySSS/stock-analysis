@@ -92,7 +92,7 @@
 | 3 | **AkShare** | 实时行情/板块数据 | ✅ 主力源 |
 | 4 | **Bright Data代理** | 东方财富等受限数据源 | ✅ 备用 |
 
-**Tushare Token**: `0faa52cf4350bede12c0cd302f5015f5a840c22ce3acb905393396a8`
+**Tushare Token**: 请从 https://tushare.pro/register.html 获取个人 Token
 
 ---
 
