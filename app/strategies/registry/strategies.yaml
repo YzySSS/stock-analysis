@@ -1,0 +1,15 @@
+default_strategy: v13_three_factor
+
+strategies:
+  - id: v13_three_factor
+    name: V13 三因子策略
+    version: 0.1.0
+    status: active
+    entrypoint: app.strategies.active.v13_three_factor.strategy.V13ThreeFactorStrategy
+    config_path: app/strategies/active/v13_three_factor/config.yaml
+    tags:
+      - core
+      - alpha
+      - three-factor
+      - mysql
+      - tencent-cloud
