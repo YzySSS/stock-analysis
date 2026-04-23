@@ -22,21 +22,23 @@ from app.strategies.active.v13_three_factor.strategy import StrategyInput
 
 
 def build_demo_features(universe: list[str]) -> Dict[str, Dict]:
-    """构造演示用特征。
+    """构造演示用时序特征。
 
-    当前是占位实现，后续由 data_ingestion 模块提供真实因子输入。
+    当前仍是 demo 数据，但格式已经更接近真实因子计算输入：
+    - closes: 历史收盘价序列
+    - turnovers: 历史换手率序列
     """
 
-    demo_scores = {}
-    base = [88, 76, 64, 59, 52]
+    demo = {}
     for i, code in enumerate(universe):
-        seed = base[i % len(base)]
-        demo_scores[code] = {
-            "turnover_score": max(seed - 5, 0),
-            "lowvol_score": max(seed, 0),
-            "reversal_score": max(seed - 10, 0),
+        base_price = 10 + i * 7
+        closes = [round(base_price * (1 + 0.002 * j + ((-1) ** j) * 0.003), 2) for j in range(1, 31)]
+        turnovers = [round(1.5 + ((j + i) % 7) * 0.35, 2) for j in range(30)]
+        demo[code] = {
+            "closes": closes,
+            "turnovers": turnovers,
         }
-    return demo_scores
+    return demo
 
 
 def main() -> None:

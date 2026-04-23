@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import sqrt
 from typing import Any, Dict, List
 
 
@@ -49,6 +50,14 @@ class StrategyOutput:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+def _stddev(values: List[float]) -> float:
+    if not values:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((x - mean) ** 2 for x in values) / len(values)
+    return sqrt(variance)
+
+
 class V13ThreeFactorStrategy:
     """V13 三因子策略。
 
@@ -83,12 +92,46 @@ class V13ThreeFactorStrategy:
     def score_stock(self, code: str, feature_row: Dict[str, Any]) -> StockScore:
         """对单只股票打分。
 
-        当前为模板实现，后续替换为真实因子计算逻辑。
+        当前优先采用旧仓库中已经出现过的 V13 三因子近似逻辑：
+        - Turnover: 20日平均换手率映射到 0-100
+        - LowVol: 波动率越低分越高
+        - Reversal: 近20日跌得越多分越高
+
+        如果上游已经给出 *_score，则优先直接使用。
         """
 
-        turnover_score = float(feature_row.get("turnover_score", 0))
-        lowvol_score = float(feature_row.get("lowvol_score", 0))
-        reversal_score = float(feature_row.get("reversal_score", 0))
+        if all(key in feature_row for key in ["turnover_score", "lowvol_score", "reversal_score"]):
+            turnover_score = float(feature_row.get("turnover_score", 0))
+            lowvol_score = float(feature_row.get("lowvol_score", 0))
+            reversal_score = float(feature_row.get("reversal_score", 0))
+        else:
+            closes = [float(x) for x in feature_row.get("closes", []) if x is not None]
+            turnovers = [float(x) for x in feature_row.get("turnovers", []) if x is not None]
+
+            if len(closes) < 20:
+                return StockScore(
+                    code=code,
+                    total_score=0.0,
+                    factor_scores={"turnover": 0.0, "lowvol": 0.0, "reversal": 0.0},
+                    notes=["历史收盘价不足20日"],
+                )
+
+            recent_turnovers = turnovers[-20:] if len(turnovers) >= 20 else turnovers
+            avg_turnover = sum(recent_turnovers) / len(recent_turnovers) if recent_turnovers else 0.0
+            turnover_score = max(0.0, min(100.0, 100.0 - (avg_turnover - 2.0) * 5.0))
+
+            returns = []
+            for prev, curr in zip(closes[:-1], closes[1:]):
+                if prev:
+                    returns.append((curr - prev) / prev)
+            recent_returns = returns[-60:] if len(returns) >= 60 else returns
+            volatility = _stddev(recent_returns) * sqrt(252) if recent_returns else 0.0
+            lowvol_score = max(0.0, min(100.0, 100.0 - volatility * 200.0)) if recent_returns else 50.0
+
+            price_now = closes[-1]
+            price_20d = closes[-20] if len(closes) >= 20 else closes[0]
+            ret_20d = ((price_now - price_20d) / price_20d) if price_20d else 0.0
+            reversal_score = max(0.0, min(100.0, 50.0 - ret_20d * 150.0))
 
         weights = self.config["weights"]
         total_score = (
@@ -101,9 +144,9 @@ class V13ThreeFactorStrategy:
             code=code,
             total_score=round(total_score, 2),
             factor_scores={
-                "turnover": turnover_score,
-                "lowvol": lowvol_score,
-                "reversal": reversal_score,
+                "turnover": round(turnover_score, 2),
+                "lowvol": round(lowvol_score, 2),
+                "reversal": round(reversal_score, 2),
             },
         )
 
