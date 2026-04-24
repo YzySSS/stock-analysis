@@ -16,6 +16,11 @@ from app.shared.task_log import TaskRunLogger
 class FundamentalRecord:
     code: str
     roe: Optional[float]
+    roa: Optional[float]
+    grossprofit_margin: Optional[float]
+    netprofit_margin: Optional[float]
+    revenue_yoy: Optional[float]
+    profit_yoy: Optional[float]
     period: Optional[str]
 
 
@@ -82,6 +87,16 @@ class FundamentalSync:
                 columns = {row[0] for row in cursor.fetchall()}
                 if "roe" not in columns:
                     cursor.execute("ALTER TABLE stock_basic ADD COLUMN roe DECIMAL(12,4) DEFAULT NULL")
+                if "roa" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN roa DECIMAL(12,4) DEFAULT NULL")
+                if "grossprofit_margin" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN grossprofit_margin DECIMAL(12,4) DEFAULT NULL")
+                if "netprofit_margin" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN netprofit_margin DECIMAL(12,4) DEFAULT NULL")
+                if "revenue_yoy" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN revenue_yoy DECIMAL(12,4) DEFAULT NULL")
+                if "profit_yoy" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN profit_yoy DECIMAL(12,4) DEFAULT NULL")
                 if "fundamental_period" not in columns:
                     cursor.execute("ALTER TABLE stock_basic ADD COLUMN fundamental_period VARCHAR(16) DEFAULT NULL")
                 if "fundamental_updated_at" not in columns:
@@ -101,7 +116,7 @@ class FundamentalSync:
         params: List[Any] = []
 
         if only_missing:
-            sql += " AND roe IS NULL"
+            sql += " AND (roe IS NULL OR roa IS NULL OR grossprofit_margin IS NULL OR revenue_yoy IS NULL)"
         elif stale_after_days is not None:
             cutoff = datetime.now() - timedelta(days=stale_after_days)
             sql += " AND (fundamental_updated_at IS NULL OR fundamental_updated_at < %s)"
@@ -126,16 +141,47 @@ class FundamentalSync:
             return f"{raw}.BJ"
         return f"{raw}.SZ"
 
-    def fetch_single_roe(self, code: str, result: Optional[FundamentalSyncResult] = None) -> Optional[FundamentalRecord]:
+    @staticmethod
+    def _to_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if value == value else None
+
+    def fetch_single_fundamental(self, code: str, result: Optional[FundamentalSyncResult] = None) -> Optional[FundamentalRecord]:
         ts_code = self.to_ts_code(code)
+        fields = "ts_code,end_date,roe,roa,grossprofit_margin,profit_to_gr,or_yoy,profit_yoy"
         for period in self.periods:
             try:
-                df = self.pro.fina_indicator(ts_code=ts_code, period=period, fields="ts_code,roe")
+                df = self.pro.fina_indicator(ts_code=ts_code, period=period, fields=fields)
                 if df.empty:
                     continue
-                roe = df.iloc[0]["roe"]
-                if roe == roe and roe not in (None, 0):
-                    return FundamentalRecord(code=code, roe=float(roe), period=period)
+                latest = df.iloc[0]
+                record = FundamentalRecord(
+                    code=code,
+                    roe=self._to_float(latest.get("roe")),
+                    roa=self._to_float(latest.get("roa")),
+                    grossprofit_margin=self._to_float(latest.get("grossprofit_margin")),
+                    netprofit_margin=self._to_float(latest.get("profit_to_gr")),
+                    revenue_yoy=self._to_float(latest.get("or_yoy")),
+                    profit_yoy=self._to_float(latest.get("profit_yoy")),
+                    period=str(latest.get("end_date") or period),
+                )
+                if any(
+                    value is not None
+                    for value in [
+                        record.roe,
+                        record.roa,
+                        record.grossprofit_margin,
+                        record.netprofit_margin,
+                        record.revenue_yoy,
+                        record.profit_yoy,
+                    ]
+                ):
+                    return record
             except Exception as e:
                 message = str(e)
                 if "最多访问" in message or "每分钟最多访问" in message or "频次" in message:
@@ -155,13 +201,30 @@ class FundamentalSync:
         sql = """
         UPDATE stock_basic
         SET roe = %s,
+            roa = %s,
+            grossprofit_margin = %s,
+            netprofit_margin = %s,
+            revenue_yoy = %s,
+            profit_yoy = %s,
             fundamental_period = %s,
             fundamental_updated_at = NOW()
         WHERE code = %s
         """
         with mysql_conn(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, (record.roe, record.period, record.code))
+                cursor.execute(
+                    sql,
+                    (
+                        record.roe,
+                        record.roa,
+                        record.grossprofit_margin,
+                        record.netprofit_margin,
+                        record.revenue_yoy,
+                        record.profit_yoy,
+                        record.period,
+                        record.code,
+                    ),
+                )
 
     @staticmethod
     def build_run_id() -> str:
@@ -190,7 +253,7 @@ class FundamentalSync:
             result.scanned = len(codes)
 
             for code in codes:
-                record = self.fetch_single_roe(code, result=result)
+                record = self.fetch_single_fundamental(code, result=result)
                 if not record:
                     result.no_data += 1
                     continue
