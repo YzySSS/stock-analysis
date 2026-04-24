@@ -1,0 +1,194 @@
+from __future__ import annotations
+
+import os
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+import tushare as ts
+
+from app.shared.db import mysql_conn
+
+
+@dataclass
+class FundamentalRecord:
+    code: str
+    roe: Optional[float]
+    period: Optional[str]
+
+
+@dataclass
+class SyncFailure:
+    code: str
+    ts_code: str
+    period: Optional[str]
+    error: str
+
+
+@dataclass
+class FundamentalSyncResult:
+    run_id: str
+    scanned: int = 0
+    updated: int = 0
+    no_data: int = 0
+    failed: int = 0
+    throttled: int = 0
+    started_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    finished_at: Optional[str] = None
+    failures: List[SyncFailure] = field(default_factory=list)
+
+    def finish(self) -> "FundamentalSyncResult":
+        self.finished_at = datetime.now().isoformat(timespec="seconds")
+        return self
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "scanned": self.scanned,
+            "updated": self.updated,
+            "no_data": self.no_data,
+            "failed": self.failed,
+            "throttled": self.throttled,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "failures": [
+                {
+                    "code": item.code,
+                    "ts_code": item.ts_code,
+                    "period": item.period,
+                    "error": item.error,
+                }
+                for item in self.failures
+            ],
+        }
+
+
+class FundamentalSync:
+    def __init__(self, token: Optional[str] = None, sleep_seconds: float = 0.3):
+        self.token = token or os.getenv("TUSHARE_TOKEN")
+        if not self.token:
+            raise RuntimeError("TUSHARE_TOKEN 未配置")
+        self.pro = ts.pro_api(self.token)
+        self.sleep_seconds = sleep_seconds
+        self.periods = ["20241231", "20240930", "20240630", "20240331", "20231231"]
+
+    def ensure_columns(self) -> None:
+        with mysql_conn(dict_cursor=False) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SHOW COLUMNS FROM stock_basic")
+                columns = {row[0] for row in cursor.fetchall()}
+                if "roe" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN roe DECIMAL(12,4) DEFAULT NULL")
+                if "fundamental_period" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN fundamental_period VARCHAR(16) DEFAULT NULL")
+                if "fundamental_updated_at" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN fundamental_updated_at DATETIME DEFAULT NULL")
+
+    def fetch_stock_codes(
+        self,
+        limit: Optional[int] = 200,
+        only_missing: bool = True,
+        stale_after_days: Optional[int] = 30,
+    ) -> List[str]:
+        sql = """
+        SELECT code FROM stock_basic
+        WHERE is_delisted = 0
+          AND name NOT LIKE '%指数%'
+        """
+        params: List[Any] = []
+
+        if only_missing:
+            sql += " AND roe IS NULL"
+        elif stale_after_days is not None:
+            cutoff = datetime.now() - timedelta(days=stale_after_days)
+            sql += " AND (fundamental_updated_at IS NULL OR fundamental_updated_at < %s)"
+            params.append(cutoff.strftime("%Y-%m-%d %H:%M:%S"))
+
+        sql += " ORDER BY code"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                return [row["code"] for row in cursor.fetchall()]
+
+    @staticmethod
+    def to_ts_code(code: str) -> str:
+        raw = code.split(".")[-1] if "." in code else code
+        prefix = code.split(".")[0] if "." in code else ""
+        if prefix == "sh" or raw.startswith("6"):
+            return f"{raw}.SH"
+        if prefix == "bj" or raw.startswith("8") or raw.startswith("4"):
+            return f"{raw}.BJ"
+        return f"{raw}.SZ"
+
+    def fetch_single_roe(self, code: str, result: Optional[FundamentalSyncResult] = None) -> Optional[FundamentalRecord]:
+        ts_code = self.to_ts_code(code)
+        for period in self.periods:
+            try:
+                df = self.pro.fina_indicator(ts_code=ts_code, period=period, fields="ts_code,roe")
+                if df.empty:
+                    continue
+                roe = df.iloc[0]["roe"]
+                if roe == roe and roe not in (None, 0):
+                    return FundamentalRecord(code=code, roe=float(roe), period=period)
+            except Exception as e:
+                message = str(e)
+                if "最多访问" in message or "每分钟最多访问" in message or "频次" in message:
+                    if result:
+                        result.throttled += 1
+                    time.sleep(10)
+                    continue
+                if result is not None:
+                    result.failed += 1
+                    result.failures.append(
+                        SyncFailure(code=code, ts_code=ts_code, period=period, error=message[:300])
+                    )
+                return None
+        return None
+
+    def save_record(self, record: FundamentalRecord) -> None:
+        sql = """
+        UPDATE stock_basic
+        SET roe = %s,
+            fundamental_period = %s,
+            fundamental_updated_at = NOW()
+        WHERE code = %s
+        """
+        with mysql_conn(dict_cursor=False) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (record.roe, record.period, record.code))
+
+    @staticmethod
+    def build_run_id() -> str:
+        return f"fundamental_sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def run(
+        self,
+        limit: Optional[int] = 50,
+        only_missing: bool = True,
+        stale_after_days: Optional[int] = 30,
+    ) -> FundamentalSyncResult:
+        self.ensure_columns()
+        result = FundamentalSyncResult(run_id=self.build_run_id())
+        codes = self.fetch_stock_codes(limit=limit, only_missing=only_missing, stale_after_days=stale_after_days)
+        result.scanned = len(codes)
+
+        for code in codes:
+            record = self.fetch_single_roe(code, result=result)
+            if not record:
+                result.no_data += 1
+                continue
+            self.save_record(record)
+            result.updated += 1
+            time.sleep(self.sleep_seconds)
+
+        return result.finish()
+
+
+if __name__ == "__main__":
+    sync = FundamentalSync()
+    summary = sync.run()
+    print(summary.to_dict())
