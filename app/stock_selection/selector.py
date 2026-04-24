@@ -12,6 +12,7 @@ class StockSelector:
     def __init__(self, strategy_id: Optional[str] = None):
         self.loader = StrategyLoader()
         self.strategy_id = strategy_id or self.loader.get_default_strategy_id()
+        self.strategy_meta = self.loader.get_strategy_meta(self.strategy_id)
         self.strategy = self.loader.load_strategy(self.strategy_id)
 
     @staticmethod
@@ -252,6 +253,8 @@ class StockSelector:
                 **item,
                 "explain": self._enhance_explain(item),
                 "strategy_id": self.strategy_id,
+                "strategy_display_name": self.strategy_meta.get("display_name"),
+                "strategy_version": self.strategy_meta.get("version"),
             }
             for item in selected
         ]
@@ -288,6 +291,8 @@ class StockSelector:
             metadata = {
                 "name": item.get("name"),
                 "instrument_type": item.get("instrument_type"),
+                "strategy_display_name": item.get("strategy_display_name") or self.strategy_meta.get("display_name"),
+                "strategy_version": item.get("strategy_version") or self.strategy_meta.get("version"),
                 "factors": item.get("factors", {}),
                 "explain": item.get("explain", {}),
                 "raw_metrics": {
@@ -327,6 +332,8 @@ class StockSelector:
         return {
             "run_id": saved_run_id,
             "strategy_id": self.strategy_id,
+            "strategy_display_name": self.strategy_meta.get("display_name"),
+            "strategy_version": self.strategy_meta.get("version"),
             "count": len(results),
             "results": results,
         }

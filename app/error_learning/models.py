@@ -10,6 +10,8 @@ class SelectionTrackingRecord:
     name: str
     selection_date: str
     strategy_id: str
+    strategy_display_name: Optional[str]
+    strategy_version: Optional[str]
     score: Optional[float]
     factor_scores: Dict[str, Any]
     selected_open_price: Optional[float]
