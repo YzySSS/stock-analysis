@@ -23,9 +23,24 @@ cp .env.example .env
 - `DB_PASSWORD`
 - `DB_NAME`
 
+如果是新环境，建议先初始化 schema：
+
+```bash
+python3 -m app.orchestration.init_project
+```
+
 如果要跑 Tushare 相关同步，再补：
 
 - `TUSHARE_TOKEN`
+
+并建议至少执行一次：
+
+```bash
+python3 -m app.data_ingestion.valuation_sync
+python3 -m app.data_ingestion.fundamental_sync
+```
+
+这样 `stock_basic` 会补齐 selector / tracking / API 需要的估值和基本面字段。
 
 ## 3. 启动 API
 
