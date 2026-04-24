@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import tushare as ts
 
 from app.shared.db import mysql_conn
+from app.shared.task_log import TaskRunLogger
 
 
 @dataclass
@@ -72,6 +73,7 @@ class FundamentalSync:
         self.pro = ts.pro_api(self.token)
         self.sleep_seconds = sleep_seconds
         self.periods = ["20241231", "20240930", "20240630", "20240331", "20231231"]
+        self.task_logger = TaskRunLogger()
 
     def ensure_columns(self) -> None:
         with mysql_conn(dict_cursor=False) as conn:
@@ -173,19 +175,48 @@ class FundamentalSync:
     ) -> FundamentalSyncResult:
         self.ensure_columns()
         result = FundamentalSyncResult(run_id=self.build_run_id())
-        codes = self.fetch_stock_codes(limit=limit, only_missing=only_missing, stale_after_days=stale_after_days)
-        result.scanned = len(codes)
+        self.task_logger.start(
+            task_name="fundamental_sync",
+            run_id=result.run_id,
+            metadata={
+                "limit": limit,
+                "only_missing": only_missing,
+                "stale_after_days": stale_after_days,
+            },
+        )
 
-        for code in codes:
-            record = self.fetch_single_roe(code, result=result)
-            if not record:
-                result.no_data += 1
-                continue
-            self.save_record(record)
-            result.updated += 1
-            time.sleep(self.sleep_seconds)
+        try:
+            codes = self.fetch_stock_codes(limit=limit, only_missing=only_missing, stale_after_days=stale_after_days)
+            result.scanned = len(codes)
 
-        return result.finish()
+            for code in codes:
+                record = self.fetch_single_roe(code, result=result)
+                if not record:
+                    result.no_data += 1
+                    continue
+                self.save_record(record)
+                result.updated += 1
+                time.sleep(self.sleep_seconds)
+
+            result.finish()
+            self.task_logger.finish(
+                task_name="fundamental_sync",
+                run_id=result.run_id,
+                status="success",
+                message=f"fundamental sync completed, updated={result.updated}",
+                metadata=result.to_dict(),
+            )
+            return result
+        except Exception as e:
+            result.finish()
+            self.task_logger.finish(
+                task_name="fundamental_sync",
+                run_id=result.run_id,
+                status="failed",
+                message=str(e)[:500],
+                metadata=result.to_dict(),
+            )
+            raise
 
 
 if __name__ == "__main__":
