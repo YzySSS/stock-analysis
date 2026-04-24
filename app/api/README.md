@@ -44,11 +44,18 @@ python3 -m app.data_ingestion.fundamental_sync
 
 ## 3. 启动 API
 
-方式一：直接运行 uvicorn
+方式一：直接运行 uvicorn（推荐显式带上 `--app-dir`）
 
 ```bash
 cd /root/.openclaw/workspace/stock-analysis
-python3 -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+.venv/bin/python -m uvicorn app.api.main:app --app-dir /root/.openclaw/workspace/stock-analysis --host 0.0.0.0 --port 8000 --reload
+```
+
+如果你当前 shell 没有把项目根目录放进 Python 模块搜索路径，就会报：`ModuleNotFoundError: No module named 'app'`。
+所以要么使用上面的 `--app-dir`，要么先执行：
+
+```bash
+export PYTHONPATH=/root/.openclaw/workspace/stock-analysis:$PYTHONPATH
 ```
 
 方式二：使用脚本
