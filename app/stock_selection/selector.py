@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.shared.db import mysql_conn
@@ -11,6 +13,10 @@ class StockSelector:
         self.loader = StrategyLoader()
         self.strategy_id = strategy_id or self.loader.get_default_strategy_id()
         self.strategy = self.loader.load_strategy(self.strategy_id)
+
+    @staticmethod
+    def build_run_id(prefix: str = "selection") -> str:
+        return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     @staticmethod
     def _round_score(value: float) -> float:
@@ -253,6 +259,77 @@ class StockSelector:
     def run_from_mysql(self, limit: int = 50, instrument_type: str = "stock") -> List[Dict[str, Any]]:
         data_bundle = self.load_candidates_from_mysql(limit=limit, instrument_type=instrument_type)
         return self.run(data_bundle)
+
+    def save_selection_results(
+        self,
+        results: List[Dict[str, Any]],
+        run_id: Optional[str] = None,
+        trade_date: Optional[str] = None,
+    ) -> str:
+        if not results:
+            return run_id or self.build_run_id()
+
+        final_run_id = run_id or self.build_run_id()
+        final_trade_date = trade_date or results[0].get("trade_date") or datetime.now().strftime("%Y-%m-%d")
+        sql = """
+        INSERT INTO selection_result (
+            run_id, trade_date, strategy_id, code, score, rank_no, metadata_json
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            trade_date = VALUES(trade_date),
+            strategy_id = VALUES(strategy_id),
+            score = VALUES(score),
+            rank_no = VALUES(rank_no),
+            metadata_json = VALUES(metadata_json)
+        """
+
+        payload = []
+        for index, item in enumerate(results, start=1):
+            metadata = {
+                "name": item.get("name"),
+                "instrument_type": item.get("instrument_type"),
+                "factors": item.get("factors", {}),
+                "explain": item.get("explain", {}),
+                "raw_metrics": {
+                    "close": item.get("close"),
+                    "pe_tushare": item.get("pe_tushare"),
+                    "pb_tushare": item.get("pb_tushare"),
+                    "roe": item.get("roe"),
+                    "roa": item.get("roa"),
+                    "grossprofit_margin": item.get("grossprofit_margin"),
+                    "netprofit_margin": item.get("netprofit_margin"),
+                    "revenue_yoy": item.get("revenue_yoy"),
+                    "profit_yoy": item.get("profit_yoy"),
+                    "trade_date": item.get("trade_date"),
+                },
+            }
+            payload.append(
+                (
+                    final_run_id,
+                    final_trade_date,
+                    item.get("strategy_id") or self.strategy_id,
+                    item.get("code"),
+                    item.get("score"),
+                    index,
+                    json.dumps(metadata, ensure_ascii=False),
+                )
+            )
+
+        with mysql_conn(dict_cursor=False) as conn:
+            with conn.cursor() as cursor:
+                cursor.executemany(sql, payload)
+
+        return final_run_id
+
+    def run_and_save(self, limit: int = 50, instrument_type: str = "stock", run_id: Optional[str] = None) -> Dict[str, Any]:
+        results = self.run_from_mysql(limit=limit, instrument_type=instrument_type)
+        saved_run_id = self.save_selection_results(results, run_id=run_id)
+        return {
+            "run_id": saved_run_id,
+            "strategy_id": self.strategy_id,
+            "count": len(results),
+            "results": results,
+        }
 
 
 if __name__ == "__main__":

@@ -1,13 +1,63 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import json
+from typing import Any, Dict, List, Optional
 
 from app.error_learning.models import SelectionTrackingRecord
 from app.shared.db import mysql_conn
 
 
 class SelectionResultTracker:
-    def build_latest_selection_snapshot(self, limit: int = 20, instrument_type: str = "stock") -> List[SelectionTrackingRecord]:
+    def build_latest_selection_snapshot(
+        self,
+        limit: int = 20,
+        instrument_type: str = "stock",
+        run_id: Optional[str] = None,
+    ) -> List[SelectionTrackingRecord]:
+        rows = self._fetch_from_selection_result(limit=limit, instrument_type=instrument_type, run_id=run_id)
+        if rows:
+            return [self._build_record_from_selection_result(row) for row in rows]
+        rows = self._fetch_from_stock_snapshot(limit=limit, instrument_type=instrument_type)
+        return [self._build_record_from_snapshot(row) for row in rows]
+
+    def _fetch_from_selection_result(
+        self,
+        limit: int,
+        instrument_type: str,
+        run_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        sql = """
+        SELECT
+            sr.run_id,
+            sr.trade_date AS selection_date,
+            sr.strategy_id,
+            sr.code,
+            sr.score,
+            sr.metadata_json,
+            sb.name,
+            sb.instrument_type,
+            dk.open AS selected_open_price,
+            dk.close AS current_price
+        FROM selection_result sr
+        INNER JOIN stock_basic sb ON sr.code = sb.code
+        LEFT JOIN daily_kline dk ON sr.code = dk.code AND sr.trade_date = dk.trade_date
+        WHERE sb.instrument_type = %s
+        """
+        params: List[Any] = [instrument_type]
+        if run_id:
+            sql += " AND sr.run_id = %s"
+            params.append(run_id)
+        else:
+            sql += " AND sr.run_id = (SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1)"
+        sql += " ORDER BY sr.rank_no ASC, sr.id ASC LIMIT %s"
+        params.append(limit)
+
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                return cursor.fetchall()
+
+    def _fetch_from_stock_snapshot(self, limit: int, instrument_type: str) -> List[Dict[str, Any]]:
         sql = """
         SELECT
             sb.code,
@@ -42,9 +92,7 @@ class SelectionResultTracker:
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, (instrument_type, limit))
-                rows = cursor.fetchall()
-
-        return [self._build_record(row) for row in rows]
+                return cursor.fetchall()
 
     @staticmethod
     def _to_float(value: Any) -> float | None:
@@ -56,7 +104,39 @@ class SelectionResultTracker:
             return None
         return value if value == value else None
 
-    def _build_record(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
+    def _build_record_from_selection_result(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
+        selected_open_price = self._to_float(row.get("selected_open_price"))
+        current_price = self._to_float(row.get("current_price"))
+        price_change_pct = None
+        if selected_open_price and current_price:
+            price_change_pct = round((current_price - selected_open_price) / selected_open_price * 100, 2)
+
+        metadata = row.get("metadata_json")
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        metadata = metadata or {}
+        raw_metrics = metadata.get("raw_metrics", {})
+        factor_scores = {
+            **raw_metrics,
+            **metadata.get("factors", {}),
+        }
+
+        return SelectionTrackingRecord(
+            code=row["code"],
+            name=row["name"],
+            selection_date=str(row["selection_date"]) if row.get("selection_date") else "",
+            strategy_id=row.get("strategy_id") or "",
+            score=self._to_float(row.get("score")),
+            factor_scores=factor_scores,
+            selected_open_price=selected_open_price,
+            current_price=current_price,
+            price_change_pct=price_change_pct,
+        )
+
+    def _build_record_from_snapshot(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
         current_price = self._to_float(row.get("current_price"))
         price_change_pct = None
