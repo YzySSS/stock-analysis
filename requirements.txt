@@ -15,8 +15,11 @@ requests>=2.28.0
 # tavily-python>=0.3.0
 # newspaper3k>=0.2.8
 
-# 数据验证（可选）
-# pydantic>=2.0.0
+# 数据验证 / API
+pydantic>=2.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-dotenv>=1.0.0
 
 # 工具
 python-dateutil>=2.8.0
