@@ -23,6 +23,8 @@ def dashboard_summary(limit: int = Query(default=5, ge=1, le=20)) -> dict:
 
     mysql_info = ping_mysql()
 
+    latest_trade_date = preview_items[0].get("selection_date") if preview_items else None
+
     return {
         "health": {
             "status": "ok",
@@ -31,6 +33,7 @@ def dashboard_summary(limit: int = Query(default=5, ge=1, le=20)) -> dict:
         },
         "default_strategy": strategy_service.get_default_strategy_id(),
         "strategy_count": len(strategies),
+        "latest_trade_date": latest_trade_date,
         "latest_tracking_count": len(preview_items),
         "latest_tracking_avg_price_change_pct": avg_price_change_pct,
         "latest_tracking_preview": preview_items,

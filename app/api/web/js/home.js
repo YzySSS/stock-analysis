@@ -2,7 +2,9 @@ async function loadHomePage() {
   const healthStatus = qs('#home-health-status');
   const healthDetail = qs('#home-health-detail');
   const defaultStrategy = qs('#home-default-strategy');
+  const latestTradeDate = qs('#home-latest-trade-date');
   const trackingCount = qs('#home-tracking-count');
+  const avgChange = qs('#home-avg-change');
   const trackingPreview = qs('#home-tracking-preview');
 
   try {
@@ -18,7 +20,11 @@ async function loadHomePage() {
       : '健康检查正常';
 
     defaultStrategy.textContent = data.default_strategy || '-';
+    latestTradeDate.textContent = data.latest_trade_date || '-';
     trackingCount.textContent = String(data.latest_tracking_count ?? items.length ?? 0);
+    avgChange.textContent = formatPercent(data.latest_tracking_avg_price_change_pct);
+    avgChange.classList.remove('up', 'down');
+    avgChange.classList.add(getPctClass(data.latest_tracking_avg_price_change_pct));
 
     if (!items.length) {
       trackingPreview.innerHTML = renderEmptyRow(4, '暂无跟踪数据');
@@ -42,7 +48,9 @@ async function loadHomePage() {
     healthStatus.classList.add('down');
     healthDetail.textContent = error.message;
     defaultStrategy.textContent = '加载失败';
+    latestTradeDate.textContent = '加载失败';
     trackingCount.textContent = '加载失败';
+    avgChange.textContent = '加载失败';
     trackingPreview.innerHTML = renderEmptyRow(4, error.message);
   }
 }
