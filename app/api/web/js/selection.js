@@ -89,6 +89,7 @@ async function refreshSelectionPage() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  bindStockQuickSearch('#selection-stock-search', '#selection-stock-search-btn');
   qs('#selection-form').addEventListener('submit', runSelection);
   qs('#refresh-strategies').addEventListener('click', loadStrategies);
   qs('#refresh-tracking').addEventListener('click', loadTracking);

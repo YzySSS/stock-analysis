@@ -56,6 +56,26 @@ function getPctClass(value) {
   return Number(value) >= 0 ? 'up' : 'down';
 }
 
+function bindStockQuickSearch(inputSelector, buttonSelector) {
+  const input = qs(inputSelector);
+  const button = qs(buttonSelector);
+  if (!input || !button) return;
+
+  const go = () => {
+    const code = (input.value || '').trim();
+    if (!code) return;
+    window.location.href = `/stocks/${encodeURIComponent(code)}`;
+  };
+
+  button.addEventListener('click', go);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      go();
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   setActiveNav();
 });

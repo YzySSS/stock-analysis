@@ -28,7 +28,7 @@
         <div>
           <p class="eyebrow">Dashboard</p>
           <h1>首页概览</h1>
-          <p class="page-desc">先看系统状态、默认策略和最近结果，判断今天值不值得继续盯盘。</p>
+          <p class="page-desc">展示系统状态、默认策略和最近结果。</p>
         </div>
         <div class="header-actions">
           <a class="btn btn-primary" href="/selection">去运行选股</a>
@@ -57,7 +57,11 @@
         <article class="card">
           <div class="card-header">
             <h2>快捷入口</h2>
-            <p class="muted">把高频操作放前面，别绕路。</p>
+            <p class="muted">常用功能入口。</p>
+          </div>
+          <div class="actions inline-search-actions">
+            <input id="stock-quick-search" type="text" placeholder="输入股票代码，如 sh.600000" />
+            <button id="stock-quick-search-btn" class="btn btn-secondary" type="button">查看个股</button>
           </div>
           <div class="quick-links">
             <a class="quick-link-card" href="/selection">
@@ -82,7 +86,7 @@
         <article class="card">
           <div class="card-header">
             <h2>最近跟踪预览</h2>
-            <p class="muted">先看前几条，够你快速判断今天有没有亮点。</p>
+            <p class="muted">最近跟踪记录预览。</p>
           </div>
           <div class="table-wrap compact-table">
             <table>

@@ -28,18 +28,31 @@
         <div>
           <p class="eyebrow">Selection</p>
           <h1>选股中心</h1>
-          <p class="page-desc">运行策略、查看返回结果，再顺手看最新 tracking 快照。</p>
+          <p class="page-desc">运行策略并查看最新结果。</p>
         </div>
         <div class="header-actions">
           <button id="refresh-selection-page" class="btn btn-secondary" type="button">刷新页面数据</button>
         </div>
       </header>
 
+      <section class="card">
+        <div class="card-header with-actions">
+          <div>
+            <h2>快速跳转</h2>
+            <p class="muted">输入股票代码直接进入详情页。</p>
+          </div>
+        </div>
+        <div class="actions inline-search-actions">
+          <input id="selection-stock-search" type="text" placeholder="输入股票代码，如 sh.600000" />
+          <button id="selection-stock-search-btn" class="btn btn-secondary" type="button">查看个股</button>
+        </div>
+      </section>
+
       <section class="content-grid two-columns top-align">
         <article class="card">
           <div class="card-header">
             <h2>运行选股</h2>
-            <p class="muted">第一版先保留最核心的运行参数。</p>
+            <p class="muted">配置运行参数并执行选股。</p>
           </div>
 
           <form id="selection-form" class="stack-form">
@@ -72,7 +85,7 @@
         <article class="card">
           <div class="card-header">
             <h2>运行结果</h2>
-            <p class="muted">先完整展示返回 JSON，后续再做摘要卡片。</p>
+            <p class="muted">显示本次运行返回结果。</p>
           </div>
           <pre id="selection-run-result" class="code-block">等待运行...</pre>
         </article>
@@ -92,7 +105,7 @@
         <div class="card-header with-actions">
           <div>
             <h2>最新选股跟踪</h2>
-            <p class="muted">沿用当前 tracking/latest 接口，方便跑完就看。</p>
+            <p class="muted">最新跟踪结果。</p>
           </div>
           <div class="actions">
             <button id="refresh-tracking" class="btn btn-secondary" type="button">刷新跟踪</button>
