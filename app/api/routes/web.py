@@ -19,7 +19,7 @@ def home() -> FileResponse:
     return serve_page("home.html")
 
 
-@router.get("/favicon.ico", include_in_schema=False)
+@router.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 def favicon() -> FileResponse:
     return FileResponse(WEB_DIR / "assets" / "favicon.png", media_type="image/png")
 
