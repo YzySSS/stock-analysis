@@ -1,3 +1,45 @@
+function renderPriceChart(history) {
+  const svg = qs('#stock-price-chart');
+  if (!svg) return;
+  if (!history || history.length < 2) {
+    svg.innerHTML = '';
+    return;
+  }
+
+  const points = history.filter((item) => item.close != null);
+  if (points.length < 2) {
+    svg.innerHTML = '';
+    return;
+  }
+
+  const width = 640;
+  const height = 220;
+  const padding = 18;
+  const values = points.map((item) => Number(item.close));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  const polyline = points.map((item, index) => {
+    const x = padding + (index * (width - padding * 2)) / (points.length - 1);
+    const y = height - padding - ((Number(item.close) - min) / range) * (height - padding * 2);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const last = values[values.length - 1];
+  const first = values[0];
+  const positive = last >= first;
+  const stroke = positive ? '#22c55e' : '#ef4444';
+
+  svg.innerHTML = `
+    <polyline fill="none" stroke="${stroke}" stroke-width="3" points="${polyline}" />
+    <line x1="18" y1="202" x2="622" y2="202" stroke="#334155" stroke-width="1" />
+    <text x="18" y="18" fill="#94a3b8" font-size="12">最高 ${max.toFixed(2)}</text>
+    <text x="18" y="198" fill="#94a3b8" font-size="12">最低 ${min.toFixed(2)}</text>
+    <text x="540" y="18" fill="#94a3b8" font-size="12">最近 ${last.toFixed(2)}</text>
+  `;
+}
+
 function renderSelectionHistory(items) {
   const container = qs('#stock-detail-history');
   if (!items || !items.length) {
@@ -116,6 +158,7 @@ async function loadStockDetail() {
       <div>${escapeHtml(latestSelection.created_at || '-')}</div>
     `;
 
+    renderPriceChart(data.price_history || []);
     renderSelectionHistory(data.selection_history || []);
   } catch (error) {
     qs('#stock-detail-subtitle').textContent = '加载详情失败';

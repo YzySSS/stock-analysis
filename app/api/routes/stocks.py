@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.shared.db import mysql_conn
 
@@ -21,7 +21,7 @@ def _to_float(value: Any) -> float | None:
 
 
 @router.get("/stocks/{code}")
-def stock_detail(code: str) -> dict:
+def stock_detail(code: str, history_limit: int = Query(default=20, ge=5, le=120)) -> dict:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -80,6 +80,20 @@ def stock_detail(code: str) -> dict:
             cursor.execute(
                 """
                 SELECT
+                    trade_date,
+                    close
+                FROM daily_kline
+                WHERE code = %s
+                ORDER BY trade_date DESC
+                LIMIT %s
+                """,
+                (code, history_limit),
+            )
+            price_history_rows = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
                     run_id,
                     trade_date,
                     strategy_id,
@@ -132,6 +146,14 @@ def stock_detail(code: str) -> dict:
     if latest_open and latest_close:
         intraday_change_pct = round((latest_close - latest_open) / latest_open * 100, 2)
 
+    price_history = [
+        {
+            "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+            "close": _to_float(row.get("close")),
+        }
+        for row in reversed(price_history_rows)
+    ]
+
     return {
         "code": basic.get("code"),
         "name": basic.get("name"),
@@ -169,6 +191,7 @@ def stock_detail(code: str) -> dict:
             "intraday_change_pct": intraday_change_pct,
             "updated_at": str(latest_kline.get("updated_at")) if latest_kline and latest_kline.get("updated_at") else None,
         },
+        "price_history": price_history,
         "latest_selection": latest_selection,
         "selection_history": selection_history,
         "updated_at": str(basic.get("updated_at")) if basic.get("updated_at") else None,
