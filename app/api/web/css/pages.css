@@ -1,0 +1,68 @@
+.quick-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quick-link-card,
+.strategy-card,
+.strategy-item {
+  background: rgba(31, 41, 55, 0.85);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.quick-link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text);
+}
+
+.quick-link-card:hover {
+  background: rgba(51, 65, 85, 0.95);
+  text-decoration: none;
+}
+
+.compact-table th,
+.compact-table td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.list-stack,
+.strategy-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.strategy-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.status-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px 14px;
+}
+
+@media (max-width: 960px) {
+  .quick-links,
+  .strategy-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>股票分析控制台 - 系统状态</title>
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/pages.css" />
+</head>
+<body data-page="system">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">股票分析控制台</div>
+      <nav class="nav">
+        <a href="/" data-nav="home">首页</a>
+        <a href="/selection" data-nav="selection">选股中心</a>
+        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/system" data-nav="system">系统状态</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">System</p>
+          <h1>系统状态</h1>
+          <p class="page-desc">先把 API 健康状态和基础检查做起来，后面再接任务日志和数据同步状态。</p>
+        </div>
+        <div class="header-actions">
+          <button id="refresh-system-page" class="btn btn-secondary" type="button">刷新状态</button>
+        </div>
+      </header>
+
+      <section class="content-grid two-columns">
+        <article class="card">
+          <div class="card-header">
+            <h2>健康检查</h2>
+            <p class="muted">目前来自 /api/health</p>
+          </div>
+          <div id="system-health-panel" class="status-panel">加载中...</div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>后续扩展位</h2>
+            <p class="muted">先把坑位留出来，接口补齐后直接接入。</p>
+          </div>
+          <ul class="placeholder-list">
+            <li>数据同步状态</li>
+            <li>最近任务日志</li>
+            <li>手动触发同步动作</li>
+            <li>环境信息与配置摘要</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>系统说明</h2>
+          <p class="muted">这一页目前主要用于运维可视化，不追求花哨。</p>
+        </div>
+        <div class="note-block">
+          <p>建议下一步补一个聚合接口，比如 <code>/api/system/status</code>，把健康检查、最近同步时间、最近任务、关键表记录数一次性返回，前端会省很多胶水代码。</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/system.js"></script>
+</body>
+</html>

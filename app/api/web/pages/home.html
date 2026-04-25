@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>股票分析控制台 - 首页</title>
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/pages.css" />
+</head>
+<body data-page="home">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">股票分析控制台</div>
+      <nav class="nav">
+        <a href="/" data-nav="home">首页</a>
+        <a href="/selection" data-nav="selection">选股中心</a>
+        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/system" data-nav="system">系统状态</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Dashboard</p>
+          <h1>首页概览</h1>
+          <p class="page-desc">先看系统状态、默认策略和最近结果，判断今天值不值得继续盯盘。</p>
+        </div>
+        <div class="header-actions">
+          <a class="btn btn-primary" href="/selection">去运行选股</a>
+        </div>
+      </header>
+
+      <section class="stat-grid">
+        <article class="stat-card">
+          <div class="stat-label">API 健康状态</div>
+          <div id="home-health-status" class="stat-value">加载中...</div>
+          <div id="home-health-detail" class="muted">正在获取健康检查结果</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">默认策略</div>
+          <div id="home-default-strategy" class="stat-value">加载中...</div>
+          <div class="muted">来自 /api/strategies</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">最近跟踪数量</div>
+          <div id="home-tracking-count" class="stat-value">加载中...</div>
+          <div class="muted">最新 tracking 快照条目数</div>
+        </article>
+      </section>
+
+      <section class="content-grid two-columns">
+        <article class="card">
+          <div class="card-header">
+            <h2>快捷入口</h2>
+            <p class="muted">把高频操作放前面，别绕路。</p>
+          </div>
+          <div class="quick-links">
+            <a class="quick-link-card" href="/selection">
+              <strong>运行选股</strong>
+              <span>执行策略、查看本轮输出</span>
+            </a>
+            <a class="quick-link-card" href="/tracking">
+              <strong>跟踪复盘</strong>
+              <span>查看已入选股票后续表现</span>
+            </a>
+            <a class="quick-link-card" href="/strategies">
+              <strong>策略管理</strong>
+              <span>看策略列表、默认策略和描述</span>
+            </a>
+            <a class="quick-link-card" href="/system">
+              <strong>系统状态</strong>
+              <span>确认 API 和后续数据链路是否正常</span>
+            </a>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>最近跟踪预览</h2>
+            <p class="muted">先看前几条，够你快速判断今天有没有亮点。</p>
+          </div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>代码</th>
+                  <th>名称</th>
+                  <th>策略</th>
+                  <th>涨跌幅</th>
+                </tr>
+              </thead>
+              <tbody id="home-tracking-preview">
+                <tr><td colspan="4" class="muted">加载中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/home.js"></script>
+</body>
+</html>

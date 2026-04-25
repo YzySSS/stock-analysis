@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>股票分析控制台 - 个股详情</title>
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/pages.css" />
+</head>
+<body data-page="stock-detail">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">股票分析控制台</div>
+      <nav class="nav">
+        <a href="/" data-nav="home">首页</a>
+        <a href="/selection" data-nav="selection">选股中心</a>
+        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/system" data-nav="system">系统状态</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Stock Detail</p>
+          <h1 id="stock-detail-title">个股详情</h1>
+          <p id="stock-detail-subtitle" class="page-desc">先把详情路由和页面骨架占上。</p>
+        </div>
+      </header>
+
+      <section class="content-grid two-columns">
+        <article class="card">
+          <div class="card-header">
+            <h2>基础信息</h2>
+          </div>
+          <div id="stock-detail-basic" class="detail-grid muted">等待后续接口接入</div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>因子与评分</h2>
+          </div>
+          <div id="stock-detail-factors" class="detail-grid muted">等待后续接口接入</div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>历史入选记录</h2>
+          <p class="muted">后续适合接入该股票的 tracking / selection history。</p>
+        </div>
+        <div id="stock-detail-history" class="empty-state">暂无数据</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/stock-detail.js"></script>
+</body>
+</html>

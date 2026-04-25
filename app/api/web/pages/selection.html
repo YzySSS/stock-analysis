@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>股票分析控制台 - 选股中心</title>
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/pages.css" />
+</head>
+<body data-page="selection">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">股票分析控制台</div>
+      <nav class="nav">
+        <a href="/" data-nav="home">首页</a>
+        <a href="/selection" data-nav="selection">选股中心</a>
+        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/system" data-nav="system">系统状态</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Selection</p>
+          <h1>选股中心</h1>
+          <p class="page-desc">运行策略、查看返回结果，再顺手看最新 tracking 快照。</p>
+        </div>
+        <div class="header-actions">
+          <button id="refresh-selection-page" class="btn btn-secondary" type="button">刷新页面数据</button>
+        </div>
+      </header>
+
+      <section class="content-grid two-columns top-align">
+        <article class="card">
+          <div class="card-header">
+            <h2>运行选股</h2>
+            <p class="muted">第一版先保留最核心的运行参数。</p>
+          </div>
+
+          <form id="selection-form" class="stack-form">
+            <div class="form-group">
+              <label for="strategy-id">策略</label>
+              <select id="strategy-id"></select>
+            </div>
+
+            <div class="form-group">
+              <label for="instrument-type">股票池类型</label>
+              <select id="instrument-type">
+                <option value="stock">stock</option>
+                <option value="etf">etf</option>
+                <option value="index">index</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="limit">数量限制</label>
+              <input id="limit" type="number" value="5" min="1" max="100" />
+            </div>
+
+            <div class="actions">
+              <button class="btn btn-primary" type="submit">运行并保存</button>
+              <button id="refresh-strategies" class="btn btn-secondary" type="button">刷新策略</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>运行结果</h2>
+            <p class="muted">先完整展示返回 JSON，后续再做摘要卡片。</p>
+          </div>
+          <pre id="selection-run-result" class="code-block">等待运行...</pre>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-header with-actions">
+          <div>
+            <h2>可用策略</h2>
+            <p class="muted">默认策略会自动选中。</p>
+          </div>
+        </div>
+        <div id="strategies" class="list-stack empty-state">加载中...</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header with-actions">
+          <div>
+            <h2>最新选股跟踪</h2>
+            <p class="muted">沿用当前 tracking/latest 接口，方便跑完就看。</p>
+          </div>
+          <div class="actions">
+            <button id="refresh-tracking" class="btn btn-secondary" type="button">刷新跟踪</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代码</th>
+                <th>名称</th>
+                <th>选股日期</th>
+                <th>策略</th>
+                <th>分数</th>
+                <th>开盘价</th>
+                <th>现价</th>
+                <th>涨跌幅</th>
+              </tr>
+            </thead>
+            <tbody id="tracking-body">
+              <tr><td colspan="8" class="muted">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/selection.js"></script>
+</body>
+</html>
