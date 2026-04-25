@@ -36,7 +36,26 @@
         </div>
       </header>
 
-      <section class="content-grid two-columns">
+      <section class="stat-grid compact-stats">
+        <article class="stat-card">
+          <div class="stat-label">最新收盘</div>
+          <div id="stock-stat-close" class="stat-value">-</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">日内涨跌幅</div>
+          <div id="stock-stat-change" class="stat-value">-</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">最近选股分数</div>
+          <div id="stock-stat-score" class="stat-value">-</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">最近交易日</div>
+          <div id="stock-stat-date" class="stat-value">-</div>
+        </article>
+      </section>
+
+      <section class="content-grid two-columns stock-detail-panels">
         <article class="card">
           <div class="card-header">
             <h2>基础信息</h2>
@@ -46,9 +65,25 @@
 
         <article class="card">
           <div class="card-header">
-            <h2>因子与评分</h2>
+            <h2>估值与因子</h2>
           </div>
           <div id="stock-detail-factors" class="detail-grid muted">加载中...</div>
+        </article>
+      </section>
+
+      <section class="content-grid two-columns stock-detail-panels">
+        <article class="card">
+          <div class="card-header">
+            <h2>基本面</h2>
+          </div>
+          <div id="stock-detail-fundamentals" class="detail-grid muted">加载中...</div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>最近入选信息</h2>
+          </div>
+          <div id="stock-detail-selection" class="detail-grid muted">加载中...</div>
         </article>
       </section>
 

@@ -93,6 +93,10 @@
   gap: 10px 14px;
 }
 
+.stock-detail-panels .card {
+  height: 100%;
+}
+
 @media (max-width: 960px) {
   .quick-links,
   .strategy-grid,
