@@ -14,6 +14,10 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
+      <div class="global-stock-search">
+        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
+        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
+      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
@@ -58,10 +62,6 @@
           <div class="card-header">
             <h2>快捷入口</h2>
             <p class="muted">常用功能入口。</p>
-          </div>
-          <div class="actions inline-search-actions">
-            <input id="stock-quick-search" type="text" placeholder="输入股票代码，如 sh.600000" />
-            <button id="stock-quick-search-btn" class="btn btn-secondary" type="button">查看个股</button>
           </div>
           <div class="quick-links">
             <a class="quick-link-card" href="/selection">

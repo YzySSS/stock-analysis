@@ -74,13 +74,22 @@
   flex-wrap: wrap;
 }
 
-.inline-search-actions input {
-  min-width: 260px;
+.inline-search-actions input,
+.global-stock-search input {
+  min-width: 0;
+  width: 100%;
   background: var(--panel-soft);
   border: 1px solid var(--panel-border);
   color: var(--text);
   border-radius: 10px;
   padding: 10px 12px;
+}
+
+.global-stock-search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 
 .align-end {

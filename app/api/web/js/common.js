@@ -76,6 +76,11 @@ function bindStockQuickSearch(inputSelector, buttonSelector) {
   });
 }
 
+function bindGlobalStockSearch() {
+  bindStockQuickSearch('[data-global-stock-search-input]', '[data-global-stock-search-btn]');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   setActiveNav();
+  bindGlobalStockSearch();
 });

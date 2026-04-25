@@ -48,6 +48,5 @@ async function loadHomePage() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  bindStockQuickSearch('#stock-quick-search', '#stock-quick-search-btn');
   loadHomePage();
 });
