@@ -14,9 +14,14 @@ def serve_page(filename: str) -> FileResponse:
     return FileResponse(PAGES_DIR / filename)
 
 
-@router.get("/", include_in_schema=False)
+@router.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def home() -> FileResponse:
     return serve_page("home.html")
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(WEB_DIR / "assets" / "favicon.png", media_type="image/png")
 
 
 @router.get("/selection", include_in_schema=False)
