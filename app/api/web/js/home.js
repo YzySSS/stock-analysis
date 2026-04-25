@@ -27,19 +27,23 @@ async function loadHomePage() {
     avgChange.classList.add(getPctClass(data.latest_tracking_avg_price_change_pct));
 
     if (!items.length) {
-      trackingPreview.innerHTML = renderEmptyRow(4, '暂无跟踪数据');
+      trackingPreview.innerHTML = '<div class="empty-state">暂无跟踪数据</div>';
       return;
     }
 
     trackingPreview.innerHTML = items.map((item) => {
       const pct = item.price_change_pct;
       return `
-        <tr>
-          <td><a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.code || '')}</a></td>
-          <td>${escapeHtml(item.name || '')}</td>
-          <td>${escapeHtml(item.strategy_display_name || item.strategy_id || '')}</td>
-          <td class="${getPctClass(pct)}">${formatPercent(pct)}</td>
-        </tr>
+        <a class="preview-item" href="/stocks/${encodeURIComponent(item.code || '')}">
+          <div class="preview-main">
+            <strong>${escapeHtml(item.code || '')}</strong>
+            <span>${escapeHtml(item.name || '')}</span>
+          </div>
+          <div class="preview-side">
+            <span class="muted">${escapeHtml(item.strategy_display_name || item.strategy_id || '')}</span>
+            <strong class="${getPctClass(pct)}">${formatPercent(pct)}</strong>
+          </div>
+        </a>
       `;
     }).join('');
   } catch (error) {
@@ -51,7 +55,7 @@ async function loadHomePage() {
     latestTradeDate.textContent = '加载失败';
     trackingCount.textContent = '加载失败';
     avgChange.textContent = '加载失败';
-    trackingPreview.innerHTML = renderEmptyRow(4, error.message);
+    trackingPreview.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
   }
 }
 
