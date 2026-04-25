@@ -1,20 +1,30 @@
 async function loadSystemPage() {
   const panel = qs('#system-health-panel');
   try {
-    const data = await fetchJson('/api/health');
-    const hasMessage = Object.prototype.hasOwnProperty.call(data, 'message') && data.message != null && data.message !== '';
+    const data = await fetchJson('/api/system/status');
+    const counts = data.table_counts || {};
+    const latest = data.latest || {};
+
     panel.innerHTML = `
       <div class="status-row">
         <span class="badge ${data.status === 'ok' ? 'status-ok' : 'status-error'}">${escapeHtml(data.status || 'unknown')}</span>
+        <span class="muted">DB: ${escapeHtml(data.health?.database || '-')}</span>
       </div>
       <div class="status-detail">
-        <div><strong>message:</strong> ${hasMessage ? escapeHtml(data.message) : '健康检查接口未返回 message 字段'}</div>
+        <div><strong>MySQL 版本:</strong> ${escapeHtml(data.health?.version || '-')}</div>
+        <div><strong>stock_basic:</strong> ${escapeHtml(counts.stock_basic ?? '-')}</div>
+        <div><strong>daily_kline:</strong> ${escapeHtml(counts.daily_kline ?? '-')}</div>
+        <div><strong>selection_result:</strong> ${escapeHtml(counts.selection_result ?? '-')}</div>
+        <div><strong>最新 K 线日期:</strong> ${escapeHtml(latest.daily_kline_latest_trade_date || '-')}</div>
+        <div><strong>最近选股写入:</strong> ${escapeHtml(latest.selection_result_latest_created_at || '-')}</div>
+        <div><strong>最近选股交易日:</strong> ${escapeHtml(latest.selection_result_latest_trade_date || '-')}</div>
+        <div><strong>最近基础信息更新时间:</strong> ${escapeHtml(latest.stock_basic_latest_updated_at || '-')}</div>
         <div><strong>raw:</strong></div>
         <pre class="code-block small-code">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
       </div>
     `;
   } catch (error) {
-    panel.innerHTML = `<div class="error-box">加载健康状态失败: ${escapeHtml(error.message)}</div>`;
+    panel.innerHTML = `<div class="error-box">加载系统状态失败: ${escapeHtml(error.message)}</div>`;
   }
 }
 
