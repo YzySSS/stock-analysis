@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from app.error_learning.models import SelectionTrackingRecord
@@ -118,15 +119,40 @@ class SelectionResultTracker:
             return None
         return value if value == value else None
 
+    @staticmethod
+    def _to_date(value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            return datetime.fromisoformat(str(value)).date()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _calc_tracking_days(start: date | None, end: date | None) -> int | None:
+        if not start or not end:
+            return None
+        return max((end - start).days, 0)
+
     def _build_record_from_selection_result(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
         selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
+        selection_dt = self._to_date(row.get("selection_date"))
+        latest_dt = self._to_date(row.get("latest_trade_date"))
         base_price = selected_close_price or selected_open_price
         price_change_pct = None
         if base_price and current_price:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
+        tracking_days = self._calc_tracking_days(selection_dt, latest_dt)
+        review_status = "tracking" if latest_dt and selection_dt and latest_dt >= selection_dt else "pending"
+        max_gain_pct = price_change_pct if price_change_pct is not None and price_change_pct > 0 else 0.0 if price_change_pct is not None else None
+        max_drawdown_pct = price_change_pct if price_change_pct is not None and price_change_pct < 0 else 0.0 if price_change_pct is not None else None
 
         metadata = row.get("metadata_json")
         if isinstance(metadata, str):
@@ -162,6 +188,10 @@ class SelectionResultTracker:
             price_change_pct=price_change_pct,
             reason_summary=explain.get("reasons") or [],
             risk_summary=explain.get("risks") or [],
+            tracking_days=tracking_days,
+            review_status=review_status,
+            max_gain_pct=max_gain_pct,
+            max_drawdown_pct=max_drawdown_pct,
         )
 
     def _build_record_from_snapshot(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
@@ -169,10 +199,16 @@ class SelectionResultTracker:
         selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
+        selection_dt = self._to_date(row.get("selection_date"))
+        latest_dt = self._to_date(row.get("latest_trade_date"))
         base_price = selected_close_price or selected_open_price
         price_change_pct = None
         if base_price and current_price:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
+        tracking_days = self._calc_tracking_days(selection_dt, latest_dt)
+        review_status = "tracking" if latest_dt and selection_dt and latest_dt >= selection_dt else "pending"
+        max_gain_pct = price_change_pct if price_change_pct is not None and price_change_pct > 0 else 0.0 if price_change_pct is not None else None
+        max_drawdown_pct = price_change_pct if price_change_pct is not None and price_change_pct < 0 else 0.0 if price_change_pct is not None else None
 
         factor_scores = {
             "pe_tushare": self._to_float(row.get("pe_tushare")),
@@ -201,6 +237,10 @@ class SelectionResultTracker:
             price_change_pct=price_change_pct,
             reason_summary=[],
             risk_summary=[],
+            tracking_days=tracking_days,
+            review_status=review_status,
+            max_gain_pct=max_gain_pct,
+            max_drawdown_pct=max_drawdown_pct,
         )
 
     def to_dict_list(self, records: List[SelectionTrackingRecord]) -> List[Dict[str, Any]]:
@@ -223,6 +263,10 @@ class SelectionResultTracker:
                 "price_change_pct": item.price_change_pct,
                 "reason_summary": item.reason_summary or [],
                 "risk_summary": item.risk_summary or [],
+                "tracking_days": item.tracking_days,
+                "review_status": item.review_status,
+                "max_gain_pct": item.max_gain_pct,
+                "max_drawdown_pct": item.max_drawdown_pct,
             }
             for item in records
         ]

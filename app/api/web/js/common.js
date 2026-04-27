@@ -95,27 +95,41 @@ function ensureTooltip() {
 function bindTooltips() {
   const tooltip = ensureTooltip();
 
+  const show = (element) => {
+    tooltip.textContent = element.getAttribute('data-tooltip') || '';
+    const rect = element.getBoundingClientRect();
+    tooltip.hidden = false;
+    tooltip.style.top = `${window.scrollY + rect.bottom + 8}px`;
+    tooltip.style.left = `${Math.min(window.scrollX + rect.left, window.scrollX + window.innerWidth - 340)}px`;
+  };
+
+  const hide = () => {
+    tooltip.hidden = true;
+  };
+
   qsa('[data-tooltip]').forEach((element) => {
     if (element.dataset.tooltipBound === 'true') return;
     element.dataset.tooltipBound = 'true';
 
-    const show = () => {
-      tooltip.textContent = element.getAttribute('data-tooltip') || '';
-      const rect = element.getBoundingClientRect();
-      tooltip.hidden = false;
-      tooltip.style.top = `${window.scrollY + rect.bottom + 8}px`;
-      tooltip.style.left = `${Math.min(window.scrollX + rect.left, window.scrollX + window.innerWidth - 340)}px`;
-    };
-
-    const hide = () => {
-      tooltip.hidden = true;
-    };
-
-    element.addEventListener('mouseenter', show);
-    element.addEventListener('focus', show);
+    element.addEventListener('mouseenter', () => show(element));
+    element.addEventListener('focus', () => show(element));
     element.addEventListener('mouseleave', hide);
     element.addEventListener('blur', hide);
+    element.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (!tooltip.hidden && tooltip.textContent === (element.getAttribute('data-tooltip') || '')) {
+        hide();
+      } else {
+        show(element);
+      }
+    });
   });
+
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-tooltip]') && !event.target.closest('[data-shared-tooltip]')) {
+      hide();
+    }
+  }, { once: true });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

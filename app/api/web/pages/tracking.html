@@ -37,20 +37,24 @@
 
       <section class="stat-grid compact-stats">
         <article class="stat-card">
-          <div class="stat-label">条目数</div>
+          <div class="stat-label">复盘条目数</div>
           <div id="tracking-stat-count" class="stat-value">-</div>
         </article>
         <article class="stat-card">
-          <div class="stat-label">上涨数</div>
-          <div id="tracking-stat-up" class="stat-value up">-</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">下跌数</div>
-          <div id="tracking-stat-down" class="stat-value down">-</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">平均涨跌幅</div>
+          <div class="stat-label">平均收益率</div>
           <div id="tracking-stat-avg" class="stat-value">-</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">胜率</div>
+          <div id="tracking-stat-win-rate" class="stat-value">-</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">最大浮盈</div>
+          <div id="tracking-stat-max-gain" class="stat-value up">-</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">最大回撤</div>
+          <div id="tracking-stat-max-drawdown" class="stat-value down">-</div>
         </article>
       </section>
 
@@ -86,25 +90,33 @@
 
       <section class="card">
         <div class="card-header">
-          <h2>跟踪结果</h2>
+          <h2>复盘概览</h2>
           <p id="tracking-summary-text" class="muted">正在加载...</p>
+        </div>
+        <div id="tracking-review-summary" class="list-stack empty-state">加载中...</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>个股复盘列表</h2>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>代码</th>
-                <th>名称</th>
+                <th>股票</th>
                 <th>选股日期</th>
-                <th>策略</th>
-                <th>分数</th>
-                <th>开盘价</th>
-                <th>现价</th>
-                <th>涨跌幅</th>
+                <th>入选价</th>
+                <th>最新价</th>
+                <th>区间收益</th>
+                <th>跟踪天数</th>
+                <th>最大浮盈</th>
+                <th>最大回撤</th>
+                <th>状态</th>
               </tr>
             </thead>
             <tbody id="tracking-results-body">
-              <tr><td colspan="8" class="muted">加载中...</td></tr>
+              <tr><td colspan="9" class="muted">加载中...</td></tr>
             </tbody>
           </table>
         </div>

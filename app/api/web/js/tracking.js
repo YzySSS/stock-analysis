@@ -1,22 +1,30 @@
-function updateTrackingStats(items) {
-  const pctValues = items
-    .map((item) => Number(item.price_change_pct))
-    .filter((value) => !Number.isNaN(value));
+function updateTrackingStats(summary = {}, items = []) {
+  qs('#tracking-stat-count').textContent = String(summary.count ?? items.length ?? 0);
+  qs('#tracking-stat-avg').textContent = formatPercent(summary.avg_return_pct);
+  qs('#tracking-stat-win-rate').textContent = formatPercent(summary.win_rate_pct);
+  qs('#tracking-stat-max-gain').textContent = formatPercent(summary.max_gain_pct);
+  qs('#tracking-stat-max-drawdown').textContent = formatPercent(summary.max_drawdown_pct);
+}
 
-  const upCount = pctValues.filter((value) => value >= 0).length;
-  const downCount = pctValues.filter((value) => value < 0).length;
-  const avg = pctValues.length ? pctValues.reduce((sum, value) => sum + value, 0) / pctValues.length : null;
-
-  qs('#tracking-stat-count').textContent = String(items.length);
-  qs('#tracking-stat-up').textContent = String(upCount);
-  qs('#tracking-stat-down').textContent = String(downCount);
-  qs('#tracking-stat-avg').textContent = formatPercent(avg);
+function renderReviewSummary(summary = {}, runId = '') {
+  const container = qs('#tracking-review-summary');
+  container.innerHTML = `
+    <article class="strategy-item">
+      <div class="strategy-item-head">
+        <strong>${runId ? `run_id: ${escapeHtml(runId)}` : '最新复盘快照'}</strong>
+        <span class="badge status-ok">${summary.count ?? 0} 条</span>
+      </div>
+      <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)}</div>
+      <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
+      <div class="muted">这一区域后续可继续补策略稳定性、超额收益和失败归因。</div>
+    </article>
+  `;
 }
 
 function renderTrackingTable(items) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(8, '暂无跟踪数据');
+    body.innerHTML = renderEmptyRow(9, '暂无跟踪数据');
     return;
   }
 
@@ -24,22 +32,26 @@ function renderTrackingTable(items) {
     const pct = item.price_change_pct;
     return `
       <tr>
-        <td><a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.code || '')}</a></td>
-        <td>${escapeHtml(item.name || '')}</td>
+        <td>
+          <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '')}</a>
+          <div class="muted">${escapeHtml(item.code || '')}</div>
+        </td>
         <td>${escapeHtml(item.selection_date || '')}</td>
-        <td>${escapeHtml(item.strategy_display_name || item.strategy_id || '')}</td>
-        <td>${formatNumber(item.score, 2)}</td>
-        <td>${formatNumber(item.selected_open_price, 2)}</td>
+        <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
         <td class="${getPctClass(pct)}">${formatPercent(pct)}</td>
+        <td>${item.tracking_days ?? '-'}</td>
+        <td class="up">${formatPercent(item.max_gain_pct)}</td>
+        <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
+        <td>${escapeHtml(item.review_status || '-')}</td>
       </tr>
     `;
   }).join('');
 }
 
 async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stock' } = {}) {
-  const summary = qs('#tracking-summary-text');
-  summary.textContent = '加载中...';
+  const summaryText = qs('#tracking-summary-text');
+  summaryText.textContent = '加载中...';
 
   const url = runId
     ? `/api/tracking?run_id=${encodeURIComponent(runId)}&limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}`
@@ -47,11 +59,13 @@ async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stoc
 
   const data = await fetchJson(url);
   const items = data.items || [];
+  const summary = data.summary || {};
   renderTrackingTable(items);
-  updateTrackingStats(items);
-  summary.textContent = runId
-    ? `当前显示 run_id=${runId} 的结果，共 ${items.length} 条`
-    : `当前显示最新 tracking 快照，共 ${items.length} 条`;
+  updateTrackingStats(summary, items);
+  renderReviewSummary(summary, runId);
+  summaryText.textContent = runId
+    ? `当前显示 run_id=${runId} 的复盘结果，共 ${items.length} 条`
+    : `当前显示最新复盘快照，共 ${items.length} 条`;
 }
 
 async function handleTrackingFilter(event) {
@@ -64,7 +78,7 @@ async function handleTrackingFilter(event) {
     });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `加载失败: ${error.message}`;
-    qs('#tracking-results-body').innerHTML = renderEmptyRow(8, error.message);
+    qs('#tracking-results-body').innerHTML = renderEmptyRow(9, error.message);
   }
 }
 
@@ -82,6 +96,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadTrackingData();
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
-    qs('#tracking-results-body').innerHTML = renderEmptyRow(8, error.message);
+    qs('#tracking-results-body').innerHTML = renderEmptyRow(9, error.message);
   }
 });
