@@ -12,9 +12,15 @@ router = APIRouter(tags=["strategies"])
 @router.get("/strategies")
 def list_strategies() -> dict:
     service = StrategyService()
+    strategies = service.list_strategies()
     return {
         "default_strategy": service.get_default_strategy_id(),
-        "strategies": service.list_strategies(),
+        "summary": {
+            "count": len(strategies),
+            "current_count": len([item for item in strategies if item.get("mode") == "current"]),
+            "legacy_count": len([item for item in strategies if item.get("mode") == "legacy"]),
+        },
+        "strategies": strategies,
     }
 
 

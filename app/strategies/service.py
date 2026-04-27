@@ -11,14 +11,18 @@ class StrategyService:
         self.loader = StrategyLoader(registry_path=registry_path)
 
     def list_strategies(self) -> List[Dict[str, Any]]:
+        default_strategy = self.get_default_strategy_id()
         return [
             {
                 "id": item.get("id"),
                 "display_name": item.get("display_name"),
                 "version": item.get("version"),
                 "status": item.get("status"),
+                "mode": item.get("mode") or "current",
                 "description": item.get("description"),
                 "tags": item.get("tags", []),
+                "executable": bool(item.get("executable", True)),
+                "is_default": item.get("id") == default_strategy,
             }
             for item in self.loader.registry.get("strategies", [])
         ]
@@ -35,8 +39,11 @@ class StrategyService:
         meta = self.get_strategy_meta(final_strategy_id)
         config = self.loader.load_config(final_strategy_id)
         factor_configs = config.get("factors", {}) or {}
-        selector = StockSelector(strategy_id=final_strategy_id)
-        factor_stats = selector.build_factor_analysis(instrument_type=instrument_type, limit=sample_limit)
+        executable = bool(meta.get("executable", True))
+        factor_stats = {}
+        if executable:
+            selector = StockSelector(strategy_id=final_strategy_id)
+            factor_stats = selector.build_factor_analysis(instrument_type=instrument_type, limit=sample_limit)
 
         factor_items = []
         for key, factor_meta in factor_configs.items():
@@ -53,7 +60,8 @@ class StrategyService:
                     "ci": stat.get("ci", factor_meta.get("ci_hint")),
                     "coverage": stat.get("coverage"),
                     "missing_rate": stat.get("missing_rate"),
-                    "sample_size": stat.get("sample_size"),
+                    "sample_size": stat.get("sample_size") if stat else None,
+                    "is_placeholder": not bool(stat),
                 }
             )
 
@@ -62,11 +70,13 @@ class StrategyService:
             "display_name": meta.get("display_name"),
             "version": meta.get("version"),
             "status": meta.get("status"),
+            "mode": meta.get("mode") or "current",
+            "executable": executable,
             "description": meta.get("description"),
             "tags": meta.get("tags", []),
             "score_threshold": config.get("selection", {}).get("score_threshold"),
             "max_picks": config.get("selection", {}).get("max_picks"),
-            "factor_sample_size": sample_limit,
+            "factor_sample_size": sample_limit if executable else None,
             "factors": factor_items,
         }
 

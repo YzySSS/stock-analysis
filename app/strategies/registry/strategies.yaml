@@ -1,15 +1,34 @@
-default_strategy: v13_three_factor
+default_strategy: lowvol_reversal
 
 strategies:
-  - id: v13_three_factor
-    name: V13 三因子策略
-    version: 0.1.0
+  - id: lowvol_reversal
+    display_name: 低波动反转策略
+    entrypoint: app.strategies.active.lowvol_reversal_strategy.LowVolReversalStrategy
+    config_path: app/strategies/registry/configs/lowvol_reversal.yaml
+    version: v1
     status: active
+    mode: current
+    executable: true
+    tags: [lowvol, reversal, core]
+    description: 基于换手率、低波动和短期反转的基础选股策略
+
+  - id: v13_three_factor
+    display_name: V13 三因子策略
     entrypoint: app.strategies.active.v13_three_factor.strategy.V13ThreeFactorStrategy
-    config_path: app/strategies/active/v13_three_factor/config.yaml
-    tags:
-      - core
-      - alpha
-      - three-factor
-      - mysql
-      - tencent-cloud
+    config_path: app/strategies/registry/configs/v13_three_factor.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [turnover, lowvol, reversal, v13]
+    description: 新架构下的三因子策略骨架，已具备基础因子定义与近似打分逻辑
+
+  - id: v12_legacy
+    display_name: V12 多因子策略
+    config_path: app/strategies/registry/configs/v12_legacy.yaml
+    version: 1.1-fixed
+    status: legacy
+    mode: legacy
+    executable: false
+    tags: [trend, momentum, quality, sentiment, value, v12]
+    description: 历史版本多因子策略，当前仅纳入页面展示，尚未迁入现有执行链路

@@ -1,0 +1,29 @@
+selection:
+  score_threshold: 60
+  max_picks: 5
+
+factors:
+  turnover:
+    name: 换手因子
+    category: liquidity
+    description: 反映资金活跃度与成交承接，当前偏向低换手稳定区间筛选。
+    direction: positive
+    weight: 0.35
+    enabled: true
+    ci_hint: 0.12
+  lowvol:
+    name: 低波因子
+    category: stability
+    description: 反映近期波动是否温和，波动越低通常更利于稳健持有。
+    direction: positive
+    weight: 0.35
+    enabled: true
+    ci_hint: 0.16
+  reversal:
+    name: 反转因子
+    category: momentum
+    description: 反映短期超跌修复潜力，用于捕捉回弹机会。
+    direction: positive
+    weight: 0.30
+    enabled: true
+    ci_hint: 0.10

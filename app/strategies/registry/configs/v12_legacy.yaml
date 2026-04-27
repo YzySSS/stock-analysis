@@ -1,0 +1,45 @@
+selection:
+  score_threshold: 50
+  max_picks: 3
+
+factors:
+  trend:
+    name: 趋势因子
+    category: trend
+    description: 反映价格趋势延续性，是 V12 旧版多因子结构的一部分。
+    direction: positive
+    weight: 0.25
+    enabled: true
+    ci_hint: 0.08
+  momentum:
+    name: 动量因子
+    category: momentum
+    description: 反映阶段性强弱与价格惯性。
+    direction: positive
+    weight: 0.25
+    enabled: true
+    ci_hint: 0.07
+  quality:
+    name: 质量因子
+    category: quality
+    description: 反映盈利质量与财务稳健程度。
+    direction: positive
+    weight: 0.20
+    enabled: true
+    ci_hint: 0.05
+  sentiment:
+    name: 情绪因子
+    category: sentiment
+    description: 反映市场短期情绪与前一交易日涨跌反馈。
+    direction: positive
+    weight: 0.20
+    enabled: true
+    ci_hint: 0.04
+  value:
+    name: 估值因子
+    category: value
+    description: 反映估值安全边际，是 V12 中的辅助因子。
+    direction: positive
+    weight: 0.10
+    enabled: true
+    ci_hint: 0.06

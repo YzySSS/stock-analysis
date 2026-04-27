@@ -32,6 +32,7 @@
         <div>
           <p class="eyebrow">Strategies</p>
           <h1>策略管理</h1>
+          <p class="page-subtitle">在这里看策略体系、版本状态和因子分析，不再把完整因子表塞在选股结果页里。</p>
         </div>
         <div class="header-actions">
           <button id="refresh-strategies-page" class="btn btn-secondary" type="button">刷新策略</button>
@@ -47,6 +48,14 @@
           <div class="stat-label">策略数量</div>
           <div id="strategies-count" class="stat-value">加载中...</div>
         </article>
+        <article class="stat-card">
+          <div class="stat-label">当前策略</div>
+          <div id="strategies-current-count" class="stat-value">加载中...</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">历史/待迁移</div>
+          <div id="strategies-legacy-count" class="stat-value">加载中...</div>
+        </article>
       </section>
 
       <section class="card">
@@ -54,6 +63,40 @@
           <h2>策略列表</h2>
         </div>
         <div id="strategies-list" class="strategy-grid empty-state">加载中...</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>策略详情</h2>
+        </div>
+        <div id="strategy-detail" class="strategy-detail empty-state">请选择策略</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>因子分析</h2>
+        </div>
+        <div id="strategy-factor-summary" class="muted">请选择策略后查看因子分析</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>因子名</th>
+                <th>类别</th>
+                <th>方向</th>
+                <th>权重</th>
+                <th>CI</th>
+                <th>覆盖率</th>
+                <th>缺失率</th>
+                <th>启用</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody id="strategy-factors-body">
+              <tr><td colspan="9" class="empty-state">请选择策略</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>
