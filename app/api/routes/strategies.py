@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Optional
+
+from fastapi import APIRouter, Query
 
 from app.strategies.service import StrategyService
 
@@ -13,4 +15,12 @@ def list_strategies() -> dict:
     return {
         "default_strategy": service.get_default_strategy_id(),
         "strategies": service.list_strategies(),
+    }
+
+
+@router.get("/strategies/detail")
+def get_strategy_detail(strategy_id: Optional[str] = Query(default=None)) -> dict:
+    service = StrategyService()
+    return {
+        "strategy": service.get_strategy_detail(strategy_id=strategy_id),
     }

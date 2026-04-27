@@ -29,6 +29,7 @@ class SelectionResultTracker:
         sql = """
         SELECT
             sr.run_id,
+            sr.rank_no,
             sr.trade_date AS selection_date,
             sr.strategy_id,
             sr.code,
@@ -36,11 +37,22 @@ class SelectionResultTracker:
             sr.metadata_json,
             sb.name,
             sb.instrument_type,
-            dk.open AS selected_open_price,
-            dk.close AS current_price
+            selected_dk.open AS selected_open_price,
+            selected_dk.close AS selected_close_price,
+            latest_dk.trade_date AS latest_trade_date,
+            latest_dk.close AS current_price
         FROM selection_result sr
         INNER JOIN stock_basic sb ON sr.code = sb.code
-        LEFT JOIN daily_kline dk ON sr.code = dk.code AND sr.trade_date = dk.trade_date
+        LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date
+        LEFT JOIN (
+            SELECT d1.code, d1.trade_date, d1.close
+            FROM daily_kline d1
+            INNER JOIN (
+                SELECT code, MAX(trade_date) AS max_date
+                FROM daily_kline
+                GROUP BY code
+            ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
+        ) latest_dk ON sr.code = latest_dk.code
         WHERE sb.instrument_type = %s
         """
         params: List[Any] = [instrument_type]
@@ -73,6 +85,8 @@ class SelectionResultTracker:
             sb.profit_yoy,
             dk.trade_date AS selection_date,
             dk.open AS selected_open_price,
+            dk.close AS selected_close_price,
+            dk.trade_date AS latest_trade_date,
             dk.close AS current_price
         FROM stock_basic sb
         LEFT JOIN (
@@ -106,10 +120,13 @@ class SelectionResultTracker:
 
     def _build_record_from_selection_result(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
+        selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
+        latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
+        base_price = selected_close_price or selected_open_price
         price_change_pct = None
-        if selected_open_price and current_price:
-            price_change_pct = round((current_price - selected_open_price) / selected_open_price * 100, 2)
+        if base_price and current_price:
+            price_change_pct = round((current_price - base_price) / base_price * 100, 2)
 
         metadata = row.get("metadata_json")
         if isinstance(metadata, str):
@@ -118,6 +135,7 @@ class SelectionResultTracker:
             except json.JSONDecodeError:
                 metadata = {}
         metadata = metadata or {}
+        explain = metadata.get("explain", {}) or {}
         raw_metrics = metadata.get("raw_metrics", {})
         factor_scores = {
             **raw_metrics,
@@ -125,6 +143,8 @@ class SelectionResultTracker:
         }
 
         return SelectionTrackingRecord(
+            run_id=row.get("run_id"),
+            rank_no=row.get("rank_no"),
             code=row["code"],
             name=row["name"],
             selection_date=str(row["selection_date"]) if row.get("selection_date") else "",
@@ -134,16 +154,23 @@ class SelectionResultTracker:
             score=self._to_float(row.get("score")),
             factor_scores=factor_scores,
             selected_open_price=selected_open_price,
+            selected_close_price=selected_close_price,
             current_price=current_price,
+            latest_trade_date=latest_trade_date,
             price_change_pct=price_change_pct,
+            reason_summary=explain.get("reasons") or [],
+            risk_summary=explain.get("risks") or [],
         )
 
     def _build_record_from_snapshot(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
+        selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
+        latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
+        base_price = selected_close_price or selected_open_price
         price_change_pct = None
-        if selected_open_price and current_price:
-            price_change_pct = round((current_price - selected_open_price) / selected_open_price * 100, 2)
+        if base_price and current_price:
+            price_change_pct = round((current_price - base_price) / base_price * 100, 2)
 
         factor_scores = {
             "pe_tushare": self._to_float(row.get("pe_tushare")),
@@ -166,13 +193,19 @@ class SelectionResultTracker:
             score=None,
             factor_scores=factor_scores,
             selected_open_price=selected_open_price,
+            selected_close_price=selected_close_price,
             current_price=current_price,
+            latest_trade_date=latest_trade_date,
             price_change_pct=price_change_pct,
+            reason_summary=[],
+            risk_summary=[],
         )
 
     def to_dict_list(self, records: List[SelectionTrackingRecord]) -> List[Dict[str, Any]]:
         return [
             {
+                "run_id": item.run_id,
+                "rank_no": item.rank_no,
                 "code": item.code,
                 "name": item.name,
                 "selection_date": item.selection_date,
@@ -182,8 +215,12 @@ class SelectionResultTracker:
                 "strategy_version": item.strategy_version,
                 "factor_scores": item.factor_scores,
                 "selected_open_price": item.selected_open_price,
+                "selected_close_price": item.selected_close_price,
                 "current_price": item.current_price,
+                "latest_trade_date": item.latest_trade_date,
                 "price_change_pct": item.price_change_pct,
+                "reason_summary": item.reason_summary or [],
+                "risk_summary": item.risk_summary or [],
             }
             for item in records
         ]

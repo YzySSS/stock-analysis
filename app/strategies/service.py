@@ -30,6 +30,35 @@ class StrategyService:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         return self.loader.get_strategy_meta(final_strategy_id)
 
+    def get_strategy_detail(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+        final_strategy_id = strategy_id or self.get_default_strategy_id()
+        meta = self.get_strategy_meta(final_strategy_id)
+        config = self.loader.load_config(final_strategy_id)
+        factor_configs = config.get("factors", {}) or {}
+
+        factor_items = [
+            {
+                "key": key,
+                "name": factor_meta.get("name") or key,
+                "description": factor_meta.get("description") or "",
+                "direction": factor_meta.get("direction") or "positive",
+                "weight": factor_meta.get("weight", 0),
+            }
+            for key, factor_meta in factor_configs.items()
+        ]
+
+        return {
+            "id": meta.get("id"),
+            "display_name": meta.get("display_name"),
+            "version": meta.get("version"),
+            "status": meta.get("status"),
+            "description": meta.get("description"),
+            "tags": meta.get("tags", []),
+            "score_threshold": config.get("selection", {}).get("score_threshold"),
+            "max_picks": config.get("selection", {}).get("max_picks"),
+            "factors": factor_items,
+        }
+
     def run_strategy(
         self,
         strategy_id: Optional[str] = None,

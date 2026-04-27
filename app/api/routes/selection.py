@@ -38,7 +38,20 @@ def get_selection_results(
 
     tracker = SelectionResultTracker()
     records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type, run_id=run_id)
+    items = tracker.to_dict_list(records)
+
+    strategy_id = items[0].get("strategy_id") if items else None
+    service = StrategyService()
+    strategy = service.get_strategy_detail(strategy_id=strategy_id) if strategy_id else None
+
     return {
-        "run_id": run_id,
-        "items": tracker.to_dict_list(records),
+        "run_id": run_id or (items[0].get("run_id") if items else None),
+        "strategy": strategy,
+        "summary": {
+            "selected_trade_date": items[0].get("selection_date") if items else None,
+            "latest_trade_date": items[0].get("latest_trade_date") if items else None,
+            "total_count": len(items),
+            "instrument_type": instrument_type,
+        },
+        "items": items,
     }
