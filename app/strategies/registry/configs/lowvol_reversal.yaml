@@ -5,16 +5,25 @@ selection:
 factors:
   turnover:
     name: 换手活跃度
+    category: liquidity
     description: 反映股票成交与换手活跃程度，用于衡量资金关注度与可交易性。
     direction: positive
     weight: 0.35
+    enabled: true
+    ci_hint: 0.14
   lowvol:
     name: 低波稳定性
+    category: stability
     description: 反映近期价格波动是否温和，波动越低通常代表走势更稳。
     direction: positive
     weight: 0.35
+    enabled: true
+    ci_hint: 0.19
   reversal:
     name: 短期反转弹性
+    category: momentum
     description: 反映短期价格修复与反转潜力，用于捕捉超跌后的回弹机会。
     direction: positive
     weight: 0.30
+    enabled: true
+    ci_hint: 0.11

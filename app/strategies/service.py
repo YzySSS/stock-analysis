@@ -30,22 +30,32 @@ class StrategyService:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         return self.loader.get_strategy_meta(final_strategy_id)
 
-    def get_strategy_detail(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_strategy_detail(self, strategy_id: Optional[str] = None, instrument_type: str = "stock", sample_limit: int = 200) -> Dict[str, Any]:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         meta = self.get_strategy_meta(final_strategy_id)
         config = self.loader.load_config(final_strategy_id)
         factor_configs = config.get("factors", {}) or {}
+        selector = StockSelector(strategy_id=final_strategy_id)
+        factor_stats = selector.build_factor_analysis(instrument_type=instrument_type, limit=sample_limit)
 
-        factor_items = [
-            {
-                "key": key,
-                "name": factor_meta.get("name") or key,
-                "description": factor_meta.get("description") or "",
-                "direction": factor_meta.get("direction") or "positive",
-                "weight": factor_meta.get("weight", 0),
-            }
-            for key, factor_meta in factor_configs.items()
-        ]
+        factor_items = []
+        for key, factor_meta in factor_configs.items():
+            stat = factor_stats.get(key, {})
+            factor_items.append(
+                {
+                    "key": key,
+                    "name": factor_meta.get("name") or key,
+                    "category": factor_meta.get("category") or "general",
+                    "description": factor_meta.get("description") or "",
+                    "direction": factor_meta.get("direction") or "positive",
+                    "weight": factor_meta.get("weight", 0),
+                    "enabled": factor_meta.get("enabled", True),
+                    "ci": stat.get("ci", factor_meta.get("ci_hint")),
+                    "coverage": stat.get("coverage"),
+                    "missing_rate": stat.get("missing_rate"),
+                    "sample_size": stat.get("sample_size"),
+                }
+            )
 
         return {
             "id": meta.get("id"),
@@ -56,6 +66,7 @@ class StrategyService:
             "tags": meta.get("tags", []),
             "score_threshold": config.get("selection", {}).get("score_threshold"),
             "max_picks": config.get("selection", {}).get("max_picks"),
+            "factor_sample_size": sample_limit,
             "factors": factor_items,
         }
 

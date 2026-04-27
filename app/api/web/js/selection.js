@@ -51,17 +51,22 @@ function renderFactorAnalysis(strategy) {
   const body = qs('#factor-analysis-body');
   const items = strategy?.factors || [];
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(5, '暂无因子配置');
+    body.innerHTML = renderEmptyRow(10, '暂无因子配置');
     return;
   }
 
   body.innerHTML = items.map((item) => `
     <tr>
       <td>${escapeHtml(item.name || item.key || '')}</td>
+      <td>${escapeHtml(item.category || 'general')}</td>
       <td>${escapeHtml(item.direction || 'positive')}</td>
       <td>${formatNumber(item.weight, 2)}</td>
+      <td>${formatNumber(item.ci, 4)}</td>
+      <td>${formatPercent(item.coverage)}</td>
+      <td>${formatPercent(item.missing_rate)}</td>
+      <td><span class="badge ${item.enabled === false ? 'status-warn' : 'status-ok'}">${item.enabled === false ? '关闭' : '启用'}</span></td>
       <td>${escapeHtml(item.description || '')}</td>
-      <td><button class="icon-help" type="button" data-tooltip="因子：${escapeHtml(item.name || item.key || '')}\n方向：${escapeHtml(item.direction || 'positive')}\n说明：${escapeHtml(item.description || '暂无')}">ⓘ</button></td>
+      <td><button class="icon-help" type="button" data-tooltip="因子：${escapeHtml(item.name || item.key || '')}\n类别：${escapeHtml(item.category || 'general')}\n方向：${escapeHtml(item.direction || 'positive')}\n权重：${formatNumber(item.weight, 2)}\nCI：${formatNumber(item.ci, 4)}\n覆盖率：${formatPercent(item.coverage)}\n缺失率：${formatPercent(item.missing_rate)}\n样本量：${escapeHtml(item.sample_size ?? '-')}\n说明：${escapeHtml(item.description || '暂无')}">ⓘ</button></td>
     </tr>
   `).join('');
 }
@@ -184,7 +189,8 @@ async function loadStrategies() {
 }
 
 async function loadStrategyDetail(strategyId) {
-  const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId || currentDefaultStrategy || '')}`);
+  const instrumentType = qs('#instrument-type')?.value || 'stock';
+  const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId || currentDefaultStrategy || '')}&instrument_type=${encodeURIComponent(instrumentType)}&sample_limit=200`);
   renderStrategySummary(data.strategy);
   renderFactorAnalysis(data.strategy);
 }

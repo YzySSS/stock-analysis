@@ -243,6 +243,40 @@ class StockSelector:
             "fundamental_context": item.get("fundamental_context", {}),
         }
 
+    @staticmethod
+    def _factor_coverage(candidates: List[Dict[str, Any]], field: str) -> Dict[str, Any]:
+        total = len(candidates)
+        present = len([item for item in candidates if item.get(field) is not None])
+        coverage = round((present / total) * 100, 2) if total else None
+        missing_rate = round(100 - coverage, 2) if coverage is not None else None
+        return {
+            "sample_size": total,
+            "coverage": coverage,
+            "missing_rate": missing_rate,
+        }
+
+    def build_factor_analysis(self, instrument_type: str = "stock", limit: int = 200) -> Dict[str, Dict[str, Any]]:
+        data_bundle = self.load_candidates_from_mysql(limit=limit, instrument_type=instrument_type)
+        candidates = data_bundle.get("candidates", [])
+        stats = {
+            "turnover": self._factor_coverage(candidates, "turnover_score"),
+            "lowvol": self._factor_coverage(candidates, "lowvol_score"),
+            "reversal": self._factor_coverage(candidates, "reversal_score"),
+        }
+        ci_mapping = {
+            "turnover": "turnover_score",
+            "lowvol": "lowvol_score",
+            "reversal": "reversal_score",
+        }
+        for key, field in ci_mapping.items():
+            values = [float(item.get(field)) for item in candidates if item.get(field) is not None]
+            avg = round(sum(values) / len(values), 4) if values else None
+            if avg is not None:
+                stats[key]["ci"] = round(avg - 0.5, 4)
+            else:
+                stats[key]["ci"] = None
+        return stats
+
     def run(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
         context = self.strategy.prepare_context(data_bundle)
         factor_rows = self.strategy.compute_factors(context)
