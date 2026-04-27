@@ -8,6 +8,12 @@ function renderStrategySummary(strategy) {
   }
 
   const factors = strategy.factors || [];
+  const helpText = [
+    strategy.description || '暂无策略说明',
+    `阈值：${strategy.score_threshold ?? '-'}，最多入选：${strategy.max_picks ?? '-'}`,
+    `核心因子：${factors.map((item) => item.name || item.key || '-').join(' / ') || '暂无'}`,
+  ].join('｜');
+
   container.innerHTML = `
     <div class="strategy-item">
       <div class="strategy-item-head">
@@ -18,6 +24,7 @@ function renderStrategySummary(strategy) {
       <div>${escapeHtml(strategy.description || '')}</div>
       <div class="muted">阈值: ${strategy.score_threshold ?? '-'} · 最多入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
+      <div class="muted">策略说明 <span title="${escapeHtml(helpText)}">ⓘ</span></div>
     </div>
   `;
 }
@@ -26,7 +33,7 @@ function renderFactorAnalysis(strategy) {
   const body = qs('#factor-analysis-body');
   const items = strategy?.factors || [];
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(4, '暂无因子配置');
+    body.innerHTML = renderEmptyRow(5, '暂无因子配置');
     return;
   }
 
@@ -36,6 +43,7 @@ function renderFactorAnalysis(strategy) {
       <td>${escapeHtml(item.direction || 'positive')}</td>
       <td>${formatNumber(item.weight, 2)}</td>
       <td>${escapeHtml(item.description || '')}</td>
+      <td><span title="因子：${escapeHtml(item.name || item.key || '')}｜方向：${escapeHtml(item.direction || 'positive')}｜说明：${escapeHtml(item.description || '暂无')} ">ⓘ</span></td>
     </tr>
   `).join('');
 }
@@ -49,13 +57,24 @@ function renderSelectionResults(data) {
   summaryLine.textContent = `选股日期：${summary.selected_trade_date || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${summary.total_count || 0} 条`;
 
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(9, '暂无选股结果');
+    body.innerHTML = renderEmptyRow(10, '暂无选股结果');
     return;
   }
 
-  body.innerHTML = items.map((item) => {
+  body.innerHTML = items.map((item, index) => {
     const reasons = (item.reason_summary || []).slice(0, 2).join('；') || '-';
     const risks = (item.risk_summary || []).slice(0, 2).join('；') || '-';
+    const detailId = `selection-detail-${index}`;
+    const factorScores = item.factor_scores || {};
+    const detailText = [
+      `策略：${item.strategy_display_name || item.strategy_id || '-'}`,
+      `最新交易日：${item.latest_trade_date || '-'}`,
+      `开盘入选价：${item.selected_open_price ?? '-'}`,
+      `收盘入选价：${item.selected_close_price ?? '-'}`,
+      `因子摘要：turnover=${factorScores.turnover ?? '-'}, lowvol=${factorScores.lowvol ?? '-'}, reversal=${factorScores.reversal ?? '-'}`,
+      `详细原因：${(item.reason_summary || []).join('；') || '-'}`,
+      `详细风险：${(item.risk_summary || []).join('；') || '-'}`,
+    ].join('\n');
     return `
       <tr>
         <td>
@@ -70,9 +89,25 @@ function renderSelectionResults(data) {
         <td>${item.rank_no ?? '-'}</td>
         <td>${escapeHtml(reasons)}</td>
         <td>${escapeHtml(risks)}</td>
+        <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" title="${escapeHtml(detailText)}">查看</button></td>
+      </tr>
+      <tr id="${detailId}" class="selection-detail-row" hidden>
+        <td colspan="10">
+          <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')}</div>
+          <div class="muted">因子摘要：turnover=${escapeHtml(String(factorScores.turnover ?? '-'))} / lowvol=${escapeHtml(String(factorScores.lowvol ?? '-'))} / reversal=${escapeHtml(String(factorScores.reversal ?? '-'))}</div>
+          <div class="muted">详细原因：${escapeHtml((item.reason_summary || []).join('；') || '-')}</div>
+          <div class="muted">详细风险：${escapeHtml((item.risk_summary || []).join('；') || '-')}</div>
+        </td>
       </tr>
     `;
   }).join('');
+
+  body.querySelectorAll('[data-selection-detail]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const detailRow = qs(`#${button.getAttribute('data-selection-detail')}`);
+      if (detailRow) detailRow.hidden = !detailRow.hidden;
+    });
+  });
 }
 
 async function loadStrategies() {
