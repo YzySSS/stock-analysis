@@ -37,6 +37,31 @@ def _sample_size(instrument_type: str) -> int:
             return int(row.get("count") or 0)
 
 
+def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None) -> dict:
+    sql = """
+    SELECT
+        sr.run_id,
+        sr.trade_date,
+        sr.strategy_id,
+        MAX(sr.created_at) AS created_at
+    FROM selection_result sr
+    INNER JOIN stock_basic sb ON sr.code = sb.code
+    WHERE sb.instrument_type = %s
+    """
+    params = [instrument_type]
+    if run_id:
+        sql += " AND sr.run_id = %s"
+        params.append(run_id)
+    else:
+        sql += " AND sr.run_id = (SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1)"
+    sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY created_at DESC LIMIT 1"
+
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchone() or {}
+
+
 @router.get("/selection/results")
 def get_selection_results(
     run_id: Optional[str] = Query(default=None),
@@ -48,16 +73,18 @@ def get_selection_results(
     tracker = SelectionResultTracker()
     records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type, run_id=run_id)
     items = tracker.to_dict_list(records)
+    run_meta = _latest_run_meta(instrument_type=instrument_type, run_id=run_id)
 
-    strategy_id = items[0].get("strategy_id") if items else None
+    strategy_id = items[0].get("strategy_id") if items else run_meta.get("strategy_id")
     service = StrategyService()
     strategy = service.get_strategy_detail(strategy_id=strategy_id) if strategy_id else None
 
     return {
-        "run_id": run_id or (items[0].get("run_id") if items else None),
+        "run_id": run_id or run_meta.get("run_id") or (items[0].get("run_id") if items else None),
         "strategy": strategy,
         "summary": {
-            "selected_trade_date": items[0].get("selection_date") if items else None,
+            "selected_trade_date": items[0].get("selection_date") if items else str(run_meta.get("trade_date") or "") or None,
+            "run_created_at": str(run_meta.get("created_at")) if run_meta.get("created_at") else None,
             "latest_trade_date": items[0].get("latest_trade_date") if items else None,
             "total_count": len(items),
             "sample_size": _sample_size(instrument_type),

@@ -36,39 +36,18 @@ function renderStrategySummary(strategy) {
     <div class="strategy-item">
       <div class="strategy-item-head">
         <strong>${escapeHtml(strategy.display_name || strategy.id || '-')}</strong>
-        <span class="badge status-ok">${escapeHtml(strategy.version || '-')}</span>
+        <div>
+          <span class="badge ${strategy.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(strategy.mode || 'current')}</span>
+          <span class="badge ${strategy.status === 'active' ? 'status-ok' : 'status-warn'}">${escapeHtml(strategy.version || '-')}</span>
+        </div>
       </div>
-      <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')}</div>
+      <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · ${strategy.executable === false ? '仅展示' : '可执行'}</div>
       <div>${escapeHtml(strategy.description || '')}</div>
       <div class="muted">阈值: ${strategy.score_threshold ?? '-'} · 最多入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
-      <div class="muted">策略说明 <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
+      <div class="muted">完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
   `;
-}
-
-function renderFactorAnalysis(strategy) {
-  const body = qs('#factor-analysis-body');
-  const items = strategy?.factors || [];
-  if (!items.length) {
-    body.innerHTML = renderEmptyRow(10, '暂无因子配置');
-    return;
-  }
-
-  body.innerHTML = items.map((item) => `
-    <tr>
-      <td>${escapeHtml(item.name || item.key || '')}</td>
-      <td>${escapeHtml(item.category || 'general')}</td>
-      <td>${escapeHtml(item.direction || 'positive')}</td>
-      <td>${formatNumber(item.weight, 2)}</td>
-      <td>${formatNumber(item.ci, 4)}</td>
-      <td>${formatPercent(item.coverage)}</td>
-      <td>${formatPercent(item.missing_rate)}</td>
-      <td><span class="badge ${item.enabled === false ? 'status-warn' : 'status-ok'}">${item.enabled === false ? '关闭' : '启用'}</span></td>
-      <td>${escapeHtml(item.description || '')}</td>
-      <td><button class="icon-help" type="button" data-tooltip="因子：${escapeHtml(item.name || item.key || '')}\n类别：${escapeHtml(item.category || 'general')}\n方向：${escapeHtml(item.direction || 'positive')}\n权重：${formatNumber(item.weight, 2)}\nCI：${formatNumber(item.ci, 4)}\n覆盖率：${formatPercent(item.coverage)}\n缺失率：${formatPercent(item.missing_rate)}\n样本量：${escapeHtml(item.sample_size ?? '-')}\n说明：${escapeHtml(item.description || '暂无')}">ⓘ</button></td>
-    </tr>
-  `).join('');
 }
 
 function renderSelectionResults(data) {
@@ -89,16 +68,16 @@ function renderSelectionResults(data) {
   }
 
   if (searchText) {
-    items = items.filter((item) => [item.code, item.name, item.industry].some((value) => String(value || '').toLowerCase().includes(searchText)));
+    items = items.filter((item) => [item.code, item.name, item.industry, item.strategy_display_name, item.strategy_id].some((value) => String(value || '').toLowerCase().includes(searchText)));
   }
 
   items = [...items].sort((a, b) => compareSelectionItems(sortBy, a, b));
 
-  summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股日期：${summary.selected_trade_date || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${items.length} / ${summary.total_count || 0} 条`;
-  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 入选数：${summary.total_count || 0} · 数据更新时间：${summary.updated_at || '-'} · 策略版本：${data.strategy?.version || '-'}`;
+  summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${items.length} / ${summary.total_count || 0} 条`;
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 入选数：${summary.total_count || 0} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'}`;
 
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(12, '当前筛选条件下暂无选股结果');
+    body.innerHTML = renderEmptyRow(13, '当前筛选条件下暂无选股结果');
     return;
   }
 
@@ -109,6 +88,7 @@ function renderSelectionResults(data) {
     const factorScores = item.factor_scores || {};
     const detailText = [
       `策略：${item.strategy_display_name || item.strategy_id || '-'}`,
+      `策略版本：${item.strategy_version || '-'}`,
       `最新交易日：${item.latest_trade_date || '-'}`,
       `跟踪状态：${item.review_status || '-'}`,
       `开盘入选价：${item.selected_open_price ?? '-'}`,
@@ -128,6 +108,10 @@ function renderSelectionResults(data) {
           <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '')}</a>
           <div class="muted">${escapeHtml(item.code || '')}</div>
         </td>
+        <td>
+          <div>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')}</div>
+          <div class="muted">${escapeHtml(item.strategy_version || '-')}</div>
+        </td>
         <td>${escapeHtml(item.industry || '未分类')}</td>
         <td>${escapeHtml(item.selection_date || '-')}</td>
         <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
@@ -141,8 +125,8 @@ function renderSelectionResults(data) {
         <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" data-tooltip="${escapeHtml(detailText)}">查看</button></td>
       </tr>
       <tr id="${detailId}" class="selection-detail-row" hidden>
-        <td colspan="12">
-          <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
+        <td colspan="13">
+          <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 版本：${escapeHtml(item.strategy_version || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
           <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
           <div class="muted">因子摘要：turnover=${escapeHtml(String(factorScores.turnover ?? '-'))} / lowvol=${escapeHtml(String(factorScores.lowvol ?? '-'))} / reversal=${escapeHtml(String(factorScores.reversal ?? '-'))}</div>
           <div class="score-chip-list">
@@ -178,7 +162,7 @@ async function loadStrategies() {
   strategies.forEach((item) => {
     const option = document.createElement('option');
     option.value = item.id;
-    option.textContent = `${item.display_name || item.id} (${item.id})`;
+    option.textContent = `${item.display_name || item.id} (${item.id})${item.executable === false ? ' · 仅展示' : ''}`;
     if (item.id === data.default_strategy) option.selected = true;
     select.appendChild(option);
   });
@@ -192,7 +176,6 @@ async function loadStrategyDetail(strategyId) {
   const instrumentType = qs('#instrument-type')?.value || 'stock';
   const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId || currentDefaultStrategy || '')}&instrument_type=${encodeURIComponent(instrumentType)}&sample_limit=200`);
   renderStrategySummary(data.strategy);
-  renderFactorAnalysis(data.strategy);
 }
 
 async function loadSelectionResults() {
@@ -206,7 +189,6 @@ async function loadSelectionResults() {
   renderSelectionResults(data);
   if (data.strategy) {
     renderStrategySummary(data.strategy);
-    renderFactorAnalysis(data.strategy);
   }
 }
 

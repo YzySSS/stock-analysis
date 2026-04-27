@@ -32,6 +32,7 @@
         <div>
           <p class="eyebrow">Selection</p>
           <h1>选股中心</h1>
+          <p class="page-subtitle">这里主要回答“这次选了谁、属于哪套策略、结果后来怎么样”，完整因子分析请去策略管理页看。</p>
         </div>
         <div class="header-actions">
           <button id="refresh-selection-page" class="btn btn-secondary" type="button">刷新页面数据</button>
@@ -80,7 +81,10 @@
           <div class="card-header with-actions">
             <div>
               <h2>当前策略摘要</h2>
-            <p class="muted" id="selection-top-summary">加载中...</p>
+              <p class="muted" id="selection-top-summary">加载中...</p>
+            </div>
+            <div class="actions">
+              <a class="btn btn-secondary" href="/strategies">去看策略因子分析</a>
             </div>
           </div>
           <div id="strategy-summary" class="list-stack empty-state">加载中...</div>
@@ -104,7 +108,7 @@
           </div>
           <div class="form-group">
             <label for="selection-search">搜索股票</label>
-            <input id="selection-search" type="text" placeholder="代码 / 名称 / 行业" />
+            <input id="selection-search" type="text" placeholder="代码 / 名称 / 行业 / 策略" />
           </div>
           <div class="form-group">
             <label for="selection-sort">排序方式</label>
@@ -128,6 +132,7 @@
             <thead>
               <tr>
                 <th>股票</th>
+                <th>选股策略</th>
                 <th>行业</th>
                 <th>选股日期</th>
                 <th>入选价</th>
@@ -142,7 +147,7 @@
               </tr>
             </thead>
             <tbody id="selection-results-body">
-              <tr><td colspan="12" class="muted">加载中...</td></tr>
+              <tr><td colspan="13" class="muted">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -151,30 +156,11 @@
       <section class="card">
         <div class="card-header with-actions">
           <div>
-            <h2>因子分析</h2>
-            <p class="muted">当前策略配置中的核心因子、权重与方向</p>
+            <h2>当前页面说明</h2>
           </div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>因子</th>
-                <th>类别</th>
-                <th>方向</th>
-                <th>权重</th>
-                <th>CI</th>
-                <th>覆盖率</th>
-                <th>缺失率</th>
-                <th>启用</th>
-                <th>说明</th>
-                <th>帮助</th>
-              </tr>
-            </thead>
-            <tbody id="factor-analysis-body">
-              <tr><td colspan="10" class="muted">加载中...</td></tr>
-            </tbody>
-          </table>
+        <div class="note-block">
+          <p>选股中心负责展示“这次选了谁、属于哪套策略、后续涨跌和风险如何”；完整因子构成、CI、覆盖率与策略解释链路，统一放到“策略管理”页查看。</p>
         </div>
       </section>
     </main>
