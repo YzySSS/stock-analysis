@@ -158,11 +158,42 @@ async function loadStockDetail() {
       <div>${escapeHtml(latestSelection.created_at || '-')}</div>
     `;
 
+    const riskTexts = [];
+    if (data.fundamentals?.roe == null) riskTexts.push('缺少 ROE 数据');
+    if (data.fundamentals?.revenue_yoy == null) riskTexts.push('缺少营收同比数据');
+    if (data.valuation?.pe_tushare == null) riskTexts.push('缺少 PE 数据');
+    if (data.flags?.is_st) riskTexts.push('股票处于 ST 状态');
+    const positiveReasons = [];
+    if (data.fundamentals?.roe != null && Number(data.fundamentals.roe) >= 10) positiveReasons.push(`ROE 良好 (${formatNumber(data.fundamentals.roe, 2)})`);
+    if (data.valuation?.pb_tushare != null && Number(data.valuation.pb_tushare) <= 2) positiveReasons.push(`PB 偏低 (${formatNumber(data.valuation.pb_tushare, 2)})`);
+    if (latestSelection.score != null) positiveReasons.push(`最近入选分数 ${formatNumber(latestSelection.score, 4)}`);
+
+    qs('#stock-detail-reasons').innerHTML = `
+      <div><strong>当前可见正向信号：</strong>${positiveReasons.length ? escapeHtml(positiveReasons.join('；')) : '暂无明显正向信号'}</div>
+      <div class="muted"><strong>当前主要风险：</strong>${riskTexts.length ? escapeHtml(riskTexts.join('；')) : '暂无明显风险提示'}</div>
+    `;
+
+    qs('#stock-detail-tracking-summary').innerHTML = `
+      <div><strong>最近复盘入口</strong></div>
+      <div>${latestSelection.run_id ? `run_id ${escapeHtml(latestSelection.run_id)}` : '暂无 run_id'}</div>
+      <div><strong>建议动作</strong></div>
+      <div>${latestSelection.run_id ? '可直接跳转到跟踪复盘页查看整轮表现' : '当前暂无可关联复盘 run_id'}</div>
+      <div><strong>当前价格</strong></div>
+      <div>${formatNumber(data.latest_kline?.close, 2)}</div>
+      <div><strong>最近交易日</strong></div>
+      <div>${escapeHtml(data.latest_kline?.trade_date || '-')}</div>
+    `;
+
+    const trackingLink = qs('#stock-detail-tracking-link');
+    if (trackingLink && latestSelection.run_id) {
+      trackingLink.href = `/tracking?run_id=${encodeURIComponent(latestSelection.run_id)}`;
+    }
+
     renderPriceChart(data.price_history || []);
     renderSelectionHistory(data.selection_history || []);
   } catch (error) {
     qs('#stock-detail-subtitle').textContent = '加载详情失败';
-    ['#stock-detail-basic', '#stock-detail-factors', '#stock-detail-fundamentals', '#stock-detail-selection', '#stock-detail-history'].forEach((selector) => {
+    ['#stock-detail-basic', '#stock-detail-factors', '#stock-detail-fundamentals', '#stock-detail-selection', '#stock-detail-reasons', '#stock-detail-tracking-summary', '#stock-detail-history'].forEach((selector) => {
       qs(selector).innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
     });
   }
