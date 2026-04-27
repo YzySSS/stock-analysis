@@ -101,15 +101,18 @@ function bindTooltips() {
     tooltip.hidden = false;
     tooltip.style.top = `${window.scrollY + rect.bottom + 8}px`;
     tooltip.style.left = `${Math.min(window.scrollX + rect.left, window.scrollX + window.innerWidth - 340)}px`;
+    tooltip.dataset.owner = element.dataset.tooltipId || '';
   };
 
   const hide = () => {
     tooltip.hidden = true;
+    tooltip.dataset.owner = '';
   };
 
-  qsa('[data-tooltip]').forEach((element) => {
+  qsa('[data-tooltip]').forEach((element, index) => {
     if (element.dataset.tooltipBound === 'true') return;
     element.dataset.tooltipBound = 'true';
+    if (!element.dataset.tooltipId) element.dataset.tooltipId = `tooltip-${index}`;
 
     element.addEventListener('mouseenter', () => show(element));
     element.addEventListener('focus', () => show(element));
@@ -117,7 +120,7 @@ function bindTooltips() {
     element.addEventListener('blur', hide);
     element.addEventListener('click', (event) => {
       event.preventDefault();
-      if (!tooltip.hidden && tooltip.textContent === (element.getAttribute('data-tooltip') || '')) {
+      if (!tooltip.hidden && tooltip.dataset.owner === element.dataset.tooltipId) {
         hide();
       } else {
         show(element);
@@ -125,11 +128,14 @@ function bindTooltips() {
     });
   });
 
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('[data-tooltip]') && !event.target.closest('[data-shared-tooltip]')) {
-      hide();
-    }
-  }, { once: true });
+  if (!document.body.dataset.tooltipGlobalBound) {
+    document.body.dataset.tooltipGlobalBound = 'true';
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('[data-tooltip]') && !event.target.closest('[data-shared-tooltip]')) {
+        hide();
+      }
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

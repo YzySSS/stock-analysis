@@ -21,6 +21,16 @@ function renderReviewSummary(summary = {}, runId = '') {
   `;
 }
 
+function renderReviewNotes(summary = {}, items = []) {
+  const container = qs('#tracking-review-notes');
+  const positive = items.filter((item) => (item.price_change_pct ?? -999) >= 0).length;
+  const negative = items.filter((item) => (item.price_change_pct ?? 999) < 0).length;
+  container.innerHTML = `
+    <div>当前复盘判断：正收益 ${positive} 只，负收益 ${negative} 只，胜率 ${formatPercent(summary.win_rate_pct)}。</div>
+    <div class="muted">后续应补：基准超额、失败归因、因子失效观察、人工复盘备注。</div>
+  `;
+}
+
 function renderTrackingTable(items) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
@@ -63,6 +73,7 @@ async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stoc
   renderTrackingTable(items);
   updateTrackingStats(summary, items);
   renderReviewSummary(summary, runId);
+  renderReviewNotes(summary, items);
   summaryText.textContent = runId
     ? `当前显示 run_id=${runId} 的复盘结果，共 ${items.length} 条`
     : `当前显示最新复盘快照，共 ${items.length} 条`;
