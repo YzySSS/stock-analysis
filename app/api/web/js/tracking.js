@@ -8,6 +8,8 @@ function updateTrackingStats(summary = {}, items = []) {
 
 function renderReviewSummary(summary = {}, runId = '') {
   const container = qs('#tracking-review-summary');
+  const best = summary.best_item;
+  const worst = summary.worst_item;
   container.innerHTML = `
     <article class="strategy-item">
       <div class="strategy-item-head">
@@ -16,7 +18,8 @@ function renderReviewSummary(summary = {}, runId = '') {
       </div>
       <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)}</div>
       <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
-      <div class="muted">这一区域后续可继续补策略稳定性、超额收益和失败归因。</div>
+      <div class="muted">表现最好：${best ? `${escapeHtml(best.name || best.code || '-')} (${formatPercent(best.price_change_pct)})` : '暂无'}</div>
+      <div class="muted">表现最弱：${worst ? `${escapeHtml(worst.name || worst.code || '-')} (${formatPercent(worst.price_change_pct)})` : '暂无'}</div>
     </article>
   `;
 }
@@ -25,9 +28,10 @@ function renderReviewNotes(summary = {}, items = []) {
   const container = qs('#tracking-review-notes');
   const positive = items.filter((item) => (item.price_change_pct ?? -999) >= 0).length;
   const negative = items.filter((item) => (item.price_change_pct ?? 999) < 0).length;
+  const flat = Math.max((summary.count ?? items.length ?? 0) - positive - negative, 0);
   container.innerHTML = `
-    <div>当前复盘判断：正收益 ${positive} 只，负收益 ${negative} 只，胜率 ${formatPercent(summary.win_rate_pct)}。</div>
-    <div class="muted">后续应补：基准超额、失败归因、因子失效观察、人工复盘备注。</div>
+    <div>当前复盘判断：正收益 ${positive} 只，负收益 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(summary.win_rate_pct)}。</div>
+    <div class="muted">这一版先补到“谁最好、谁最弱、整体赢面如何”；基准超额和真实失败归因下一步再接。</div>
   `;
 }
 

@@ -16,12 +16,32 @@ def _build_tracking_summary(items: list[dict]) -> dict:
     win_rate = round((win_count / len(pct_values)) * 100, 2) if pct_values else None
     max_gain = max((item.get("max_gain_pct") for item in items if item.get("max_gain_pct") is not None), default=None)
     max_drawdown = min((item.get("max_drawdown_pct") for item in items if item.get("max_drawdown_pct") is not None), default=None)
+    best_item = max(
+        (item for item in items if item.get("price_change_pct") is not None),
+        key=lambda item: item.get("price_change_pct") or 0,
+        default=None,
+    )
+    worst_item = min(
+        (item for item in items if item.get("price_change_pct") is not None),
+        key=lambda item: item.get("price_change_pct") or 0,
+        default=None,
+    )
     return {
         "count": len(items),
         "avg_return_pct": avg_return,
         "win_rate_pct": win_rate,
         "max_gain_pct": max_gain,
         "max_drawdown_pct": max_drawdown,
+        "best_item": {
+            "code": best_item.get("code"),
+            "name": best_item.get("name"),
+            "price_change_pct": best_item.get("price_change_pct"),
+        } if best_item else None,
+        "worst_item": {
+            "code": worst_item.get("code"),
+            "name": worst_item.get("name"),
+            "price_change_pct": worst_item.get("price_change_pct"),
+        } if worst_item else None,
     }
 
 

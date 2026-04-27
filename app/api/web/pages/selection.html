@@ -97,6 +97,32 @@
             <button id="refresh-results" class="btn btn-secondary" type="button">刷新结果</button>
           </div>
         </div>
+        <form id="selection-filter-form" class="inline-form selection-filter-form">
+          <div class="form-group">
+            <label for="selection-run-id">run_id / 留空取最新</label>
+            <input id="selection-run-id" type="text" placeholder="如 selection_20260427_122725" />
+          </div>
+          <div class="form-group">
+            <label for="selection-search">搜索股票</label>
+            <input id="selection-search" type="text" placeholder="代码 / 名称 / 行业" />
+          </div>
+          <div class="form-group">
+            <label for="selection-sort">排序方式</label>
+            <select id="selection-sort">
+              <option value="rank_asc">按排名升序</option>
+              <option value="score_desc">按总分降序</option>
+              <option value="change_desc">按涨跌幅降序</option>
+              <option value="change_asc">按涨跌幅升序</option>
+              <option value="name_asc">按名称升序</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="selection-industry">行业筛选</label>
+            <select id="selection-industry">
+              <option value="">全部行业</option>
+            </select>
+          </div>
+        </form>
         <div class="table-wrap">
           <table>
             <thead>

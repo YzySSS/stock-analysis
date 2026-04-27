@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/png" href="/favicon.ico" />
-  <title>股票分析控制台 - 系统状态</title>
+  <title>股票分析控制台 - 数据状态</title>
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
@@ -30,8 +30,8 @@
     <main class="main-content">
       <header class="page-header">
         <div>
-          <p class="eyebrow">System</p>
-          <h1>系统状态</h1>
+          <p class="eyebrow">Data Status</p>
+          <h1>数据状态</h1>
         </div>
         <div class="header-actions">
           <button id="refresh-system-page" class="btn btn-secondary" type="button">刷新状态</button>
@@ -54,12 +54,28 @@
         </article>
       </section>
 
+      <section class="content-grid two-columns">
+        <article class="card">
+          <div class="card-header">
+            <h2>最近同步结果</h2>
+          </div>
+          <div id="system-latest-panel" class="status-panel">加载中...</div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>缺口提示</h2>
+          </div>
+          <div id="system-gap-panel" class="status-panel">加载中...</div>
+        </article>
+      </section>
+
       <section class="card">
         <div class="card-header">
           <h2>数据状态说明</h2>
         </div>
         <div class="note-block">
-          <p>本页现在按 V1 文档优先承接数据覆盖率、最近同步时间与关键表状态；后续再补缺失字段统计、异常任务状态与手动触发能力。</p>
+          <p>本页已按 V1 方向承接数据覆盖率、最近同步时间、关键表规模与缺口提示；后续再补异常任务状态、字段级缺失统计与手动触发能力。</p>
         </div>
       </section>
     </main>
