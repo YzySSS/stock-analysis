@@ -51,13 +51,16 @@ function renderFactorAnalysis(strategy) {
 function renderSelectionResults(data) {
   const body = qs('#selection-results-body');
   const summaryLine = qs('#selection-summary-line');
-  const items = data.items || [];
+  const topSummary = qs('#selection-top-summary');
+  const minScore = Number(qs('#selection-min-score')?.value || 0);
+  const items = (data.items || []).filter((item) => Number(item.score ?? 0) >= minScore);
   const summary = data.summary || {};
 
-  summaryLine.textContent = `选股日期：${summary.selected_trade_date || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${summary.total_count || 0} 条`;
+  summaryLine.textContent = `选股日期：${summary.selected_trade_date || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${items.length} / ${summary.total_count || 0} 条`;
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 入选数：${summary.total_count || 0} · 数据更新时间：${summary.updated_at || '-'}`;
 
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(10, '暂无选股结果');
+    body.innerHTML = renderEmptyRow(12, '暂无选股结果');
     return;
   }
 
@@ -82,18 +85,20 @@ function renderSelectionResults(data) {
           <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '')}</a>
           <div class="muted">${escapeHtml(item.code || '')}</div>
         </td>
+        <td>${escapeHtml(item.industry || '-')}</td>
         <td>${escapeHtml(item.selection_date || '-')}</td>
         <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
         <td class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</td>
         <td>${formatNumber(item.score, 4)}</td>
         <td>${item.rank_no ?? '-'}</td>
+        <td>${escapeHtml(item.review_status || '-')}</td>
         <td>${escapeHtml(reasons)}</td>
         <td>${escapeHtml(risks)}</td>
         <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" data-tooltip="${escapeHtml(detailText)}">查看</button></td>
       </tr>
       <tr id="${detailId}" class="selection-detail-row" hidden>
-        <td colspan="10">
+        <td colspan="12">
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')}</div>
           <div class="muted">因子摘要：turnover=${escapeHtml(String(factorScores.turnover ?? '-'))} / lowvol=${escapeHtml(String(factorScores.lowvol ?? '-'))} / reversal=${escapeHtml(String(factorScores.reversal ?? '-'))}</div>
           <div class="score-chip-list">
@@ -190,6 +195,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   qs('#refresh-results').addEventListener('click', loadSelectionResults);
   qs('#refresh-selection-page').addEventListener('click', refreshSelectionPage);
+  qs('#selection-min-score').addEventListener('change', loadSelectionResults);
   qs('#strategy-id').addEventListener('change', async (event) => {
     await loadStrategyDetail(event.target.value);
   });

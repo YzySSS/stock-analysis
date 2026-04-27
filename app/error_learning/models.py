@@ -23,6 +23,7 @@ class SelectionTrackingRecord:
     latest_trade_date: Optional[str] = None
     reason_summary: Optional[list[str]] = None
     risk_summary: Optional[list[str]] = None
+    industry: Optional[str] = None
     tracking_days: Optional[int] = None
     review_status: Optional[str] = None
     max_gain_pct: Optional[float] = None

@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.shared.db import mysql_conn
 from app.strategies.service import StrategyService
 
 router = APIRouter(tags=["selection"])
@@ -26,6 +27,14 @@ def run_selection(payload: SelectionRunRequest) -> dict:
         instrument_type=payload.instrument_type,
         save=payload.save,
     )
+
+
+def _sample_size(instrument_type: str) -> int:
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS count FROM stock_basic WHERE instrument_type = %s", (instrument_type,))
+            row = cursor.fetchone() or {}
+            return int(row.get("count") or 0)
 
 
 @router.get("/selection/results")
@@ -51,7 +60,9 @@ def get_selection_results(
             "selected_trade_date": items[0].get("selection_date") if items else None,
             "latest_trade_date": items[0].get("latest_trade_date") if items else None,
             "total_count": len(items),
+            "sample_size": _sample_size(instrument_type),
             "instrument_type": instrument_type,
+            "updated_at": items[0].get("latest_trade_date") if items else None,
         },
         "items": items,
     }
