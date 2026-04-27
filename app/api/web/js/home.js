@@ -20,7 +20,7 @@ async function loadHomePage() {
     healthStatus.classList.remove('up', 'down');
     healthStatus.classList.add(health.status === 'ok' ? 'up' : 'down');
     healthDetail.textContent = health.database
-      ? `MySQL: ${health.database} · ${health.version || 'unknown version'}`
+      ? `MySQL: ${health.database} · ${health.version || '版本未知'}`
       : '健康检查正常';
 
     defaultStrategy.textContent = data.default_strategy || '-';
