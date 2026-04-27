@@ -48,23 +48,18 @@
 
         <article class="card">
           <div class="card-header">
-            <h2>后续扩展位</h2>
+            <h2>数据覆盖率</h2>
           </div>
-          <ul class="placeholder-list">
-            <li>数据同步状态</li>
-            <li>最近任务日志</li>
-            <li>手动触发同步动作</li>
-            <li>环境信息与配置摘要</li>
-          </ul>
+          <div id="system-coverage-panel" class="status-panel">加载中...</div>
         </article>
       </section>
 
       <section class="card">
         <div class="card-header">
-          <h2>系统说明</h2>
+          <h2>数据状态说明</h2>
         </div>
         <div class="note-block">
-          <p>建议下一步补一个聚合接口，比如 <code>/api/system/status</code>，把健康检查、最近同步时间、最近任务、关键表记录数一次性返回，前端会省很多胶水代码。</p>
+          <p>本页现在按 V1 文档优先承接数据覆盖率、最近同步时间与关键表状态；后续再补缺失字段统计、异常任务状态与手动触发能力。</p>
         </div>
       </section>
     </main>

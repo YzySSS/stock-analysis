@@ -18,6 +18,30 @@ def _scalar(sql: str) -> int | None:
             return int(value) if value is not None else None
 
 
+def _coverage_stats() -> dict:
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock') AS total_stock_codes,
+                    (SELECT COUNT(DISTINCT code) FROM daily_kline) AS daily_kline_covered_codes,
+                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (roe IS NOT NULL OR roa IS NOT NULL OR grossprofit_margin IS NOT NULL OR revenue_yoy IS NOT NULL)) AS fundamental_filled_codes
+                """
+            )
+            row = cursor.fetchone() or {}
+            total_codes = int(row.get("total_stock_codes") or 0)
+            covered_codes = int(row.get("daily_kline_covered_codes") or 0)
+            fundamental_filled = int(row.get("fundamental_filled_codes") or 0)
+            return {
+                "total_stock_codes": total_codes,
+                "daily_kline_covered_codes": covered_codes,
+                "daily_kline_coverage_pct": round((covered_codes / total_codes) * 100, 2) if total_codes else None,
+                "fundamental_filled_codes": fundamental_filled,
+                "fundamental_coverage_pct": round((fundamental_filled / total_codes) * 100, 2) if total_codes else None,
+            }
+
+
 def _latest_dates() -> dict:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -54,5 +78,6 @@ def system_status() -> dict:
             "version": mysql_info.get("version"),
         },
         "table_counts": table_counts,
+        "coverage": _coverage_stats(),
         "latest": _latest_dates(),
     }
