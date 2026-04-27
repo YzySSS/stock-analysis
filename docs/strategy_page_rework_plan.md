@@ -1,6 +1,6 @@
 # 策略页重构与接口排查落地方案
 
-更新时间：2026-04-27 18:22
+更新时间：2026-04-27 18:34
 
 ## 一、目标
 
@@ -23,33 +23,24 @@
 - `/selection`：已具备结果列表 + 策略摘要 + 因子分析
 - `/tracking`：复盘页已成型
 
-### 当前不符合最新设计决定的地方
-- 因子分析仍在 `selection` 页面主区展示
-- `strategies` 页面过薄，没有承接策略说明与因子分析主展示
-- `selection` 列表虽然详情里能看到策略，但主表还没把“选股策略”作为明确字段突出展示
-- 策略页目前只有一个正式注册策略，页面认知上太单薄
+### 当前仍待继续优化的地方
+- 多策略结果还没有真正跑起来，`selection_result` 里当前仍只有 `lowvol_reversal`
+- `selection` 页面虽然已加入“选股策略”列，但默认取数逻辑仍是“最近一个 run”
+- `V12` 目前仍是页面展示态，不是可执行新架构策略
 
 ---
 
 ## 2.2 策略体系现状
 
-### 已正式注册
-- `lowvol_reversal`
+### 当前已注册
+- `lowvol_reversal`（current / active / executable）
+- `v13_three_factor`（current / experimental / executable）
+- `v12_legacy`（legacy / display-only / non-executable）
 
-### 已存在但未正式挂入注册表
-- `v13_three_factor`
-  - 位置：`app/strategies/active/v13_three_factor/`
-  - 特征：已进入新架构目录，但更接近模板 / 骨架 + 近似逻辑
-
-### 旧体系历史策略
-- `V12`
-  - 位置：`src/strategies/v12_strategy.py`
-  - 以及 `v12_strategy_v6.py` / `v12_strategy_v7.py`
-  - 特征：仍在旧体系，尚未迁入 `app/strategies` 当前注册链路
-
-### 产品判断
-- `V13` 可以较快纳入当前页面策略体系
-- `V12` 适合先作为 **legacy / 待迁移策略** 展示，不应伪装成已完整接入当前执行链路
+### 落地结果
+- `V13` 已正式纳入当前页面策略体系
+- `V12` 已作为 **legacy / 待迁移策略** 纳入页面展示
+- 当前策略页已不再是单策略薄页，而是多策略 + 详情 + 因子分析主页
 
 ---
 
@@ -80,13 +71,13 @@
 - `selection_20260427_120327`
 
 ### 已确认的接口数据风险点
-#### 风险 1：`/api/selection/results` 默认只拿“最近一个 run_id”
-当前逻辑：
+#### 风险 1：`/api/selection/results` 默认仍只拿“最近一个 run_id”
+当前逻辑仍等价于：
 ```sql
 SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1
 ```
 这会导致：
-- 页面只能默认看最后一次 run
+- 页面默认只能看到最后一次 run
 - 多策略并存后，用户容易误解为“系统只有这套策略结果”
 
 #### 风险 2：`selection_result` 表没有 `selected_at` 字段
@@ -94,19 +85,29 @@ SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1
 - `trade_date`
 - `created_at`
 
-这意味着页面层如果想展示：
-- 选股交易日
-- 实际入库时间
+当前已在接口 summary 中补充：
+- `selected_trade_date`
+- `run_created_at`
 
-必须明确区分，不然容易混淆。
+用来明确区分“选股交易日”和“实际入库时间”。
 
-#### 风险 3：当前只有一个正式策略被注册
-所以即便页面想展示多策略，接口 `/api/strategies` 当前也拿不出来。
+#### 风险 3：当前 `selection_result` 只有一个真实策略来源
+实查结果：
+- `selection_result.strategy_id` 当前只有 `lowvol_reversal`
+- 共有 `18` 条记录，`5` 个 run
 
-#### 风险 4：部分“数据问题”其实是覆盖率问题
+这意味着：
+- 页面结构虽然已支持多策略
+- 但结果数据层面暂时还没进入多策略并存阶段
+
+#### 风险 4：很多“看起来像接口问题”的现象，本质是底层数据覆盖问题
 例如：
-- 基本面字段大量缺失
-- 并不是接口坏了，而是底层数据本来就没补齐
+- 最新 `daily_kline` 日期就是 `2026-04-23`
+- 最新选股 run 的 `trade_date` 也是 `2026-04-23`
+- 因此当前结果页中很多股票的 `price_change_pct = 0.0`
+
+这不是前端计算错，而是因为：
+- 最新行情还没有晚于选股日的数据可供比较
 
 ---
 
@@ -246,18 +247,20 @@ SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1
 4. 扩 `/api/strategies/detail`
 5. 重构 `/strategies` 页面
 
-## 第二刀
-再做 **选股中心收口**：
+## 第二刀 ✅
+已完成 **选股中心收口**：
 
-1. 增加“选股策略”列
-2. 弱化因子分析区
-3. 增加跳转到策略页的入口
+1. 已增加“选股策略”列
+2. 已移除完整因子分析主表
+3. 已增加跳转到策略页的入口
+4. 已在 summary 中区分 `selected_trade_date` 与 `run_created_at`
 
-## 第三刀
-最后做 **接口数据问题排查与修修补补**：
+## 第三刀（当前进行中）
+继续做 **接口数据问题排查与修修补补**：
 
-1. 比对接口与 DB
-2. 修语义不一致字段
+1. 比对接口与 DB ✅（已完成一轮）
+2. 修语义不一致字段 ✅（已补时间语义）
+3. 继续确认哪些是底层数据未更新导致的显示问题
 3. 修页面展示误导
 
 ---
@@ -284,23 +287,26 @@ SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1
 
 ---
 
-## 六、下一步建议
+## 六、当前进展结论与下一步建议
 
-如果立刻开干，建议按这个顺序：
+### 当前已完成
+1. 多策略 registry 已落地
+2. 策略页已重构为因子分析主页
+3. 选股页已加入“选股策略”列并移除完整因子分析主表
+4. 接口 summary 已补时间语义区分
 
-### 现在开始
-1. 扩 `strategies.yaml`
-2. 给 V13 / V12 增加 registry-level 元信息
-3. 改 `/api/strategies` 与 `/api/strategies/detail`
-4. 改 `/strategies` 页面为因子分析主页
+### 当前查实的数据事实
+1. `daily_kline` 最新日期仍是 `2026-04-23`
+2. `daily_kline` 当前覆盖 `3720 / 5200`
+3. 最新选股 run 也是基于 `2026-04-23`
+4. 因此当前结果页里很多 `price_change_pct=0.0` 是数据现状，不是页面 bug
+5. `stock_basic` 基本面已覆盖仅 `67 / 5200`
 
-### 然后
-5. 改 `/selection` 页面，增加“选股策略”列
-6. 去掉完整因子分析主表
-
-### 同步
-7. 对 `selection_result`、`daily_kline`、`stock_basic` 做接口字段一致性复查
+### 下一步建议
+1. 继续把接口层支持“按策略查看结果”提上日程
+2. 优先继续补 `daily_kline`，避免复盘结果长期停在选股日
+3. 再补估值 / 基本面，提高解释质量
 
 一句话：
 
-> **先把页面职责改对，再继续修接口，再分辨哪些其实是底层缺数据。**
+> **页面结构已经基本改对，接下来更该追的是结果数据更新与多策略结果接入。**
