@@ -50,6 +50,7 @@ def _latest_dates() -> dict:
                 SELECT
                     (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_trade_date,
                     (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at,
+                    (SELECT MAX(fundamental_updated_at) FROM stock_basic) AS fundamental_latest_updated_at,
                     (SELECT MAX(created_at) FROM selection_result) AS selection_result_latest_created_at,
                     (SELECT MAX(trade_date) FROM selection_result) AS selection_result_latest_trade_date
                 """
@@ -58,6 +59,51 @@ def _latest_dates() -> dict:
             return {
                 key: str(value) if value is not None else None
                 for key, value in row.items()
+            }
+
+
+def _field_missing_stats() -> dict:
+    tracked_fields = [
+        "pe_tushare",
+        "pb_tushare",
+        "roe",
+        "roa",
+        "grossprofit_margin",
+        "netprofit_margin",
+        "revenue_yoy",
+        "profit_yoy",
+    ]
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            total_sql = "SELECT COUNT(*) AS total FROM stock_basic WHERE instrument_type='stock'"
+            cursor.execute(total_sql)
+            total_row = cursor.fetchone() or {}
+            total = int(total_row.get("total") or 0)
+
+            select_parts = [f"SUM(CASE WHEN {field} IS NULL THEN 1 ELSE 0 END) AS {field}_missing" for field in tracked_fields]
+            sql = f"SELECT {', '.join(select_parts)} FROM stock_basic WHERE instrument_type='stock'"
+            cursor.execute(sql)
+            row = cursor.fetchone() or {}
+
+            items = []
+            for field in tracked_fields:
+                missing = int(row.get(f"{field}_missing") or 0)
+                coverage = round(((total - missing) / total) * 100, 2) if total else None
+                missing_rate = round((missing / total) * 100, 2) if total else None
+                items.append(
+                    {
+                        "field": field,
+                        "missing_count": missing,
+                        "coverage_pct": coverage,
+                        "missing_rate_pct": missing_rate,
+                    }
+                )
+
+            items.sort(key=lambda item: item["missing_count"], reverse=True)
+            return {
+                "total_stock_codes": total,
+                "items": items,
+                "worst_fields": items[:3],
             }
 
 
@@ -80,4 +126,5 @@ def system_status() -> dict:
         "table_counts": table_counts,
         "coverage": _coverage_stats(),
         "latest": _latest_dates(),
+        "field_missing": _field_missing_stats(),
     }

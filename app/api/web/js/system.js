@@ -3,16 +3,20 @@ async function loadSystemPage() {
   const coveragePanel = qs('#system-coverage-panel');
   const latestPanel = qs('#system-latest-panel');
   const gapPanel = qs('#system-gap-panel');
+  const fieldMissingPanel = qs('#system-field-missing-panel');
+  const shortfallPanel = qs('#system-shortfall-panel');
   try {
     const data = await fetchJson('/api/system/status');
     const counts = data.table_counts || {};
     const latest = data.latest || {};
     const coverage = data.coverage || {};
+    const fieldMissing = data.field_missing || {};
     const totalStockCodes = Number(coverage.total_stock_codes || 0);
     const klineCovered = Number(coverage.daily_kline_covered_codes || 0);
     const fundamentalCovered = Number(coverage.fundamental_filled_codes || 0);
     const klineMissing = Math.max(totalStockCodes - klineCovered, 0);
     const fundamentalMissing = Math.max(totalStockCodes - fundamentalCovered, 0);
+    const worstFields = fieldMissing.worst_fields || [];
 
     panel.innerHTML = `
       <div class="status-row">
@@ -38,6 +42,7 @@ async function loadSystemPage() {
       <div><strong>最近选股写入:</strong> ${escapeHtml(latest.selection_result_latest_created_at || '-')}</div>
       <div><strong>最近选股交易日:</strong> ${escapeHtml(latest.selection_result_latest_trade_date || '-')}</div>
       <div><strong>最近基础信息更新时间:</strong> ${escapeHtml(latest.stock_basic_latest_updated_at || '-')}</div>
+      <div><strong>最近基本面更新时间:</strong> ${escapeHtml(latest.fundamental_latest_updated_at || '-')}</div>
     `;
 
     gapPanel.innerHTML = `
@@ -45,11 +50,42 @@ async function loadSystemPage() {
       <div><strong>基本面待补股票:</strong> ${fundamentalMissing}</div>
       <div class="muted">当前最大缺口仍是基本面覆盖，V1 展示可信度主要受它影响。</div>
     `;
+
+    if (!fieldMissing.items?.length) {
+      fieldMissingPanel.innerHTML = '<div class="empty-state">暂无字段缺失统计</div>';
+    } else {
+      fieldMissingPanel.innerHTML = fieldMissing.items.map((item) => `
+        <div class="preview-item">
+          <div class="preview-main">
+            <strong>${escapeHtml(item.field)}</strong>
+            <span class="muted">覆盖率 ${formatPercent(item.coverage_pct)} · 缺失率 ${formatPercent(item.missing_rate_pct)}</span>
+          </div>
+          <div class="preview-side">
+            <strong>${escapeHtml(item.missing_count)}</strong>
+            <span class="muted">缺失数</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    if (!worstFields.length) {
+      shortfallPanel.innerHTML = '<div class="empty-state">暂无主要短板分析</div>';
+    } else {
+      shortfallPanel.innerHTML = `
+        <div><strong>最缺字段 Top ${worstFields.length}</strong></div>
+        ${worstFields.map((item, index) => `
+          <div>${index + 1}. <strong>${escapeHtml(item.field)}</strong> · 缺失 ${escapeHtml(item.missing_count)} 条 · 覆盖率 ${formatPercent(item.coverage_pct)}</div>
+        `).join('')}
+        <div class="muted">这几个字段会直接影响选股解释、因子分析和单票详情的可信度。</div>
+      `;
+    }
   } catch (error) {
     panel.innerHTML = `<div class="error-box">加载系统状态失败: ${escapeHtml(error.message)}</div>`;
     coveragePanel.innerHTML = `<div class="error-box">加载覆盖率失败: ${escapeHtml(error.message)}</div>`;
     latestPanel.innerHTML = `<div class="error-box">加载最近同步结果失败: ${escapeHtml(error.message)}</div>`;
     gapPanel.innerHTML = `<div class="error-box">加载缺口提示失败: ${escapeHtml(error.message)}</div>`;
+    fieldMissingPanel.innerHTML = `<div class="error-box">加载字段缺失统计失败: ${escapeHtml(error.message)}</div>`;
+    shortfallPanel.innerHTML = `<div class="error-box">加载主要短板分析失败: ${escapeHtml(error.message)}</div>`;
   }
 }
 
