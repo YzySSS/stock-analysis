@@ -80,7 +80,46 @@ function bindGlobalStockSearch() {
   bindStockQuickSearch('[data-global-stock-search-input]', '[data-global-stock-search-btn]');
 }
 
+function ensureTooltip() {
+  let tooltip = document.querySelector('[data-shared-tooltip]');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.className = 'tooltip-popover';
+    tooltip.setAttribute('data-shared-tooltip', 'true');
+    tooltip.hidden = true;
+    document.body.appendChild(tooltip);
+  }
+  return tooltip;
+}
+
+function bindTooltips() {
+  const tooltip = ensureTooltip();
+
+  qsa('[data-tooltip]').forEach((element) => {
+    if (element.dataset.tooltipBound === 'true') return;
+    element.dataset.tooltipBound = 'true';
+
+    const show = () => {
+      tooltip.textContent = element.getAttribute('data-tooltip') || '';
+      const rect = element.getBoundingClientRect();
+      tooltip.hidden = false;
+      tooltip.style.top = `${window.scrollY + rect.bottom + 8}px`;
+      tooltip.style.left = `${Math.min(window.scrollX + rect.left, window.scrollX + window.innerWidth - 340)}px`;
+    };
+
+    const hide = () => {
+      tooltip.hidden = true;
+    };
+
+    element.addEventListener('mouseenter', show);
+    element.addEventListener('focus', show);
+    element.addEventListener('mouseleave', hide);
+    element.addEventListener('blur', hide);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   setActiveNav();
   bindGlobalStockSearch();
+  bindTooltips();
 });

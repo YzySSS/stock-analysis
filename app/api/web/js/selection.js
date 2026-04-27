@@ -24,7 +24,7 @@ function renderStrategySummary(strategy) {
       <div>${escapeHtml(strategy.description || '')}</div>
       <div class="muted">阈值: ${strategy.score_threshold ?? '-'} · 最多入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
-      <div class="muted">策略说明 <span title="${escapeHtml(helpText)}">ⓘ</span></div>
+      <div class="muted">策略说明 <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
   `;
 }
@@ -43,7 +43,7 @@ function renderFactorAnalysis(strategy) {
       <td>${escapeHtml(item.direction || 'positive')}</td>
       <td>${formatNumber(item.weight, 2)}</td>
       <td>${escapeHtml(item.description || '')}</td>
-      <td><span title="因子：${escapeHtml(item.name || item.key || '')}｜方向：${escapeHtml(item.direction || 'positive')}｜说明：${escapeHtml(item.description || '暂无')} ">ⓘ</span></td>
+      <td><button class="icon-help" type="button" data-tooltip="因子：${escapeHtml(item.name || item.key || '')}\n方向：${escapeHtml(item.direction || 'positive')}\n说明：${escapeHtml(item.description || '暂无')}">ⓘ</button></td>
     </tr>
   `).join('');
 }
@@ -72,6 +72,7 @@ function renderSelectionResults(data) {
       `开盘入选价：${item.selected_open_price ?? '-'}`,
       `收盘入选价：${item.selected_close_price ?? '-'}`,
       `因子摘要：turnover=${factorScores.turnover ?? '-'}, lowvol=${factorScores.lowvol ?? '-'}, reversal=${factorScores.reversal ?? '-'}`,
+      `分项得分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
       `详细原因：${(item.reason_summary || []).join('；') || '-'}`,
       `详细风险：${(item.risk_summary || []).join('；') || '-'}`,
     ].join('\n');
@@ -89,12 +90,19 @@ function renderSelectionResults(data) {
         <td>${item.rank_no ?? '-'}</td>
         <td>${escapeHtml(reasons)}</td>
         <td>${escapeHtml(risks)}</td>
-        <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" title="${escapeHtml(detailText)}">查看</button></td>
+        <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" data-tooltip="${escapeHtml(detailText)}">查看</button></td>
       </tr>
       <tr id="${detailId}" class="selection-detail-row" hidden>
         <td colspan="10">
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')}</div>
           <div class="muted">因子摘要：turnover=${escapeHtml(String(factorScores.turnover ?? '-'))} / lowvol=${escapeHtml(String(factorScores.lowvol ?? '-'))} / reversal=${escapeHtml(String(factorScores.reversal ?? '-'))}</div>
+          <div class="score-chip-list">
+            <span class="score-chip">value ${escapeHtml(String(factorScores.value_score ?? '-'))}</span>
+            <span class="score-chip">quality ${escapeHtml(String(factorScores.quality_score ?? '-'))}</span>
+            <span class="score-chip">stability ${escapeHtml(String(factorScores.stability_score ?? '-'))}</span>
+            <span class="score-chip">data ${escapeHtml(String(factorScores.data_quality_score ?? '-'))}</span>
+            <span class="score-chip">complete ${escapeHtml(String(factorScores.completeness_score ?? '-'))}</span>
+          </div>
           <div class="muted">详细原因：${escapeHtml((item.reason_summary || []).join('；') || '-')}</div>
           <div class="muted">详细风险：${escapeHtml((item.risk_summary || []).join('；') || '-')}</div>
         </td>
@@ -188,6 +196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     await refreshSelectionPage();
+    bindTooltips();
   } catch (error) {
     qs('#selection-summary-line').textContent = `页面初始化失败: ${error.message}`;
   }

@@ -137,9 +137,11 @@ class SelectionResultTracker:
         metadata = metadata or {}
         explain = metadata.get("explain", {}) or {}
         raw_metrics = metadata.get("raw_metrics", {})
+        summary = explain.get("summary", {}) or {}
         factor_scores = {
             **raw_metrics,
             **metadata.get("factors", {}),
+            **summary,
         }
 
         return SelectionTrackingRecord(

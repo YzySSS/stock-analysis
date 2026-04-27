@@ -235,6 +235,59 @@ th {
   color: var(--muted);
 }
 
+.icon-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(51, 65, 85, 0.9);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.icon-help:hover {
+  color: var(--text);
+  border-color: var(--primary);
+}
+
+.tooltip-popover {
+  position: absolute;
+  z-index: 20;
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: rgba(15, 23, 42, 0.98);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.score-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.7);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .inline-form {
     grid-template-columns: 1fr;
