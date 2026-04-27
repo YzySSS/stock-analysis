@@ -111,7 +111,8 @@ class FundamentalSync:
         sql = """
         SELECT code FROM stock_basic
         WHERE is_delisted = 0
-          AND name NOT LIKE '%指数%'
+          AND instrument_type = 'stock'
+          AND name NOT LIKE '%%指数%%'
         """
         params: List[Any] = []
 
@@ -129,7 +130,17 @@ class FundamentalSync:
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
-                return [row["code"] for row in cursor.fetchall()]
+                codes = []
+                for row in cursor.fetchall():
+                    code = row["code"]
+                    if "." in code:
+                        prefix, raw = code.split(".", 1)
+                        if prefix in {"sh", "sz", "bj"}:
+                            codes.append(code)
+                    elif len(code) == 6 and code.isdigit():
+                        market = "sh" if code.startswith("6") else "bj" if code.startswith(("8", "4")) else "sz"
+                        codes.append(f"{market}.{code}")
+                return codes
 
     @staticmethod
     def to_ts_code(code: str) -> str:
