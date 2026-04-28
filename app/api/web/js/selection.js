@@ -95,10 +95,16 @@ function renderSelectionResults(data) {
   }
 
   body.innerHTML = items.map((item, index) => {
-    const reasons = (item.reason_summary || []).slice(0, 2).join('；') || '-';
-    const risks = (item.risk_summary || []).slice(0, 2).join('；') || '-';
+    const reasonsList = item.reason_summary || [];
+    const risksList = item.risk_summary || [];
+    const reasons = reasonsList.slice(0, 2).join('；') || '-';
+    const risks = risksList.slice(0, 2).join('；') || '-';
     const detailId = `selection-detail-${index}`;
     const factorScores = item.factor_scores || {};
+    const turnover = factorScores.turnover ?? '-';
+    const lowvol = factorScores.lowvol ?? '-';
+    const reversal = factorScores.reversal ?? '-';
+    const factorSummary = `换手 ${turnover} / 低波 ${lowvol} / 反转 ${reversal}`;
     const detailText = [
       `策略：${item.strategy_display_name || item.strategy_id || '-'}`,
       `策略版本：${item.strategy_version || '-'}`,
@@ -110,10 +116,10 @@ function renderSelectionResults(data) {
       `区间涨跌幅：${item.price_change_pct ?? '-'}%`,
       `最大浮盈：${item.max_gain_pct ?? '-'}%`,
       `最大回撤：${item.max_drawdown_pct ?? '-'}%`,
-      `因子摘要：turnover=${factorScores.turnover ?? '-'}, lowvol=${factorScores.lowvol ?? '-'}, reversal=${factorScores.reversal ?? '-'}`,
-      `分项得分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
-      `详细原因：${(item.reason_summary || []).join('；') || '-'}`,
-      `详细风险：${(item.risk_summary || []).join('；') || '-'}`,
+      `三因子：${factorSummary}`,
+      `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
+      `详细原因：${reasonsList.join('；') || '-'}`,
+      `详细风险：${risksList.join('；') || '-'}`,
     ].join('\n');
     return `
       <tr>
@@ -125,23 +131,36 @@ function renderSelectionResults(data) {
           <div>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')}</div>
           <div class="muted">${escapeHtml(item.strategy_version || '-')}</div>
         </td>
-        <td>${escapeHtml(item.industry || '未分类')}</td>
+        <td>${escapeHtml(item.industry_display || '暂无行业')}</td>
         <td>${escapeHtml(item.selection_date || '-')}</td>
         <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
         <td class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</td>
-        <td>${formatNumber(item.score, 2)}</td>
-        <td>${item.rank_no ?? '-'}</td>
+        <td>
+          <div>${formatNumber(item.score, 2)}</div>
+          <div class="muted">${escapeHtml(factorSummary)}</div>
+        </td>
+        <td>
+          <div>${item.rank_no ?? '-'}</div>
+          <div class="muted">第 ${item.rank_no ?? '-'} 名</div>
+        </td>
         <td>${escapeHtml(item.review_status || '-')}</td>
-        <td>${escapeHtml(reasons)}</td>
-        <td>${escapeHtml(risks)}</td>
+        <td>
+          <div>${escapeHtml(reasons)}</div>
+          <div class="muted">共 ${reasonsList.length} 条</div>
+        </td>
+        <td>
+          <div>${escapeHtml(risks)}</div>
+          <div class="muted">共 ${risksList.length} 条</div>
+        </td>
         <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" data-tooltip="${escapeHtml(detailText)}">查看</button></td>
       </tr>
       <tr id="${detailId}" class="selection-detail-row" hidden>
         <td colspan="13">
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 版本：${escapeHtml(item.strategy_version || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
+          <div class="muted">行业：${escapeHtml(item.industry_display || '暂无行业')} · 排名：第 ${escapeHtml(String(item.rank_no ?? '-'))} 名 · 总分：${escapeHtml(String(formatNumber(item.score, 2)))}</div>
           <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
-          <div class="muted">因子摘要：turnover=${escapeHtml(String(factorScores.turnover ?? '-'))} / lowvol=${escapeHtml(String(factorScores.lowvol ?? '-'))} / reversal=${escapeHtml(String(factorScores.reversal ?? '-'))}</div>
+          <div class="muted">三因子得分：换手=${escapeHtml(String(turnover))} / 低波=${escapeHtml(String(lowvol))} / 反转=${escapeHtml(String(reversal))}</div>
           <div class="score-chip-list">
             <span class="score-chip">value ${escapeHtml(String(factorScores.value_score ?? '-'))}</span>
             <span class="score-chip">quality ${escapeHtml(String(factorScores.quality_score ?? '-'))}</span>
@@ -149,8 +168,8 @@ function renderSelectionResults(data) {
             <span class="score-chip">data ${escapeHtml(String(factorScores.data_quality_score ?? '-'))}</span>
             <span class="score-chip">complete ${escapeHtml(String(factorScores.completeness_score ?? '-'))}</span>
           </div>
-          <div class="muted">详细原因：${escapeHtml((item.reason_summary || []).join('；') || '-')}</div>
-          <div class="muted">详细风险：${escapeHtml((item.risk_summary || []).join('；') || '-')}</div>
+          <div class="muted">详细原因：${escapeHtml(reasonsList.join('；') || '-')}</div>
+          <div class="muted">详细风险：${escapeHtml(risksList.join('；') || '-')}</div>
         </td>
       </tr>
     `;

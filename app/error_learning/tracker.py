@@ -265,6 +265,7 @@ class SelectionResultTracker:
                 "strategy_display_name": item.strategy_display_name,
                 "strategy_version": item.strategy_version,
                 "industry": item.industry,
+                "industry_display": item.industry or "暂无行业",
                 "factor_scores": item.factor_scores,
                 "selected_open_price": item.selected_open_price,
                 "selected_close_price": item.selected_close_price,
