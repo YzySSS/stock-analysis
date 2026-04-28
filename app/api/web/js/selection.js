@@ -1,5 +1,6 @@
 let currentDefaultStrategy = null;
 let lastSelectionResponse = null;
+let hasExecutedSelection = false;
 const savedSelectionKeys = new Set();
 
 function compareSelectionItems(sortBy, a, b) {
@@ -56,6 +57,13 @@ function renderStrategySummary(strategy) {
       <div class="muted">${escapeHtml(strategy.availability_note || '暂无状态说明')} · 完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
   `;
+}
+
+function renderSelectionPlaceholder(message = '请先设置条件并点击“运行”，再查看本次选股结果') {
+  const body = qs('#selection-results-body');
+  const summaryLine = qs('#selection-summary-line');
+  body.innerHTML = renderEmptyRow(14, message);
+  summaryLine.textContent = message;
 }
 
 function renderSelectionResults(data) {
@@ -252,6 +260,13 @@ async function loadSelectionResults(runIdOverride = null) {
   const runIdInput = (qs('#selection-run-id')?.value || '').trim();
   const strategyId = qs('#strategy-id')?.value || currentDefaultStrategy || '';
   const runId = runIdOverride || runIdInput;
+
+  if (!runId && !hasExecutedSelection) {
+    lastSelectionResponse = null;
+    renderSelectionPlaceholder();
+    return;
+  }
+
   const query = new URLSearchParams({ instrument_type: instrumentType, limit: String(limit) });
   if (runId) {
     query.set('run_id', runId);
@@ -289,6 +304,7 @@ async function runSelection(event) {
         save: false,
       }),
     });
+    hasExecutedSelection = true;
     if (result.run_id) {
       qs('#selection-run-id').value = result.run_id;
     }
@@ -300,7 +316,11 @@ async function runSelection(event) {
 
 async function refreshSelectionPage() {
   await loadStrategies();
-  await loadSelectionResults();
+  if (hasExecutedSelection || (qs('#selection-run-id')?.value || '').trim()) {
+    await loadSelectionResults();
+  } else {
+    renderSelectionPlaceholder();
+  }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -310,7 +330,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   qs('#refresh-results').addEventListener('click', () => loadSelectionResults());
   qs('#refresh-selection-page').addEventListener('click', refreshSelectionPage);
-  qs('#selection-min-score').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : loadSelectionResults());
+  qs('#selection-min-score').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : renderSelectionPlaceholder());
   qs('#selection-search').addEventListener('input', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
   qs('#selection-sort').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
   qs('#selection-industry').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
@@ -318,15 +338,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
     await loadSelectionResults();
   });
-  qs('#selection-run-id').addEventListener('change', () => loadSelectionResults());
+  qs('#selection-run-id').addEventListener('change', async () => {
+    hasExecutedSelection = Boolean((qs('#selection-run-id')?.value || '').trim());
+    await loadSelectionResults();
+  });
   qs('#strategy-id').addEventListener('change', async (event) => {
+    hasExecutedSelection = false;
+    lastSelectionResponse = null;
     qs('#selection-run-id').value = '';
     await loadStrategyDetail(event.target.value);
-    await loadSelectionResults();
+    renderSelectionPlaceholder();
   });
 
   try {
-    await refreshSelectionPage();
+    await loadStrategies();
+    renderSelectionPlaceholder();
     bindTooltips();
   } catch (error) {
     qs('#selection-summary-line').textContent = `页面初始化失败: ${error.message}`;
