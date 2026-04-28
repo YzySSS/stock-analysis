@@ -14,6 +14,12 @@ TRACKED_TASKS = [
     "fundamental_sync",
 ]
 
+TASK_NAME_LABELS = {
+    "daily_kline_increment": "日线增量更新",
+    "daily_kline_backfill": "历史日线补齐",
+    "fundamental_sync": "基本面补齐",
+}
+
 
 def _scalar(sql: str) -> int | None:
     with mysql_conn() as conn:
@@ -150,6 +156,7 @@ def _latest_task_runs() -> list[dict]:
         items.append(
             {
                 "task_name": row.get("task_name"),
+                "task_label": TASK_NAME_LABELS.get(row.get("task_name"), row.get("task_name")),
                 "run_id": row.get("run_id"),
                 "status": row.get("status"),
                 "started_at": str(row.get("started_at")) if row.get("started_at") else None,

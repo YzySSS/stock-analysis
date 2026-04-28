@@ -52,22 +52,30 @@ async function loadSystemPage() {
     } else {
       taskRunPanel.innerHTML = taskRuns.map((item) => {
         const meta = item.metadata || {};
+        const statusClass = item.status === 'success' ? 'status-ok' : item.status === 'failed' ? 'status-error' : item.status === 'running' ? 'status-warn' : '';
         const dateRange = meta.trade_date ? `交易日 ${escapeHtml(meta.trade_date)}` : `${escapeHtml(meta.start_date || '-')} → ${escapeHtml(meta.end_date || '-')}`;
         const progress = meta.success_codes != null
           ? `成功 ${escapeHtml(meta.success_codes)} / ${escapeHtml(meta.requested_codes ?? meta.limit ?? '-')}`
-          : (meta.updated != null ? `更新 ${escapeHtml(meta.updated)} / 扫描 ${escapeHtml(meta.scanned ?? '-')}` : '');
-        const rows = meta.rows_synced != null ? `写入 ${escapeHtml(meta.rows_synced)} 行` : '';
+          : (meta.updated != null ? `更新 ${escapeHtml(meta.updated)} / 扫描 ${escapeHtml(meta.scanned ?? '-')}` : '-');
+        const extraMetrics = [
+          meta.rows_synced != null ? `写入 ${escapeHtml(meta.rows_synced)} 行` : '',
+          meta.failed != null ? `失败 ${escapeHtml(meta.failed)}` : '',
+          meta.no_data != null ? `无数据 ${escapeHtml(meta.no_data)}` : '',
+        ].filter(Boolean).join(' · ');
         return `
-          <div class="preview-item">
+          <div class="preview-item task-run-item">
             <div class="preview-main">
-              <strong>${escapeHtml(item.task_name)}</strong>
-              <span class="muted">${escapeHtml(item.status || '-')} · ${dateRange}</span>
+              <div class="status-row">
+                <strong>${escapeHtml(item.task_label || item.task_name)}</strong>
+                <span class="badge ${statusClass}">${escapeHtml(item.status || '-')}</span>
+              </div>
+              <div class="muted">${dateRange}</div>
               <div class="muted">开始 ${escapeHtml(item.started_at || '-')} · 结束 ${escapeHtml(item.finished_at || '-')}</div>
               <div class="muted">${escapeHtml(item.message || '')}</div>
             </div>
-            <div class="preview-side">
-              <strong>${progress || '-'}</strong>
-              <span class="muted">${rows || '状态'}</span>
+            <div class="preview-side task-run-side">
+              <strong>${progress}</strong>
+              <span class="muted">${extraMetrics || '暂无额外指标'}</span>
             </div>
           </div>
         `;

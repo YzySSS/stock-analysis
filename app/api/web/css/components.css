@@ -293,3 +293,11 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+.task-run-item {
+  align-items: stretch;
+}
+
+.task-run-side {
+  min-width: 180px;
+}
