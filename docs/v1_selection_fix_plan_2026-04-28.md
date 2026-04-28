@@ -186,6 +186,20 @@ V1 现在已基本完成产品规则统一、结果一致性修复和策略状�
 
 ## 八、2026-04-28 晚间补充修复
 
+### 额外修复：策略加载失败与复盘删除
+
+1. **修复选股中心策略加载失败**
+   - 已定位根因：运行中的 uvicorn 仍是旧版本，且热修期间 `selection.py` 存在缩进错误，导致新服务无法正常拉起
+   - 已修复 `selection.py` 语法错误并重新拉起服务
+   - 当前 `/api/strategies`、`/api/strategies/detail`、`/api/selection/results` 已恢复正常返回
+
+2. **新增复盘跟踪删除选股结果能力**
+   - 新增接口：`DELETE /api/tracking/run?run_id=...&instrument_type=...`
+   - 删除范围：当前 instrument_type 下该 `run_id` 对应的全部 `selection_result` 记录
+   - 前端“跟踪复盘”页已新增按钮：`删除当前 run`
+   - 未指定 run_id 时不给删；找不到记录时返回明确 404 提示
+
+
 本轮继续修了选股结果可读性问题：
 
 1. **排名显性展示**

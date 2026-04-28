@@ -46,6 +46,12 @@ function renderReviewNotes(summary = {}, items = []) {
   `;
 }
 
+let lastTrackingState = {
+  runId: '',
+  limit: 20,
+  instrumentType: 'stock',
+};
+
 function renderTrackingTable(items, summary = {}) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
@@ -87,6 +93,7 @@ function renderTrackingTable(items, summary = {}) {
 async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stock' } = {}) {
   const summaryText = qs('#tracking-summary-text');
   summaryText.textContent = '加载中...';
+  lastTrackingState = { runId, limit, instrumentType };
 
   const url = runId
     ? `/api/tracking?run_id=${encodeURIComponent(runId)}&limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}`
@@ -102,6 +109,31 @@ async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stoc
   summaryText.textContent = runId
     ? `当前显示 run_id=${runId} 的复盘结果，共 ${items.length} 条`
     : `当前显示最新复盘快照，共 ${items.length} 条`;
+}
+
+async function deleteCurrentRun() {
+  const runId = qs('#tracking-run-id').value.trim() || lastTrackingState.runId;
+  const instrumentType = qs('#tracking-instrument-type').value || lastTrackingState.instrumentType || 'stock';
+  if (!runId) {
+    qs('#tracking-summary-text').textContent = '删除失败：请先输入或查询一个明确的 run_id';
+    return;
+  }
+
+  if (!window.confirm(`确认删除 run_id=${runId} 的选股结果吗？此操作会删除该 run 在当前类型下的全部记录。`)) {
+    return;
+  }
+
+  const button = qs('#tracking-delete-btn');
+  if (button) button.disabled = true;
+  try {
+    const query = new URLSearchParams({ run_id: runId, instrument_type: instrumentType });
+    const data = await fetchJson(`/api/tracking/run?${query.toString()}`, { method: 'DELETE' });
+    qs('#tracking-run-id').value = '';
+    qs('#tracking-summary-text').textContent = `已删除 run_id=${data.run_id}，共删除 ${data.deleted_count} 条记录`;
+    await loadTrackingData({ limit: lastTrackingState.limit, instrumentType });
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function handleTrackingFilter(event) {
@@ -127,6 +159,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       instrumentType: qs('#tracking-instrument-type').value,
     });
   });
+  qs('#tracking-delete-btn').addEventListener('click', deleteCurrentRun);
 
   try {
     await loadTrackingData();

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.error_learning.tracker import SelectionResultTracker
+from app.shared.db import mysql_conn
 
 router = APIRouter(tags=["tracking"])
 
@@ -78,4 +79,38 @@ def get_tracking_by_run(
         "run_id": run_id,
         "summary": _build_tracking_summary(items),
         "items": items,
+    }
+
+
+@router.delete("/tracking/run")
+def delete_tracking_run(run_id: str = Query(...), instrument_type: str = Query(default="stock")) -> dict:
+    with mysql_conn(dict_cursor=False) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM selection_result sr
+                INNER JOIN stock_basic sb ON sr.code = sb.code
+                WHERE sr.run_id = %s AND sb.instrument_type = %s
+                """,
+                (run_id, instrument_type),
+            )
+            matched_count = int((cursor.fetchone() or [0])[0] or 0)
+            if matched_count <= 0:
+                raise HTTPException(status_code=404, detail="未找到可删除的选股结果")
+
+            cursor.execute(
+                """
+                DELETE sr
+                FROM selection_result sr
+                INNER JOIN stock_basic sb ON sr.code = sb.code
+                WHERE sr.run_id = %s AND sb.instrument_type = %s
+                """,
+                (run_id, instrument_type),
+            )
+
+    return {
+        "run_id": run_id,
+        "instrument_type": instrument_type,
+        "deleted_count": matched_count,
     }

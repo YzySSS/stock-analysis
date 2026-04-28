@@ -80,6 +80,7 @@ def get_selection_results(
     if not resolved_run_id and run_meta.get("run_id"):
         resolved_run_id = run_meta.get("run_id")
 
+    resolved_strategy_id = strategy_id or run_meta.get("strategy_id")
     records = tracker.build_latest_selection_snapshot(
         limit=limit,
         instrument_type=instrument_type,
@@ -88,7 +89,9 @@ def get_selection_results(
     )
     items = tracker.to_dict_list(records)
 
-    resolved_strategy_id = strategy_id or (items[0].get("strategy_id") if items else run_meta.get("strategy_id"))
+    if not resolved_strategy_id and items:
+        resolved_strategy_id = items[0].get("strategy_id")
+
     service = StrategyService()
     strategy = service.get_strategy_detail(strategy_id=resolved_strategy_id) if resolved_strategy_id else None
 
@@ -98,22 +101,13 @@ def get_selection_results(
         "strategy": strategy,
         "summary": {
             "selected_trade_date": items[0].get("selection_date") if items else str(run_meta.get("trade_date") or "") or None,
-             "run_created_at": str(run_meta.get("created_at")) if run_meta.get("created_at") else None,
-             "latest_trade_date": items[0].get("latest_trade_date") if items else None,
-             "total_count": len(items),
-             "sample_size": _sample_size(instrument_type),
-             "instrument_type": instrument_type,
-             "updated_at": items[0].get("latest_trade_date") if items else None,
-+            "result_strategy_id": resolved_strategy_id,
-         },
-         "items": items,
-     }
             "run_created_at": str(run_meta.get("created_at")) if run_meta.get("created_at") else None,
             "latest_trade_date": items[0].get("latest_trade_date") if items else None,
             "total_count": len(items),
             "sample_size": _sample_size(instrument_type),
             "instrument_type": instrument_type,
             "updated_at": items[0].get("latest_trade_date") if items else None,
+            "result_strategy_id": resolved_strategy_id,
         },
         "items": items,
     }
