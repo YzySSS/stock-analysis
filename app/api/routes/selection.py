@@ -13,7 +13,7 @@ router = APIRouter(tags=["selection"])
 
 class SelectionRunRequest(BaseModel):
     strategy_id: Optional[str] = None
-    limit: int = 20
+    limit: int = 3
     instrument_type: str = "stock"
     save: bool = True
 
@@ -65,7 +65,7 @@ def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None) -> dict
 @router.get("/selection/results")
 def get_selection_results(
     run_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=3, ge=1, le=200),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
     from app.error_learning.tracker import SelectionResultTracker

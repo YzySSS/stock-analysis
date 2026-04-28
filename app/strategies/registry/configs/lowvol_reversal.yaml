@@ -1,6 +1,6 @@
 selection:
-  score_threshold: 0.55
-  max_picks: 5
+  score_threshold: 60
+  max_picks: 3
 
 factors:
   turnover:

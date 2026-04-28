@@ -21,7 +21,7 @@ class StockSelector:
 
     @staticmethod
     def _round_score(value: float) -> float:
-        return round(max(0.0, min(value, 1.0)), 4)
+        return round(max(0.0, min(value, 100.0)), 2)
 
     def _build_candidate(self, row: Dict[str, Any]) -> Dict[str, Any]:
         pe = float(row["pe_tushare"]) if row.get("pe_tushare") is not None else None
@@ -114,9 +114,9 @@ class StockSelector:
             risks.append("缺少 ROE 数据")
 
         completeness = 1 - (len(set(missing_fields)) / 4 if missing_fields else 0)
-        reversal_score = self._round_score(0.35 + quality_score * 0.25 + value_score * 0.15)
-        turnover_score = self._round_score(0.30 + stability_score * 0.30 + data_quality_score * 0.20)
-        lowvol_score = self._round_score(0.30 + value_score * 0.35 + stability_score * 0.20)
+        reversal_score = self._round_score((0.35 + quality_score * 0.25 + value_score * 0.15) * 100)
+        turnover_score = self._round_score((0.30 + stability_score * 0.30 + data_quality_score * 0.20) * 100)
+        lowvol_score = self._round_score((0.30 + value_score * 0.35 + stability_score * 0.20) * 100)
 
         fundamental_context = {
             "roe": roe,

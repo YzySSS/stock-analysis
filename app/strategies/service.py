@@ -12,6 +12,7 @@ class StrategyService:
 
     def list_strategies(self) -> List[Dict[str, Any]]:
         default_strategy = self.get_default_strategy_id()
+        runtime_ready_ids = {"lowvol_reversal"}
         return [
             {
                 "id": item.get("id"),
@@ -22,6 +23,7 @@ class StrategyService:
                 "description": item.get("description"),
                 "tags": item.get("tags", []),
                 "executable": bool(item.get("executable", True)),
+                "runtime_ready": item.get("id") in runtime_ready_ids and bool(item.get("executable", True)),
                 "is_default": item.get("id") == default_strategy,
             }
             for item in self.loader.registry.get("strategies", [])

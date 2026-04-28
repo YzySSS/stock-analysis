@@ -43,7 +43,7 @@ function renderStrategySummary(strategy) {
       </div>
       <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · ${strategy.executable === false ? '仅展示' : '可执行'}</div>
       <div>${escapeHtml(strategy.description || '')}</div>
-      <div class="muted">阈值: ${strategy.score_threshold ?? '-'} · 最多入选: ${strategy.max_picks ?? '-'}</div>
+      <div class="muted">阈值: ${strategy.score_threshold ?? '-'} 分 · 最多入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
       <div class="muted">完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
@@ -54,7 +54,7 @@ function renderSelectionResults(data) {
   const body = qs('#selection-results-body');
   const summaryLine = qs('#selection-summary-line');
   const topSummary = qs('#selection-top-summary');
-  const minScore = Number(qs('#selection-min-score')?.value || 0);
+  const minScore = Number(qs('#selection-min-score')?.value || 60);
   const searchText = (qs('#selection-search')?.value || '').trim().toLowerCase();
   const industryValue = (qs('#selection-industry')?.value || '').trim();
   const sortBy = qs('#selection-sort')?.value || 'rank_asc';
@@ -74,7 +74,7 @@ function renderSelectionResults(data) {
   items = [...items].sort((a, b) => compareSelectionItems(sortBy, a, b));
 
   summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${items.length} / ${summary.total_count || 0} 条`;
-  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 入选数：${summary.total_count || 0} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'}`;
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 入选数：${summary.total_count || 0} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 阈值：${data.strategy?.score_threshold ?? '-'} 分`;
 
   if (!items.length) {
     body.innerHTML = renderEmptyRow(13, '当前筛选条件下暂无选股结果');
@@ -117,7 +117,7 @@ function renderSelectionResults(data) {
         <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
         <td class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</td>
-        <td>${formatNumber(item.score, 4)}</td>
+        <td>${formatNumber(item.score, 2)}</td>
         <td>${item.rank_no ?? '-'}</td>
         <td>${escapeHtml(item.review_status || '-')}</td>
         <td>${escapeHtml(reasons)}</td>
@@ -156,19 +156,21 @@ async function loadStrategies() {
   const select = qs('#strategy-id');
   select.innerHTML = '';
 
-  const strategies = data.strategies || [];
-  currentDefaultStrategy = data.default_strategy || null;
+  const strategies = (data.strategies || []).filter((item) => item.executable !== false);
+  currentDefaultStrategy = strategies.find((item) => item.id === data.default_strategy)?.id || strategies[0]?.id || null;
 
   strategies.forEach((item) => {
     const option = document.createElement('option');
     option.value = item.id;
-    option.textContent = `${item.display_name || item.id} (${item.id})${item.executable === false ? ' · 仅展示' : ''}`;
-    if (item.id === data.default_strategy) option.selected = true;
+    option.textContent = `${item.display_name || item.id} (${item.id})`;
+    if (item.id === currentDefaultStrategy) option.selected = true;
     select.appendChild(option);
   });
 
   if (select.value) {
     await loadStrategyDetail(select.value);
+  } else {
+    renderStrategySummary(null);
   }
 }
 
@@ -178,14 +180,18 @@ async function loadStrategyDetail(strategyId) {
   renderStrategySummary(data.strategy);
 }
 
-async function loadSelectionResults() {
+async function loadSelectionResults(runIdOverride = null) {
   const instrumentType = qs('#instrument-type').value || 'stock';
-  const limit = Number(qs('#limit').value || 20);
-  const runId = (qs('#selection-run-id')?.value || '').trim();
+  const limit = Number(qs('#limit').value || 3);
+  const runIdInput = (qs('#selection-run-id')?.value || '').trim();
+  const runId = runIdOverride || runIdInput;
   const query = new URLSearchParams({ instrument_type: instrumentType, limit: String(limit) });
   if (runId) query.set('run_id', runId);
   const data = await fetchJson(`/api/selection/results?${query.toString()}`);
   lastSelectionResponse = data;
+  if (data.run_id && !runIdOverride) {
+    qs('#selection-run-id').value = data.run_id;
+  }
   renderSelectionResults(data);
   if (data.strategy) {
     renderStrategySummary(data.strategy);
@@ -198,17 +204,20 @@ async function runSelection(event) {
   if (button) button.disabled = true;
 
   try {
-    await fetchJson('/api/selection/run', {
+    const result = await fetchJson('/api/selection/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         strategy_id: qs('#strategy-id').value || null,
         instrument_type: qs('#instrument-type').value,
-        limit: Number(qs('#limit').value || 20),
+        limit: Number(qs('#limit').value || 3),
         save: true,
       }),
     });
-    await loadSelectionResults();
+    if (result.run_id) {
+      qs('#selection-run-id').value = result.run_id;
+    }
+    await loadSelectionResults(result.run_id || null);
   } finally {
     if (button) button.disabled = false;
   }
@@ -224,7 +233,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   qs('#refresh-strategies').addEventListener('click', async () => {
     await loadStrategies();
   });
-  qs('#refresh-results').addEventListener('click', loadSelectionResults);
+  qs('#refresh-results').addEventListener('click', () => loadSelectionResults());
   qs('#refresh-selection-page').addEventListener('click', refreshSelectionPage);
   qs('#selection-min-score').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : loadSelectionResults());
   qs('#selection-search').addEventListener('input', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
@@ -234,7 +243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
     await loadSelectionResults();
   });
-  qs('#selection-run-id').addEventListener('change', loadSelectionResults);
+  qs('#selection-run-id').addEventListener('change', () => loadSelectionResults());
   qs('#strategy-id').addEventListener('change', async (event) => {
     await loadStrategyDetail(event.target.value);
   });
