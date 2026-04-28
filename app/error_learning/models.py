@@ -18,6 +18,7 @@ class SelectionTrackingRecord:
     current_price: Optional[float]
     price_change_pct: Optional[float]
     run_id: Optional[str] = None
+    latest_run_id: Optional[str] = None
     rank_no: Optional[int] = None
     selected_close_price: Optional[float] = None
     latest_trade_date: Optional[str] = None

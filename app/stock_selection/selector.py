@@ -324,8 +324,7 @@ class StockSelector:
             run_id, trade_date, strategy_id, code, score, rank_no, metadata_json
         ) VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
-            trade_date = VALUES(trade_date),
-            strategy_id = VALUES(strategy_id),
+            run_id = VALUES(run_id),
             score = VALUES(score),
             rank_no = VALUES(rank_no),
             metadata_json = VALUES(metadata_json)
@@ -366,9 +365,20 @@ class StockSelector:
                 )
             )
 
+        dedupe_sql = """
+        DELETE newer
+        FROM selection_result newer
+        INNER JOIN selection_result older
+          ON newer.trade_date = older.trade_date
+         AND newer.strategy_id = older.strategy_id
+         AND newer.code = older.code
+         AND newer.id > older.id
+        """
+
         with mysql_conn(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
                 cursor.executemany(sql, payload)
+                cursor.execute(dedupe_sql)
 
         return final_run_id
 

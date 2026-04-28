@@ -74,8 +74,8 @@
         </div>
         <form id="tracking-filter-form" class="inline-form">
           <div class="form-group">
-            <label for="tracking-run-id">run_id</label>
-            <input id="tracking-run-id" type="text" placeholder="为空则取最新" />
+            <label for="tracking-run-id">临时 run_id（排查用）</label>
+            <input id="tracking-run-id" type="text" placeholder="一般不用填；留空看持久化复盘结果" />
           </div>
           <div class="form-group small-field">
             <label for="tracking-limit">limit</label>
@@ -91,7 +91,7 @@
           </div>
           <div class="actions align-end">
             <button class="btn btn-primary" type="submit">查询</button>
-            <button id="tracking-latest-btn" class="btn btn-secondary" type="button">查看最新</button>
+            <button id="tracking-latest-btn" class="btn btn-secondary" type="button">查看当前复盘池</button>
             <button id="tracking-delete-btn" class="btn btn-danger" type="button">删除当前 run</button>
           </div>
         </form>
@@ -142,7 +142,7 @@
     </main>
   </div>
 
-  <script src="/static/js/common.js"></script>
-  <script src="/static/js/tracking.js"></script>
+  <script src="/static/js/common.js?v=20260428d"></script>
+  <script src="/static/js/tracking.js?v=20260428d"></script>
 </body>
 </html>

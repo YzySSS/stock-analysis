@@ -56,9 +56,10 @@ def _build_tracking_summary(items: list[dict]) -> dict:
 def get_latest_tracking(
     limit: int = Query(default=20, ge=1, le=200),
     instrument_type: str = Query(default="stock"),
+    strategy_id: Optional[str] = Query(default=None),
 ) -> dict:
     tracker = SelectionResultTracker()
-    records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type)
+    records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type, strategy_id=strategy_id)
     items = tracker.to_dict_list(records)
     return {
         "summary": _build_tracking_summary(items),
@@ -69,14 +70,16 @@ def get_latest_tracking(
 @router.get("/tracking")
 def get_tracking_by_run(
     run_id: Optional[str] = Query(default=None),
+    strategy_id: Optional[str] = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
     tracker = SelectionResultTracker()
-    records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type, run_id=run_id)
+    records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type, run_id=run_id, strategy_id=strategy_id)
     items = tracker.to_dict_list(records)
     return {
         "run_id": run_id,
+        "strategy_id": strategy_id,
         "summary": _build_tracking_summary(items),
         "items": items,
     }

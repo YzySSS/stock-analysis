@@ -32,6 +32,7 @@ class SelectionResultTracker:
         sql = """
         SELECT
             sr.run_id,
+            sr.run_id AS latest_run_id,
             sr.rank_no,
             sr.trade_date AS selection_date,
             sr.strategy_id,
@@ -63,12 +64,18 @@ class SelectionResultTracker:
         if run_id:
             sql += " AND sr.run_id = %s"
             params.append(run_id)
-        elif strategy_id:
-            sql += " AND sr.run_id = (SELECT run_id FROM selection_result WHERE strategy_id = %s ORDER BY created_at DESC LIMIT 1)"
-            params.append(strategy_id)
+            sql += " ORDER BY sr.rank_no ASC, sr.id ASC LIMIT %s"
         else:
-            sql += " AND sr.run_id = (SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1)"
-        sql += " ORDER BY sr.rank_no ASC, sr.id ASC LIMIT %s"
+            latest_trade_date_sql = "SELECT MAX(sr2.trade_date) FROM selection_result sr2 INNER JOIN stock_basic sb2 ON sr2.code = sb2.code WHERE sb2.instrument_type = %s"
+            latest_params: List[Any] = [instrument_type]
+            if strategy_id:
+                latest_trade_date_sql += " AND sr2.strategy_id = %s"
+                latest_params.append(strategy_id)
+                sql += " AND sr.strategy_id = %s"
+                params.append(strategy_id)
+            sql += f" AND sr.trade_date = ({latest_trade_date_sql})"
+            params.extend(latest_params)
+            sql += " ORDER BY sr.rank_no ASC, sr.id DESC LIMIT %s"
         params.append(limit)
 
         with mysql_conn() as conn:
@@ -179,6 +186,7 @@ class SelectionResultTracker:
 
         return SelectionTrackingRecord(
             run_id=row.get("run_id"),
+            latest_run_id=row.get("latest_run_id") or row.get("run_id"),
             rank_no=row.get("rank_no"),
             code=row["code"],
             name=row["name"],
@@ -230,6 +238,7 @@ class SelectionResultTracker:
         }
 
         return SelectionTrackingRecord(
+            latest_run_id=None,
             code=row["code"],
             name=row["name"],
             selection_date=str(row["selection_date"]) if row.get("selection_date") else "",
@@ -256,6 +265,8 @@ class SelectionResultTracker:
         return [
             {
                 "run_id": item.run_id,
+                "latest_run_id": item.latest_run_id,
+                "persisted_key": "::".join([item.selection_date or "", item.strategy_id or "", item.code or ""]),
                 "rank_no": item.rank_no,
                 "code": item.code,
                 "name": item.name,

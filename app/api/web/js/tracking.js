@@ -25,8 +25,7 @@ function renderReviewSummary(summary = {}, runId = '', items = []) {
         <strong>${escapeHtml(strategyName)}</strong>
         <span class="badge status-ok">${summary.count ?? 0} 条</span>
       </div>
-      <div class="muted">run_id：${escapeHtml(runId || items[0]?.run_id || '最新')}</div>
-      <div class="muted">选股日期：${escapeHtml(selectionDate)} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
+      <div class="muted">选股日期：${escapeHtml(selectionDate)} · 策略：${escapeHtml(items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照')} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
       <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)} · 超额收益：${formatPercent(summary.excess_return_pct)}</div>
       <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
       <div class="muted">表现最好：${best ? `${escapeHtml(best.name || best.code || '-')} (${formatPercent(best.price_change_pct)})` : '暂无'}</div>
@@ -51,6 +50,7 @@ function renderReviewNotes(summary = {}, items = []) {
 
 let lastTrackingState = {
   runId: '',
+  strategyId: '',
   limit: 20,
   instrumentType: 'stock',
 };
@@ -93,14 +93,17 @@ function renderTrackingTable(items, summary = {}) {
   }).join('');
 }
 
-async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stock' } = {}) {
+async function loadTrackingData({ runId = '', strategyId = '', limit = 20, instrumentType = 'stock' } = {}) {
   const summaryText = qs('#tracking-summary-text');
   summaryText.textContent = '加载中...';
-  lastTrackingState = { runId, limit, instrumentType };
+  if (!runId) {
+    qs('#tracking-run-id').value = '';
+  }
+  lastTrackingState = { runId, strategyId, limit, instrumentType };
 
   const url = runId
     ? `/api/tracking?run_id=${encodeURIComponent(runId)}&limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}`
-    : `/api/tracking/latest?limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}`;
+    : `/api/tracking/latest?limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}${strategyId ? `&strategy_id=${encodeURIComponent(strategyId)}` : ''}`;
 
   const data = await fetchJson(url);
   const items = data.items || [];
@@ -110,7 +113,7 @@ async function loadTrackingData({ runId = '', limit = 20, instrumentType = 'stoc
   renderReviewSummary(summary, runId, items);
   renderReviewNotes(summary, items);
   summaryText.textContent = runId
-    ? `当前显示 run_id=${runId} 的复盘结果，共 ${items.length} 条`
+    ? `当前显示本次查询结果，共 ${items.length} 条`
     : `当前显示最新复盘快照，共 ${items.length} 条`;
 }
 
@@ -118,7 +121,7 @@ async function deleteCurrentRun() {
   const runId = qs('#tracking-run-id').value.trim() || lastTrackingState.runId;
   const instrumentType = qs('#tracking-instrument-type').value || lastTrackingState.instrumentType || 'stock';
   if (!runId) {
-    qs('#tracking-summary-text').textContent = '删除失败：请先输入或查询一个明确的 run_id';
+    qs('#tracking-summary-text').textContent = '删除失败：当前复盘池默认按“日期 + 策略 + 股票”聚合，若要按 run_id 删除，请先手动输入一个明确的 run_id 进入排查模式';
     return;
   }
 
@@ -144,6 +147,7 @@ async function handleTrackingFilter(event) {
   try {
     await loadTrackingData({
       runId: qs('#tracking-run-id').value.trim(),
+      strategyId: '',
       limit: Number(qs('#tracking-limit').value || 20),
       instrumentType: qs('#tracking-instrument-type').value,
     });
@@ -158,6 +162,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   qs('#tracking-latest-btn').addEventListener('click', async () => {
     qs('#tracking-run-id').value = '';
     await loadTrackingData({
+      strategyId: 'lowvol_reversal',
       limit: Number(qs('#tracking-limit').value || 20),
       instrumentType: qs('#tracking-instrument-type').value,
     });
@@ -165,7 +170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   qs('#tracking-delete-btn').addEventListener('click', deleteCurrentRun);
 
   try {
-    await loadTrackingData();
+    await loadTrackingData({ strategyId: 'lowvol_reversal' });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
     qs('#tracking-results-body').innerHTML = renderEmptyRow(11, error.message);

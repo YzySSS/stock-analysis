@@ -3,6 +3,14 @@ let lastSelectionResponse = null;
 let hasExecutedSelection = false;
 const savedSelectionKeys = new Set();
 
+function buildSelectionPersistKey(item) {
+  return [
+    item.selection_date || item.trade_date || '',
+    item.strategy_id || '',
+    item.code || '',
+  ].join('::');
+}
+
 function compareSelectionItems(sortBy, a, b) {
   if (sortBy === 'score_desc') return (Number(b.score ?? -999) - Number(a.score ?? -999));
   if (sortBy === 'change_desc') return (Number(b.price_change_pct ?? -999) - Number(a.price_change_pct ?? -999));
@@ -98,6 +106,26 @@ function normalizeRunResponse(result) {
       review_status: 'preview',
       max_gain_pct: 0,
       max_drawdown_pct: 0,
+      instrument_type: item.instrument_type || qs('#instrument-type')?.value || 'stock',
+      explain: explain,
+      factors: item.factors || {},
+      candidate_reasons: item.candidate_reasons || explain.reasons || [],
+      candidate_risks: item.candidate_risks || explain.risks || [],
+      missing_fields: item.missing_fields || explain.missing_fields || [],
+      close: item.close ?? null,
+      pe_tushare: item.pe_tushare ?? null,
+      pb_tushare: item.pb_tushare ?? null,
+      roe: item.roe ?? null,
+      roa: item.roa ?? null,
+      grossprofit_margin: item.grossprofit_margin ?? null,
+      netprofit_margin: item.netprofit_margin ?? null,
+      revenue_yoy: item.revenue_yoy ?? null,
+      profit_yoy: item.profit_yoy ?? null,
+      value_score: item.value_score ?? explain.summary?.value_score ?? null,
+      quality_score: item.quality_score ?? explain.summary?.quality_score ?? null,
+      stability_score: item.stability_score ?? explain.summary?.stability_score ?? null,
+      data_quality_score: item.data_quality_score ?? explain.summary?.data_quality_score ?? null,
+      completeness_score: item.completeness_score ?? explain.summary?.completeness_score ?? null,
     };
   });
 
@@ -163,7 +191,7 @@ function renderSelectionResults(data) {
     const risks = risksList.slice(0, 2).join('；') || '-';
     const detailId = `selection-detail-${index}`;
     const factorScores = item.factor_scores || {};
-    const saveKey = `${data.run_id || item.run_id || 'preview'}::${item.code || ''}`;
+    const saveKey = buildSelectionPersistKey(item);
     const isSaved = savedSelectionKeys.has(saveKey);
     const turnover = factorScores.turnover ?? '-';
     const lowvol = factorScores.lowvol ?? '-';
@@ -199,7 +227,7 @@ function renderSelectionResults(data) {
         <td>${escapeHtml(item.selection_date || '-')}</td>
         <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
-        <td class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</td>
+        <td class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</td>
         <td>
           <div>${formatNumber(item.score, 2)}</div>
           <div class="muted">${escapeHtml(factorSummary)}</div>
@@ -226,7 +254,7 @@ function renderSelectionResults(data) {
         <td colspan="14">
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 版本：${escapeHtml(item.strategy_version || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
           <div class="muted">行业：${escapeHtml(item.industry_display || '暂无行业')} · 排名：第 ${escapeHtml(String(item.rank_no ?? '-'))} 名 · 总分：${escapeHtml(String(formatNumber(item.score, 2)))}</div>
-          <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
+          <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
           <div class="muted">三因子得分：换手=${escapeHtml(String(turnover))} / 低波=${escapeHtml(String(lowvol))} / 反转=${escapeHtml(String(reversal))}</div>
           <div class="score-chip-list">
             <span class="score-chip">value ${escapeHtml(String(factorScores.value_score ?? '-'))}</span>
@@ -265,11 +293,14 @@ function renderSelectionResults(data) {
             item,
           }),
         });
-        savedSelectionKeys.add(`${response.run_id}::${response.code}`);
+        const persistedKey = buildSelectionPersistKey(item);
+        savedSelectionKeys.add(persistedKey);
         savedSelectionKeys.add(button.getAttribute('data-selection-save'));
         button.textContent = '已保存';
         button.classList.remove('btn-primary');
-        button.classList.add('btn-secondary');
+        if (!button.classList.contains('btn-secondary')) {
+          button.classList.add('btn-secondary');
+        }
       } catch (error) {
         button.disabled = false;
         throw error;
@@ -334,6 +365,9 @@ async function loadSelectionResults(runIdOverride = null) {
   if (!runId && data.requested_strategy_id && qs('#strategy-id')) {
     qs('#strategy-id').value = data.requested_strategy_id;
   }
+  (data.items || []).forEach((item) => {
+    if (item.persisted_key) savedSelectionKeys.add(item.persisted_key);
+  });
   renderSelectionResults(data);
   if (data.strategy) {
     renderStrategySummary(data.strategy);
@@ -363,6 +397,9 @@ async function runSelection(event) {
     }
     const normalized = normalizeRunResponse(result);
     lastSelectionResponse = normalized;
+    (normalized.items || []).forEach((item) => {
+      if (item.persisted_key) savedSelectionKeys.add(item.persisted_key);
+    });
     renderSelectionResults(normalized);
     if (normalized.strategy) {
       renderStrategySummary(normalized.strategy);
