@@ -120,6 +120,7 @@ class StrategyService:
         limit: int = 50,
         instrument_type: str = "stock",
         save: bool = True,
+        score_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         strategy_meta = self.get_strategy_meta(final_strategy_id)
@@ -127,7 +128,11 @@ class StrategyService:
         if not serialized_meta.get("runtime_ready"):
             raise ValueError(f"策略 {final_strategy_id} 当前未接通 V1 执行链路，暂不可运行")
 
-        selector = StockSelector(strategy_id=final_strategy_id)
+        overrides = {}
+        if score_threshold is not None:
+            overrides["score_threshold"] = float(score_threshold)
+
+        selector = StockSelector(strategy_id=final_strategy_id, strategy_overrides=overrides)
 
         if save:
             result = selector.run_and_save(limit=limit, instrument_type=instrument_type)
@@ -148,5 +153,6 @@ class StrategyService:
             "runtime_ready": serialized_meta.get("runtime_ready"),
             "availability": serialized_meta.get("availability"),
             "availability_label": serialized_meta.get("availability_label"),
+            "score_threshold": selector.strategy.config.get("score_threshold"),
         }
         return result

@@ -9,11 +9,21 @@ from app.shared.strategy_loader import StrategyLoader
 
 
 class StockSelector:
-    def __init__(self, strategy_id: Optional[str] = None):
+    def __init__(self, strategy_id: Optional[str] = None, strategy_overrides: Optional[Dict[str, Any]] = None):
         self.loader = StrategyLoader()
         self.strategy_id = strategy_id or self.loader.get_default_strategy_id()
         self.strategy_meta = self.loader.get_strategy_meta(self.strategy_id)
         self.strategy = self.loader.load_strategy(self.strategy_id)
+        self.strategy_overrides = strategy_overrides or {}
+        self._apply_strategy_overrides()
+
+    def _apply_strategy_overrides(self) -> None:
+        if not self.strategy_overrides:
+            return
+        for key, value in self.strategy_overrides.items():
+            if value is None:
+                continue
+            self.strategy.config[key] = value
 
     @staticmethod
     def build_run_id(prefix: str = "selection") -> str:
@@ -368,6 +378,7 @@ class StockSelector:
             "strategy_id": self.strategy_id,
             "strategy_display_name": self.strategy_meta.get("display_name"),
             "strategy_version": self.strategy_meta.get("version"),
+            "score_threshold": self.strategy.config.get("score_threshold"),
             "count": len(results),
             "results": results,
         }

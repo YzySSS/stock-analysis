@@ -14,6 +14,7 @@ router = APIRouter(tags=["selection"])
 class SelectionRunRequest(BaseModel):
     strategy_id: Optional[str] = None
     limit: int = 3
+    score_threshold: Optional[float] = None
     instrument_type: str = "stock"
     save: bool = True
 
@@ -26,6 +27,7 @@ def run_selection(payload: SelectionRunRequest) -> dict:
         limit=payload.limit,
         instrument_type=payload.instrument_type,
         save=payload.save,
+        score_threshold=payload.score_threshold,
     )
 
 

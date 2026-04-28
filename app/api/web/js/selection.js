@@ -50,7 +50,7 @@ function renderStrategySummary(strategy) {
       </div>
       <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · 版本: ${escapeHtml(strategy.version || '-')}</div>
       <div>${escapeHtml(strategy.description || '')}</div>
-      <div class="muted">阈值底线: ${strategy.score_threshold ?? '-'} 分 · 最大入选: ${strategy.max_picks ?? '-'}</div>
+      <div class="muted">当前运行阈值: ${strategy.score_threshold ?? '-'} 分 · 最大入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
       <div class="muted">${escapeHtml(strategy.availability_note || '暂无状态说明')} · 完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
@@ -82,7 +82,7 @@ function renderSelectionResults(data) {
   items = [...items].sort((a, b) => compareSelectionItems(sortBy, a, b));
 
   summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
-  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 分数底线：${data.strategy?.score_threshold ?? '-'} 分`;
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分`;
 
   if (!originalItems.length) {
     body.innerHTML = renderEmptyRow(13, '本次运行未产生任何入选结果');
@@ -251,6 +251,7 @@ async function runSelection(event) {
         strategy_id: qs('#strategy-id').value || null,
         instrument_type: qs('#instrument-type').value,
         limit: Number(qs('#limit').value || 3),
+        score_threshold: Number(qs('#selection-min-score').value || 60),
         save: true,
       }),
     });
