@@ -1,5 +1,6 @@
 let currentDefaultStrategy = null;
 let lastSelectionResponse = null;
+const savedSelectionKeys = new Set();
 
 function compareSelectionItems(sortBy, a, b) {
   if (sortBy === 'score_desc') return (Number(b.score ?? -999) - Number(a.score ?? -999));
@@ -85,12 +86,12 @@ function renderSelectionResults(data) {
   topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分`;
 
   if (!originalItems.length) {
-    body.innerHTML = renderEmptyRow(13, '本次运行未产生任何入选结果');
+    body.innerHTML = renderEmptyRow(14, '本次运行未产生任何入选结果');
     return;
   }
 
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(13, '无达标股：当前入选结果中没有股票达到设定分数底线');
+    body.innerHTML = renderEmptyRow(14, '无达标股：当前入选结果中没有股票达到设定分数底线');
     return;
   }
 
@@ -101,6 +102,8 @@ function renderSelectionResults(data) {
     const risks = risksList.slice(0, 2).join('；') || '-';
     const detailId = `selection-detail-${index}`;
     const factorScores = item.factor_scores || {};
+    const saveKey = `${data.run_id || item.run_id || 'preview'}::${item.code || ''}`;
+    const isSaved = savedSelectionKeys.has(saveKey);
     const turnover = factorScores.turnover ?? '-';
     const lowvol = factorScores.lowvol ?? '-';
     const reversal = factorScores.reversal ?? '-';
@@ -153,10 +156,13 @@ function renderSelectionResults(data) {
           <div>${escapeHtml(risks)}</div>
           <div class="muted">共 ${risksList.length} 条</div>
         </td>
+        <td>
+          <button class="btn ${isSaved ? 'btn-secondary' : 'btn-primary'}" type="button" data-selection-save="${escapeHtml(saveKey)}" ${isSaved ? 'disabled' : ''}>${isSaved ? '已保存' : '保存'}</button>
+        </td>
         <td><button class="btn btn-secondary" type="button" data-selection-detail="${detailId}" data-tooltip="${escapeHtml(detailText)}">查看</button></td>
       </tr>
       <tr id="${detailId}" class="selection-detail-row" hidden>
-        <td colspan="13">
+        <td colspan="14">
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 版本：${escapeHtml(item.strategy_version || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
           <div class="muted">行业：${escapeHtml(item.industry_display || '暂无行业')} · 排名：第 ${escapeHtml(String(item.rank_no ?? '-'))} 名 · 总分：${escapeHtml(String(formatNumber(item.score, 2)))}</div>
           <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct)}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
@@ -179,6 +185,34 @@ function renderSelectionResults(data) {
     button.addEventListener('click', () => {
       const detailRow = qs(`#${button.getAttribute('data-selection-detail')}`);
       if (detailRow) detailRow.hidden = !detailRow.hidden;
+    });
+  });
+
+  body.querySelectorAll('[data-selection-save]').forEach((button, index) => {
+    button.addEventListener('click', async () => {
+      const item = items[index];
+      if (!item) return;
+      button.disabled = true;
+      try {
+        const response = await fetchJson('/api/selection/save-item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            run_id: data.run_id || item.run_id,
+            strategy_id: item.strategy_id || data.strategy?.id,
+            score_threshold: data.strategy?.score_threshold ?? Number(qs('#selection-min-score')?.value || 60),
+            item,
+          }),
+        });
+        savedSelectionKeys.add(`${response.run_id}::${response.code}`);
+        savedSelectionKeys.add(button.getAttribute('data-selection-save'));
+        button.textContent = '已保存';
+        button.classList.remove('btn-primary');
+        button.classList.add('btn-secondary');
+      } catch (error) {
+        button.disabled = false;
+        throw error;
+      }
     });
   });
 }
@@ -252,7 +286,7 @@ async function runSelection(event) {
         instrument_type: qs('#instrument-type').value,
         limit: Number(qs('#limit').value || 3),
         score_threshold: Number(qs('#selection-min-score').value || 60),
-        save: true,
+        save: false,
       }),
     });
     if (result.run_id) {

@@ -295,12 +295,13 @@ class StockSelector:
         return [
             {
                 **item,
+                "rank_no": index,
                 "explain": self._enhance_explain(item),
                 "strategy_id": self.strategy_id,
                 "strategy_display_name": self.strategy_meta.get("display_name"),
                 "strategy_version": self.strategy_meta.get("version"),
             }
-            for item in selected
+            for index, item in enumerate(selected, start=1)
         ]
 
     def run_from_mysql(self, limit: int = 50, instrument_type: str = "stock") -> List[Dict[str, Any]]:
@@ -337,6 +338,7 @@ class StockSelector:
                 "instrument_type": item.get("instrument_type"),
                 "strategy_display_name": item.get("strategy_display_name") or self.strategy_meta.get("display_name"),
                 "strategy_version": item.get("strategy_version") or self.strategy_meta.get("version"),
+                "saved_from_run_id": item.get("run_id"),
                 "factors": item.get("factors", {}),
                 "explain": item.get("explain", {}),
                 "raw_metrics": {
@@ -359,7 +361,7 @@ class StockSelector:
                     item.get("strategy_id") or self.strategy_id,
                     item.get("code"),
                     item.get("score"),
-                    index,
+                    item.get("rank_no") or index,
                     json.dumps(metadata, ensure_ascii=False),
                 )
             )
@@ -369,6 +371,9 @@ class StockSelector:
                 cursor.executemany(sql, payload)
 
         return final_run_id
+
+    def save_single_result(self, item: Dict[str, Any], run_id: Optional[str] = None) -> str:
+        return self.save_selection_results([item], run_id=run_id, trade_date=item.get("trade_date"))
 
     def run_and_save(self, limit: int = 50, instrument_type: str = "stock", run_id: Optional[str] = None) -> Dict[str, Any]:
         results = self.run_from_mysql(limit=limit, instrument_type=instrument_type)

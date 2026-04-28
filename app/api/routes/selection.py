@@ -16,7 +16,14 @@ class SelectionRunRequest(BaseModel):
     limit: int = 3
     score_threshold: Optional[float] = None
     instrument_type: str = "stock"
-    save: bool = True
+    save: bool = False
+
+
+class SelectionSaveItemRequest(BaseModel):
+    run_id: str
+    strategy_id: str
+    score_threshold: Optional[float] = None
+    item: dict
 
 
 @router.post("/selection/run")
@@ -27,6 +34,18 @@ def run_selection(payload: SelectionRunRequest) -> dict:
         limit=payload.limit,
         instrument_type=payload.instrument_type,
         save=payload.save,
+        score_threshold=payload.score_threshold,
+        run_id=None,
+    )
+
+
+@router.post("/selection/save-item")
+def save_selection_item(payload: SelectionSaveItemRequest) -> dict:
+    service = StrategyService()
+    return service.save_strategy_result(
+        strategy_id=payload.strategy_id,
+        item=payload.item,
+        run_id=payload.run_id,
         score_threshold=payload.score_threshold,
     )
 

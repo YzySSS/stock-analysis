@@ -121,6 +121,7 @@ class StrategyService:
         instrument_type: str = "stock",
         save: bool = True,
         score_threshold: Optional[float] = None,
+        run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         strategy_meta = self.get_strategy_meta(final_strategy_id)
@@ -135,11 +136,14 @@ class StrategyService:
         selector = StockSelector(strategy_id=final_strategy_id, strategy_overrides=overrides)
 
         if save:
-            result = selector.run_and_save(limit=limit, instrument_type=instrument_type)
+            result = selector.run_and_save(limit=limit, instrument_type=instrument_type, run_id=run_id)
         else:
             items = selector.run_from_mysql(limit=limit, instrument_type=instrument_type)
+            transient_run_id = run_id or selector.build_run_id(prefix="selection_preview")
+            for item in items:
+                item["run_id"] = transient_run_id
             result = {
-                "run_id": None,
+                "run_id": transient_run_id,
                 "strategy_id": final_strategy_id,
                 "count": len(items),
                 "results": items,
@@ -156,3 +160,33 @@ class StrategyService:
             "score_threshold": selector.strategy.config.get("score_threshold"),
         }
         return result
+
+    def save_strategy_result(
+        self,
+        strategy_id: str,
+        item: Dict[str, Any],
+        run_id: Optional[str] = None,
+        score_threshold: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        strategy_meta = self.get_strategy_meta(strategy_id)
+        serialized_meta = self._serialize_strategy_item(strategy_meta, self.get_default_strategy_id())
+        if not serialized_meta.get("runtime_ready"):
+            raise ValueError(f"策略 {strategy_id} 当前未接通 V1 执行链路，暂不可保存")
+
+        overrides = {}
+        if score_threshold is not None:
+            overrides["score_threshold"] = float(score_threshold)
+
+        selector = StockSelector(strategy_id=strategy_id, strategy_overrides=overrides)
+        final_run_id = selector.save_single_result(item=item, run_id=run_id)
+        return {
+            "run_id": final_run_id,
+            "code": item.get("code"),
+            "strategy_id": strategy_id,
+            "strategy": {
+                "id": strategy_meta.get("id"),
+                "display_name": strategy_meta.get("display_name"),
+                "version": strategy_meta.get("version"),
+                "score_threshold": selector.strategy.config.get("score_threshold"),
+            },
+        }
