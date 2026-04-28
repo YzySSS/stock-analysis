@@ -5,7 +5,10 @@ function updateTrackingStats(summary = {}, items = []) {
   qs('#tracking-stat-win-rate').textContent = formatPercent(summary.win_rate_pct);
   qs('#tracking-stat-excess-return').textContent = formatPercent(summary.excess_return_pct);
   qs('#tracking-stat-excess-return').classList.remove('up', 'down');
-  qs('#tracking-stat-excess-return').classList.add(getPctClass(summary.excess_return_pct));
+  const excessReturnClass = getPctClass(summary.excess_return_pct);
+  if (excessReturnClass) {
+    qs('#tracking-stat-excess-return').classList.add(excessReturnClass);
+  }
   qs('#tracking-stat-max-gain').textContent = formatPercent(summary.max_gain_pct);
   qs('#tracking-stat-max-drawdown').textContent = formatPercent(summary.max_drawdown_pct);
 }

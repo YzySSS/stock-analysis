@@ -28,7 +28,10 @@ async function loadHomePage() {
     trackingCount.textContent = String(data.latest_tracking_count ?? items.length ?? 0);
     avgChange.textContent = formatPercent(data.latest_tracking_avg_price_change_pct);
     avgChange.classList.remove('up', 'down');
-    avgChange.classList.add(getPctClass(data.latest_tracking_avg_price_change_pct));
+    const avgChangeClass = getPctClass(data.latest_tracking_avg_price_change_pct);
+    if (avgChangeClass) {
+      avgChange.classList.add(avgChangeClass);
+    }
 
     if (!items.length) {
       trackingPreview.innerHTML = '<div class="empty-state">暂无跟踪数据</div>';

@@ -52,7 +52,7 @@ function renderError(container, message) {
 }
 
 function getPctClass(value) {
-  if (value == null || Number.isNaN(Number(value))) return '';
+  if (value == null || Number.isNaN(Number(value))) return null;
   return Number(value) >= 0 ? 'up' : 'down';
 }
 

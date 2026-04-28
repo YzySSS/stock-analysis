@@ -90,7 +90,10 @@ async function loadStockDetail() {
     qs('#stock-stat-close').textContent = formatNumber(data.latest_kline?.close, 2);
     qs('#stock-stat-change').textContent = formatPercent(data.latest_kline?.intraday_change_pct);
     qs('#stock-stat-change').classList.remove('up', 'down');
-    qs('#stock-stat-change').classList.add(getPctClass(data.latest_kline?.intraday_change_pct));
+    const stockChangeClass = getPctClass(data.latest_kline?.intraday_change_pct);
+    if (stockChangeClass) {
+      qs('#stock-stat-change').classList.add(stockChangeClass);
+    }
     qs('#stock-stat-score').textContent = formatNumber(latestSelection.score, 4);
     qs('#stock-stat-date').textContent = escapeHtml(data.latest_kline?.trade_date || '-');
 
