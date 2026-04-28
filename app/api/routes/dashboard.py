@@ -16,7 +16,7 @@ def _dashboard_data_stats() -> dict:
                 """
                 SELECT
                     (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock') AS total_stock_codes,
-                    (SELECT COUNT(DISTINCT code) FROM daily_kline) AS daily_kline_covered_codes,
+                    (SELECT COUNT(DISTINCT dk.code) FROM daily_kline dk INNER JOIN stock_basic sb ON dk.code = sb.code WHERE sb.instrument_type='stock') AS daily_kline_covered_codes,
                     (SELECT COUNT(*) FROM daily_kline) AS daily_kline_rows,
                     (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (roe IS NOT NULL OR roa IS NOT NULL OR grossprofit_margin IS NOT NULL OR revenue_yoy IS NOT NULL)) AS fundamental_filled_codes,
                     (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_trade_date,
