@@ -66,6 +66,59 @@ function renderSelectionPlaceholder(message = '请先设置条件并点击“运
   summaryLine.textContent = message;
 }
 
+function normalizeRunResponse(result) {
+  const items = (result.results || []).map((item) => {
+    const explain = item.explain || {};
+    const factorScores = {
+      ...(explain.raw_metrics || {}),
+      ...(item.factors || {}),
+      ...(explain.summary || {}),
+    };
+    return {
+      run_id: item.run_id || result.run_id || null,
+      rank_no: item.rank_no ?? null,
+      code: item.code,
+      name: item.name,
+      selection_date: item.trade_date || '',
+      strategy_id: item.strategy_id,
+      score: item.score,
+      strategy_display_name: item.strategy_display_name,
+      strategy_version: item.strategy_version,
+      industry: item.industry || null,
+      industry_display: item.industry || '暂无行业',
+      factor_scores: factorScores,
+      selected_open_price: item.open ?? null,
+      selected_close_price: item.close ?? null,
+      current_price: item.close ?? null,
+      latest_trade_date: item.trade_date || null,
+      price_change_pct: 0,
+      reason_summary: explain.reasons || item.candidate_reasons || [],
+      risk_summary: explain.risks || item.candidate_risks || [],
+      tracking_days: 0,
+      review_status: 'preview',
+      max_gain_pct: 0,
+      max_drawdown_pct: 0,
+    };
+  });
+
+  return {
+    run_id: result.run_id || null,
+    requested_strategy_id: result.strategy?.id || result.strategy_id || null,
+    strategy: result.strategy || null,
+    summary: {
+      selected_trade_date: items[0]?.selection_date || null,
+      run_created_at: null,
+      latest_trade_date: items[0]?.latest_trade_date || null,
+      total_count: items.length,
+      sample_size: null,
+      instrument_type: items[0]?.instrument_type || qs('#instrument-type')?.value || 'stock',
+      updated_at: items[0]?.latest_trade_date || null,
+      result_strategy_id: result.strategy?.id || result.strategy_id || null,
+    },
+    items,
+  };
+}
+
 function renderSelectionResults(data) {
   const body = qs('#selection-results-body');
   const summaryLine = qs('#selection-summary-line');
@@ -308,7 +361,12 @@ async function runSelection(event) {
     if (result.run_id) {
       qs('#selection-run-id').value = result.run_id;
     }
-    await loadSelectionResults(result.run_id || null);
+    const normalized = normalizeRunResponse(result);
+    lastSelectionResponse = normalized;
+    renderSelectionResults(normalized);
+    if (normalized.strategy) {
+      renderStrategySummary(normalized.strategy);
+    }
   } finally {
     if (button) button.disabled = false;
   }
