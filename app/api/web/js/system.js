@@ -5,12 +5,14 @@ async function loadSystemPage() {
   const gapPanel = qs('#system-gap-panel');
   const fieldMissingPanel = qs('#system-field-missing-panel');
   const shortfallPanel = qs('#system-shortfall-panel');
+  const taskRunPanel = qs('#system-task-run-panel');
   try {
     const data = await fetchJson('/api/system/status');
     const counts = data.table_counts || {};
     const latest = data.latest || {};
     const coverage = data.coverage || {};
     const fieldMissing = data.field_missing || {};
+    const taskRuns = data.task_runs || [];
     const totalStockCodes = Number(coverage.total_stock_codes || 0);
     const klineCovered = Number(coverage.daily_kline_covered_codes || 0);
     const fundamentalCovered = Number(coverage.fundamental_filled_codes || 0);
@@ -44,6 +46,33 @@ async function loadSystemPage() {
       <div><strong>最近基础信息更新时间:</strong> ${escapeHtml(latest.stock_basic_latest_updated_at || '-')}</div>
       <div><strong>最近基本面更新时间:</strong> ${escapeHtml(latest.fundamental_latest_updated_at || '-')}</div>
     `;
+
+    if (!taskRuns.length) {
+      taskRunPanel.innerHTML = '<div class="empty-state">暂无同步任务记录</div>';
+    } else {
+      taskRunPanel.innerHTML = taskRuns.map((item) => {
+        const meta = item.metadata || {};
+        const dateRange = meta.trade_date ? `交易日 ${escapeHtml(meta.trade_date)}` : `${escapeHtml(meta.start_date || '-')} → ${escapeHtml(meta.end_date || '-')}`;
+        const progress = meta.success_codes != null
+          ? `成功 ${escapeHtml(meta.success_codes)} / ${escapeHtml(meta.requested_codes ?? meta.limit ?? '-')}`
+          : (meta.updated != null ? `更新 ${escapeHtml(meta.updated)} / 扫描 ${escapeHtml(meta.scanned ?? '-')}` : '');
+        const rows = meta.rows_synced != null ? `写入 ${escapeHtml(meta.rows_synced)} 行` : '';
+        return `
+          <div class="preview-item">
+            <div class="preview-main">
+              <strong>${escapeHtml(item.task_name)}</strong>
+              <span class="muted">${escapeHtml(item.status || '-')} · ${dateRange}</span>
+              <div class="muted">开始 ${escapeHtml(item.started_at || '-')} · 结束 ${escapeHtml(item.finished_at || '-')}</div>
+              <div class="muted">${escapeHtml(item.message || '')}</div>
+            </div>
+            <div class="preview-side">
+              <strong>${progress || '-'}</strong>
+              <span class="muted">${rows || '状态'}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
 
     gapPanel.innerHTML = `
       <div><strong>K 线待补股票:</strong> ${klineMissing}</div>
@@ -86,6 +115,7 @@ async function loadSystemPage() {
     gapPanel.innerHTML = `<div class="error-box">加载缺口提示失败: ${escapeHtml(error.message)}</div>`;
     fieldMissingPanel.innerHTML = `<div class="error-box">加载字段缺失统计失败: ${escapeHtml(error.message)}</div>`;
     shortfallPanel.innerHTML = `<div class="error-box">加载主要短板分析失败: ${escapeHtml(error.message)}</div>`;
+    taskRunPanel.innerHTML = `<div class="error-box">加载同步任务状态失败: ${escapeHtml(error.message)}</div>`;
   }
 }
 

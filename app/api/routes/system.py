@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 from fastapi import APIRouter
 
 from app.shared.db import mysql_conn, ping_mysql
 
 router = APIRouter(tags=["system"])
+
+
+TRACKED_TASKS = [
+    "daily_kline_increment",
+    "daily_kline_backfill",
+    "fundamental_sync",
+]
 
 
 def _scalar(sql: str) -> int | None:
@@ -107,6 +115,52 @@ def _field_missing_stats() -> dict:
             }
 
 
+def _decode_metadata(value: object) -> dict | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {"raw": value}
+    return {"raw": str(value)}
+
+
+def _latest_task_runs() -> list[dict]:
+    placeholders = ", ".join(["%s"] * len(TRACKED_TASKS))
+    sql = f"""
+    SELECT t1.task_name, t1.run_id, t1.status, t1.started_at, t1.finished_at, t1.message, t1.metadata_json
+    FROM task_run_log t1
+    INNER JOIN (
+        SELECT task_name, MAX(id) AS max_id
+        FROM task_run_log
+        WHERE task_name IN ({placeholders})
+        GROUP BY task_name
+    ) t2 ON t1.id = t2.max_id
+    ORDER BY t1.id DESC
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, TRACKED_TASKS)
+            rows = cursor.fetchall() or []
+    items = []
+    for row in rows:
+        items.append(
+            {
+                "task_name": row.get("task_name"),
+                "run_id": row.get("run_id"),
+                "status": row.get("status"),
+                "started_at": str(row.get("started_at")) if row.get("started_at") else None,
+                "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
+                "message": row.get("message"),
+                "metadata": _decode_metadata(row.get("metadata_json")),
+            }
+        )
+    return items
+
+
 @router.get("/system/status")
 def system_status() -> dict:
     mysql_info = ping_mysql()
@@ -126,5 +180,6 @@ def system_status() -> dict:
         "table_counts": table_counts,
         "coverage": _coverage_stats(),
         "latest": _latest_dates(),
+        "task_runs": _latest_task_runs(),
         "field_missing": _field_missing_stats(),
     }
