@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Query
 
 from app.error_learning.tracker import SelectionResultTracker
@@ -40,7 +42,7 @@ def _dashboard_data_stats() -> dict:
 
 
 @router.get("/dashboard/summary")
-def dashboard_summary(limit: int = Query(default=5, ge=1, le=20)) -> dict:
+def dashboard_summary(limit: Annotated[int, Query(ge=1, le=20)] = 5) -> dict:
     strategy_service = StrategyService()
     tracker = SelectionResultTracker()
 
