@@ -18,6 +18,12 @@ function fillIndustryOptions(items = []) {
   if (industries.includes(current)) select.value = current;
 }
 
+function strategyBadgeClass(strategy) {
+  if (strategy?.availability === 'runtime_ready') return 'status-ok';
+  if (strategy?.availability === 'experimental') return 'status-warn';
+  return 'status-muted';
+}
+
 function renderStrategySummary(strategy) {
   const container = qs('#strategy-summary');
   if (!strategy) {
@@ -29,6 +35,7 @@ function renderStrategySummary(strategy) {
   const helpText = [
     strategy.description || '暂无策略说明',
     `阈值：${strategy.score_threshold ?? '-'}，最多入选：${strategy.max_picks ?? '-'}`,
+    `可用状态：${strategy.availability_label || '-'}`,
     `核心因子：${factors.map((item) => item.name || item.key || '-').join(' / ') || '暂无'}`,
   ].join('｜');
 
@@ -38,14 +45,14 @@ function renderStrategySummary(strategy) {
         <strong>${escapeHtml(strategy.display_name || strategy.id || '-')}</strong>
         <div>
           <span class="badge ${strategy.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(strategy.mode || 'current')}</span>
-          <span class="badge ${strategy.status === 'active' ? 'status-ok' : 'status-warn'}">${escapeHtml(strategy.version || '-')}</span>
+          <span class="badge ${strategyBadgeClass(strategy)}">${escapeHtml(strategy.availability_label || '-')}</span>
         </div>
       </div>
-      <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · ${strategy.executable === false ? '仅展示' : '可执行'}</div>
+      <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · 版本: ${escapeHtml(strategy.version || '-')}</div>
       <div>${escapeHtml(strategy.description || '')}</div>
       <div class="muted">阈值底线: ${strategy.score_threshold ?? '-'} 分 · 最大入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
-      <div class="muted">完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
+      <div class="muted">${escapeHtml(strategy.availability_note || '暂无状态说明')} · 完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
   `;
 }
@@ -190,13 +197,21 @@ async function loadSelectionResults(runIdOverride = null) {
   const instrumentType = qs('#instrument-type').value || 'stock';
   const limit = Number(qs('#limit').value || 3);
   const runIdInput = (qs('#selection-run-id')?.value || '').trim();
+  const strategyId = qs('#strategy-id')?.value || currentDefaultStrategy || '';
   const runId = runIdOverride || runIdInput;
   const query = new URLSearchParams({ instrument_type: instrumentType, limit: String(limit) });
-  if (runId) query.set('run_id', runId);
+  if (runId) {
+    query.set('run_id', runId);
+  } else if (strategyId) {
+    query.set('strategy_id', strategyId);
+  }
   const data = await fetchJson(`/api/selection/results?${query.toString()}`);
   lastSelectionResponse = data;
   if (data.run_id && !runIdOverride) {
     qs('#selection-run-id').value = data.run_id;
+  }
+  if (!runId && data.requested_strategy_id && qs('#strategy-id')) {
+    qs('#strategy-id').value = data.requested_strategy_id;
   }
   renderSelectionResults(data);
   if (data.strategy) {
@@ -251,7 +266,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   qs('#selection-run-id').addEventListener('change', () => loadSelectionResults());
   qs('#strategy-id').addEventListener('change', async (event) => {
+    qs('#selection-run-id').value = '';
     await loadStrategyDetail(event.target.value);
+    await loadSelectionResults();
   });
 
   try {

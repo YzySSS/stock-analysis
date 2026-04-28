@@ -19,6 +19,9 @@ def list_strategies() -> dict:
             "count": len(strategies),
             "current_count": len([item for item in strategies if item.get("mode") == "current"]),
             "legacy_count": len([item for item in strategies if item.get("mode") == "legacy"]),
+            "runtime_ready_count": len([item for item in strategies if item.get("runtime_ready")]),
+            "experimental_count": len([item for item in strategies if item.get("availability") == "experimental"]),
+            "display_only_count": len([item for item in strategies if item.get("availability") == "display_only"]),
         },
         "strategies": strategies,
     }

@@ -14,8 +14,9 @@ class SelectionResultTracker:
         limit: int = 20,
         instrument_type: str = "stock",
         run_id: Optional[str] = None,
+        strategy_id: Optional[str] = None,
     ) -> List[SelectionTrackingRecord]:
-        rows = self._fetch_from_selection_result(limit=limit, instrument_type=instrument_type, run_id=run_id)
+        rows = self._fetch_from_selection_result(limit=limit, instrument_type=instrument_type, run_id=run_id, strategy_id=strategy_id)
         if rows:
             return [self._build_record_from_selection_result(row) for row in rows]
         rows = self._fetch_from_stock_snapshot(limit=limit, instrument_type=instrument_type)
@@ -26,6 +27,7 @@ class SelectionResultTracker:
         limit: int,
         instrument_type: str,
         run_id: Optional[str] = None,
+        strategy_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         sql = """
         SELECT
@@ -61,6 +63,9 @@ class SelectionResultTracker:
         if run_id:
             sql += " AND sr.run_id = %s"
             params.append(run_id)
+        elif strategy_id:
+            sql += " AND sr.run_id = (SELECT run_id FROM selection_result WHERE strategy_id = %s ORDER BY created_at DESC LIMIT 1)"
+            params.append(strategy_id)
         else:
             sql += " AND sr.run_id = (SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1)"
         sql += " ORDER BY sr.rank_no ASC, sr.id ASC LIMIT %s"

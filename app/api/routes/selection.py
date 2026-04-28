@@ -37,7 +37,7 @@ def _sample_size(instrument_type: str) -> int:
             return int(row.get("count") or 0)
 
 
-def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None) -> dict:
+def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None, strategy_id: Optional[str] = None) -> dict:
     sql = """
     SELECT
         sr.run_id,
@@ -52,6 +52,9 @@ def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None) -> dict
     if run_id:
         sql += " AND sr.run_id = %s"
         params.append(run_id)
+    elif strategy_id:
+        sql += " AND sr.run_id = (SELECT run_id FROM selection_result WHERE strategy_id = %s ORDER BY created_at DESC LIMIT 1)"
+        params.append(strategy_id)
     else:
         sql += " AND sr.run_id = (SELECT run_id FROM selection_result ORDER BY created_at DESC LIMIT 1)"
     sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY created_at DESC LIMIT 1"
@@ -65,25 +68,46 @@ def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None) -> dict
 @router.get("/selection/results")
 def get_selection_results(
     run_id: Optional[str] = Query(default=None),
+    strategy_id: Optional[str] = Query(default=None),
     limit: int = Query(default=3, ge=1, le=200),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
     from app.error_learning.tracker import SelectionResultTracker
 
     tracker = SelectionResultTracker()
-    records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type=instrument_type, run_id=run_id)
-    items = tracker.to_dict_list(records)
-    run_meta = _latest_run_meta(instrument_type=instrument_type, run_id=run_id)
+    resolved_run_id = run_id
+    run_meta = _latest_run_meta(instrument_type=instrument_type, run_id=run_id, strategy_id=strategy_id)
+    if not resolved_run_id and run_meta.get("run_id"):
+        resolved_run_id = run_meta.get("run_id")
 
-    strategy_id = items[0].get("strategy_id") if items else run_meta.get("strategy_id")
+    records = tracker.build_latest_selection_snapshot(
+        limit=limit,
+        instrument_type=instrument_type,
+        run_id=resolved_run_id,
+        strategy_id=resolved_strategy_id,
+    )
+    items = tracker.to_dict_list(records)
+
+    resolved_strategy_id = strategy_id or (items[0].get("strategy_id") if items else run_meta.get("strategy_id"))
     service = StrategyService()
-    strategy = service.get_strategy_detail(strategy_id=strategy_id) if strategy_id else None
+    strategy = service.get_strategy_detail(strategy_id=resolved_strategy_id) if resolved_strategy_id else None
 
     return {
-        "run_id": run_id or run_meta.get("run_id") or (items[0].get("run_id") if items else None),
+        "run_id": resolved_run_id or (items[0].get("run_id") if items else None),
+        "requested_strategy_id": strategy_id,
         "strategy": strategy,
         "summary": {
             "selected_trade_date": items[0].get("selection_date") if items else str(run_meta.get("trade_date") or "") or None,
+             "run_created_at": str(run_meta.get("created_at")) if run_meta.get("created_at") else None,
+             "latest_trade_date": items[0].get("latest_trade_date") if items else None,
+             "total_count": len(items),
+             "sample_size": _sample_size(instrument_type),
+             "instrument_type": instrument_type,
+             "updated_at": items[0].get("latest_trade_date") if items else None,
++            "result_strategy_id": resolved_strategy_id,
+         },
+         "items": items,
+     }
             "run_created_at": str(run_meta.get("created_at")) if run_meta.get("created_at") else None,
             "latest_trade_date": items[0].get("latest_trade_date") if items else None,
             "total_count": len(items),
