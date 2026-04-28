@@ -43,7 +43,7 @@ function renderStrategySummary(strategy) {
       </div>
       <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · ${strategy.executable === false ? '仅展示' : '可执行'}</div>
       <div>${escapeHtml(strategy.description || '')}</div>
-      <div class="muted">阈值: ${strategy.score_threshold ?? '-'} 分 · 最多入选: ${strategy.max_picks ?? '-'}</div>
+      <div class="muted">阈值底线: ${strategy.score_threshold ?? '-'} 分 · 最大入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
       <div class="muted">完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
@@ -59,9 +59,10 @@ function renderSelectionResults(data) {
   const industryValue = (qs('#selection-industry')?.value || '').trim();
   const sortBy = qs('#selection-sort')?.value || 'rank_asc';
   const summary = data.summary || {};
-  let items = (data.items || []).filter((item) => Number(item.score ?? 0) >= minScore);
+  const originalItems = data.items || [];
+  let items = originalItems.filter((item) => Number(item.score ?? 0) >= minScore);
 
-  fillIndustryOptions(data.items || []);
+  fillIndustryOptions(originalItems);
 
   if (industryValue) {
     items = items.filter((item) => (item.industry || '').trim() === industryValue);
@@ -73,11 +74,16 @@ function renderSelectionResults(data) {
 
   items = [...items].sort((a, b) => compareSelectionItems(sortBy, a, b));
 
-  summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 当前展示：${items.length} / ${summary.total_count || 0} 条`;
-  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 入选数：${summary.total_count || 0} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 阈值：${data.strategy?.score_threshold ?? '-'} 分`;
+  summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 分数底线：${data.strategy?.score_threshold ?? '-'} 分`;
+
+  if (!originalItems.length) {
+    body.innerHTML = renderEmptyRow(13, '本次运行未产生任何入选结果');
+    return;
+  }
 
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(13, '当前筛选条件下暂无选股结果');
+    body.innerHTML = renderEmptyRow(13, '无达标股：当前入选结果中没有股票达到设定分数底线');
     return;
   }
 
@@ -156,7 +162,7 @@ async function loadStrategies() {
   const select = qs('#strategy-id');
   select.innerHTML = '';
 
-  const strategies = (data.strategies || []).filter((item) => item.executable !== false);
+  const strategies = (data.strategies || []).filter((item) => item.runtime_ready === true);
   currentDefaultStrategy = strategies.find((item) => item.id === data.default_strategy)?.id || strategies[0]?.id || null;
 
   strategies.forEach((item) => {
