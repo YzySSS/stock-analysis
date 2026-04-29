@@ -19,6 +19,7 @@ function renderReviewSummary(summary = {}, runId = '', items = []) {
   const worst = summary.worst_item;
   const strategyName = items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照';
   const selectionDate = items[0]?.selection_date || '-';
+  const resolvedRunId = runId || items[0]?.run_id || items[0]?.latest_run_id || '';
   container.innerHTML = `
     <article class="strategy-item">
       <div class="strategy-item-head">
@@ -26,6 +27,7 @@ function renderReviewSummary(summary = {}, runId = '', items = []) {
         <span class="badge status-ok">${summary.count ?? 0} 条</span>
       </div>
       <div class="muted">选股日期：${escapeHtml(selectionDate)} · 策略：${escapeHtml(items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照')} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
+      <div class="muted">当前 run_id：${resolvedRunId ? escapeHtml(resolvedRunId) : '未解析到'}</div>
       <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)} · 超额收益：${formatPercent(summary.excess_return_pct)}</div>
       <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
       <div class="muted">表现最好：${best ? `${escapeHtml(best.name || best.code || '-')} (${formatPercent(best.price_change_pct)})` : '暂无'}</div>
@@ -50,6 +52,7 @@ function renderReviewNotes(summary = {}, items = []) {
 
 let lastTrackingState = {
   runId: '',
+  resolvedRunId: '',
   strategyId: '',
   limit: 20,
   instrumentType: 'stock',
@@ -99,7 +102,6 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 20, instr
   if (!runId) {
     qs('#tracking-run-id').value = '';
   }
-  lastTrackingState = { runId, strategyId, limit, instrumentType };
 
   const url = runId
     ? `/api/tracking?run_id=${encodeURIComponent(runId)}&limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}`
@@ -108,20 +110,25 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 20, instr
   const data = await fetchJson(url);
   const items = data.items || [];
   const summary = data.summary || {};
+  const resolvedRunId = runId || data.run_id || items[0]?.run_id || items[0]?.latest_run_id || '';
+  lastTrackingState = { runId, resolvedRunId, strategyId, limit, instrumentType };
+  if (resolvedRunId && !runId) {
+    qs('#tracking-run-id').value = resolvedRunId;
+  }
   renderTrackingTable(items, summary);
   updateTrackingStats(summary, items);
-  renderReviewSummary(summary, runId, items);
+  renderReviewSummary(summary, resolvedRunId, items);
   renderReviewNotes(summary, items);
-  summaryText.textContent = runId
-    ? `当前显示本次查询结果，共 ${items.length} 条`
+  summaryText.textContent = resolvedRunId
+    ? `当前显示 run_id=${resolvedRunId} 的复盘结果，共 ${items.length} 条`
     : `当前显示最新复盘快照，共 ${items.length} 条`;
 }
 
 async function deleteCurrentRun() {
-  const runId = qs('#tracking-run-id').value.trim() || lastTrackingState.runId;
+  const runId = qs('#tracking-run-id').value.trim() || lastTrackingState.resolvedRunId || lastTrackingState.runId;
   const instrumentType = qs('#tracking-instrument-type').value || lastTrackingState.instrumentType || 'stock';
   if (!runId) {
-    qs('#tracking-summary-text').textContent = '删除失败：当前复盘池默认按“日期 + 策略 + 股票”聚合，若要按 run_id 删除，请先手动输入一个明确的 run_id 进入排查模式';
+    qs('#tracking-summary-text').textContent = '删除失败：当前页面没解析到可删除的 run_id，请先点“查看当前复盘池”或手动输入 run_id';
     return;
   }
 
@@ -135,6 +142,7 @@ async function deleteCurrentRun() {
     const query = new URLSearchParams({ run_id: runId, instrument_type: instrumentType });
     const data = await fetchJson(`/api/tracking/run?${query.toString()}`, { method: 'DELETE' });
     qs('#tracking-run-id').value = '';
+    lastTrackingState.resolvedRunId = '';
     qs('#tracking-summary-text').textContent = `已删除 run_id=${data.run_id}，共删除 ${data.deleted_count} 条记录`;
     await loadTrackingData({ limit: lastTrackingState.limit, instrumentType });
   } finally {
