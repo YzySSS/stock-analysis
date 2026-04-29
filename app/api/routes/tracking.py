@@ -87,8 +87,9 @@ def get_tracking_by_run(
 
 @router.delete("/tracking/item")
 def delete_tracking_item(
-    run_id: str = Query(...),
     code: str = Query(...),
+    selection_date: str = Query(...),
+    strategy_id: str = Query(...),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
     with mysql_conn(dict_cursor=False) as conn:
@@ -98,9 +99,12 @@ def delete_tracking_item(
                 SELECT COUNT(*)
                 FROM selection_result sr
                 INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sr.run_id = %s AND sr.code = %s AND sb.instrument_type = %s
+                WHERE sr.code = %s
+                  AND sr.trade_date = %s
+                  AND sr.strategy_id = %s
+                  AND sb.instrument_type = %s
                 """,
-                (run_id, code, instrument_type),
+                (code, selection_date, strategy_id, instrument_type),
             )
             matched_count = int((cursor.fetchone() or [0])[0] or 0)
             if matched_count <= 0:
@@ -111,14 +115,18 @@ def delete_tracking_item(
                 DELETE sr
                 FROM selection_result sr
                 INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sr.run_id = %s AND sr.code = %s AND sb.instrument_type = %s
+                WHERE sr.code = %s
+                  AND sr.trade_date = %s
+                  AND sr.strategy_id = %s
+                  AND sb.instrument_type = %s
                 """,
-                (run_id, code, instrument_type),
+                (code, selection_date, strategy_id, instrument_type),
             )
 
     return {
-        "run_id": run_id,
         "code": code,
+        "selection_date": selection_date,
+        "strategy_id": strategy_id,
         "instrument_type": instrument_type,
         "deleted_count": matched_count,
     }

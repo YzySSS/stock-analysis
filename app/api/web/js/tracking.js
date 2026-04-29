@@ -91,7 +91,7 @@ function renderTrackingTable(items, summary = {}) {
         <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
         <td>${escapeHtml(item.review_status || '-')}</td>
         <td>${escapeHtml(reviewNote)}</td>
-        <td><button class="btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-run-id="${escapeHtml(item.run_id || item.latest_run_id || '')}" data-code="${escapeHtml(item.code || '')}">删除</button></td>
+        <td><button class="btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}">删除</button></td>
       </tr>
     `;
   }).join('');
@@ -126,21 +126,22 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 20, instr
 }
 
 async function deleteTrackingItem(button) {
-  const runId = button?.dataset?.runId || '';
   const code = button?.dataset?.code || '';
+  const selectionDate = button?.dataset?.selectionDate || '';
+  const strategyId = button?.dataset?.strategyId || '';
   const instrumentType = qs('#tracking-instrument-type').value || lastTrackingState.instrumentType || 'stock';
-  if (!runId || !code) {
-    qs('#tracking-summary-text').textContent = '删除失败：当前行缺少 run_id 或 code';
+  if (!code || !selectionDate || !strategyId) {
+    qs('#tracking-summary-text').textContent = '删除失败：当前行缺少 code / selection_date / strategy_id';
     return;
   }
 
-  if (!window.confirm(`确认删除 ${code} 这条复盘记录吗？`)) {
+  if (!window.confirm(`确认删除 ${code} 在 ${selectionDate}（策略：${strategyId}）这条复盘记录吗？`)) {
     return;
   }
 
   button.disabled = true;
   try {
-    const query = new URLSearchParams({ run_id: runId, code, instrument_type: instrumentType });
+    const query = new URLSearchParams({ code, selection_date: selectionDate, strategy_id: strategyId, instrument_type: instrumentType });
     await fetchJson(`/api/tracking/item?${query.toString()}`, { method: 'DELETE' });
     qs('#tracking-summary-text').textContent = `已删除 ${code} 的复盘记录`;
     await loadTrackingData({
