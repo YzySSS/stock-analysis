@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stop-after-no-progress", type=int, default=5, help="Stop after this many consecutive no-progress batches")
     parser.add_argument("--retry-on-error", type=int, default=3, help="Retry a failed batch this many times before aborting")
     parser.add_argument("--retry-wait-seconds", type=float, default=10.0, help="Seconds to wait before retrying after a batch error")
+    parser.add_argument("--pb-only", action="store_true", help="Only continue backfilling rows where PB is still missing")
     return parser
 
 
@@ -79,6 +80,8 @@ def main() -> None:
                     only_missing=not args.all,
                     stale_after_days=args.stale_after_days,
                     exclude_codes=exclude_list,
+                    require_missing_pb=args.pb_only,
+                    allow_missing_pe_only=not args.pb_only,
                 )
                 break
             except Exception as e:

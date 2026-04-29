@@ -95,6 +95,8 @@ class ValuationSync:
         only_missing: bool = True,
         stale_after_days: Optional[int] = 7,
         exclude_codes: Optional[List[str]] = None,
+        require_missing_pb: bool = False,
+        allow_missing_pe_only: bool = True,
     ) -> List[str]:
         sql = "SELECT code FROM stock_basic WHERE is_delisted = 0"
         params: List[Any] = []
@@ -102,7 +104,12 @@ class ValuationSync:
             sql += " AND instrument_type = %s"
             params.append(instrument_type)
         if only_missing:
-            sql += " AND (pe_tushare IS NULL OR pb_tushare IS NULL)"
+            if require_missing_pb:
+                sql += " AND pb_tushare IS NULL"
+            elif allow_missing_pe_only:
+                sql += " AND (pe_tushare IS NULL OR pb_tushare IS NULL)"
+            else:
+                sql += " AND pb_tushare IS NULL"
         elif stale_after_days is not None:
             cutoff = datetime.now() - timedelta(days=stale_after_days)
             sql += " AND (valuation_updated_at IS NULL OR valuation_updated_at < %s)"
@@ -131,6 +138,8 @@ class ValuationSync:
         only_missing: bool = True,
         stale_after_days: Optional[int] = 7,
         exclude_codes: Optional[List[str]] = None,
+        require_missing_pb: bool = False,
+        allow_missing_pe_only: bool = True,
     ) -> tuple[int, int, int, List[str]]:
         codes = self.fetch_stock_codes(
             limit=limit,
@@ -138,6 +147,8 @@ class ValuationSync:
             only_missing=only_missing,
             stale_after_days=stale_after_days,
             exclude_codes=exclude_codes,
+            require_missing_pb=require_missing_pb,
+            allow_missing_pe_only=allow_missing_pe_only,
         )
         updated = 0
         missing_source = 0
@@ -172,6 +183,8 @@ class ValuationSync:
         only_missing: bool = True,
         stale_after_days: Optional[int] = 7,
         exclude_codes: Optional[List[str]] = None,
+        require_missing_pb: bool = False,
+        allow_missing_pe_only: bool = True,
     ) -> ValuationSyncResult:
         self.ensure_columns()
         result = ValuationSyncResult(run_id=self.build_run_id())
@@ -184,6 +197,8 @@ class ValuationSync:
                 "only_missing": only_missing,
                 "stale_after_days": stale_after_days,
                 "exclude_codes": exclude_codes or [],
+                "require_missing_pb": require_missing_pb,
+                "allow_missing_pe_only": allow_missing_pe_only,
             },
         )
         try:
@@ -197,6 +212,8 @@ class ValuationSync:
                 only_missing=only_missing,
                 stale_after_days=stale_after_days,
                 exclude_codes=exclude_codes,
+                require_missing_pb=require_missing_pb,
+                allow_missing_pe_only=allow_missing_pe_only,
             )
             result.scanned = scanned
             result.updated = updated
