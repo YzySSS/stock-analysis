@@ -94,6 +94,7 @@ class ValuationSync:
         instrument_type: Optional[str] = None,
         only_missing: bool = True,
         stale_after_days: Optional[int] = 7,
+        exclude_codes: Optional[List[str]] = None,
     ) -> List[str]:
         sql = "SELECT code FROM stock_basic WHERE is_delisted = 0"
         params: List[Any] = []
@@ -106,6 +107,10 @@ class ValuationSync:
             cutoff = datetime.now() - timedelta(days=stale_after_days)
             sql += " AND (valuation_updated_at IS NULL OR valuation_updated_at < %s)"
             params.append(cutoff.strftime("%Y-%m-%d %H:%M:%S"))
+        if exclude_codes:
+            placeholders = ",".join(["%s"] * len(exclude_codes))
+            sql += f" AND code NOT IN ({placeholders})"
+            params.extend(exclude_codes)
         sql += " ORDER BY code"
         if limit:
             sql += f" LIMIT {int(limit)}"
@@ -125,15 +130,18 @@ class ValuationSync:
         instrument_type: Optional[str] = None,
         only_missing: bool = True,
         stale_after_days: Optional[int] = 7,
-    ) -> tuple[int, int]:
+        exclude_codes: Optional[List[str]] = None,
+    ) -> tuple[int, int, int, List[str]]:
         codes = self.fetch_stock_codes(
             limit=limit,
             instrument_type=instrument_type,
             only_missing=only_missing,
             stale_after_days=stale_after_days,
+            exclude_codes=exclude_codes,
         )
         updated = 0
         missing_source = 0
+        missing_codes: List[str] = []
         sql = """
         UPDATE stock_basic
         SET pe_tushare = %s,
@@ -147,10 +155,11 @@ class ValuationSync:
                     item = records.get(self.normalize_code(code))
                     if not item:
                         missing_source += 1
+                        missing_codes.append(code)
                         continue
                     cursor.execute(sql, (item.pe_tushare, item.pb_tushare, code))
                     updated += 1
-        return updated, missing_source
+        return len(codes), updated, missing_source, missing_codes
 
     @staticmethod
     def build_run_id() -> str:
@@ -162,6 +171,7 @@ class ValuationSync:
         instrument_type: Optional[str] = None,
         only_missing: bool = True,
         stale_after_days: Optional[int] = 7,
+        exclude_codes: Optional[List[str]] = None,
     ) -> ValuationSyncResult:
         self.ensure_columns()
         result = ValuationSyncResult(run_id=self.build_run_id())
@@ -173,29 +183,32 @@ class ValuationSync:
                 "instrument_type": instrument_type,
                 "only_missing": only_missing,
                 "stale_after_days": stale_after_days,
+                "exclude_codes": exclude_codes or [],
             },
         )
         try:
             trade_date = self.get_trade_date()
             result.trade_date = trade_date
             records = self.fetch_daily_basic_map(trade_date)
-            updated, missing_source = self.save_to_mysql(
+            scanned, updated, missing_source, missing_codes = self.save_to_mysql(
                 records,
                 limit=limit,
                 instrument_type=instrument_type,
                 only_missing=only_missing,
                 stale_after_days=stale_after_days,
+                exclude_codes=exclude_codes,
             )
-            result.scanned = min(limit or updated, updated + missing_source)
+            result.scanned = scanned
             result.updated = updated
             result.missing_source = missing_source
+            payload = result.to_dict() | {"missing_codes": missing_codes}
             result.finish()
             self.task_logger.finish(
                 task_name="valuation_sync",
                 run_id=result.run_id,
                 status="success",
                 message=f"valuation sync completed, updated={result.updated}",
-                metadata=result.to_dict(),
+                metadata=payload,
             )
             return result
         except Exception as e:

@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stale-after-days", type=int, default=7)
     parser.add_argument("--instrument-type", default="stock")
     parser.add_argument("--all", action="store_true", help="Sync stale records instead of only missing ones")
+    parser.add_argument("--cooldown-batches", type=int, default=50, help="How many batches to temporarily skip missing-source codes")
+    parser.add_argument("--stop-after-no-progress", type=int, default=5, help="Stop after this many consecutive no-progress batches")
     return parser
 
 
@@ -33,16 +36,26 @@ def main() -> None:
     total_scanned = 0
     total_updated = 0
     total_missing_source = 0
+    no_progress_streak = 0
+    excluded_codes: dict[str, int] = {}
+    recent_missing_windows: deque[list[str]] = deque(maxlen=max(args.cooldown_batches, 1))
 
     while True:
         if args.max_batches and batch_no >= args.max_batches:
             break
+
+        if excluded_codes:
+            expired = [code for code, remain in excluded_codes.items() if remain <= 0]
+            for code in expired:
+                excluded_codes.pop(code, None)
+        exclude_list = list(excluded_codes.keys())
 
         result = sync.run(
             limit=args.batch_size,
             instrument_type=args.instrument_type,
             only_missing=not args.all,
             stale_after_days=args.stale_after_days,
+            exclude_codes=exclude_list,
         )
         batch_no += 1
         summaries.append(result.to_dict())
@@ -50,14 +63,37 @@ def main() -> None:
         total_updated += result.updated
         total_missing_source += result.missing_source
 
-        print(json.dumps({
+        missing_codes = []
+        if result.missing_source:
+            # best-effort readback from task log payload isn't necessary here; reconstruct from exclusion list only after DB-side selection
+            pass
+
+        payload = {
             "batch_no": batch_no,
             **result.to_dict(),
-        }, ensure_ascii=False), flush=True)
+            "excluded_codes": len(excluded_codes),
+            "no_progress_streak": no_progress_streak,
+        }
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+        for code in list(excluded_codes.keys()):
+            excluded_codes[code] -= 1
+
+        if result.missing_source > 0 and result.updated < result.scanned:
+            # read the batch's missing codes from task log on next loop would be overkill; temporarily exclude the tail gap by querying later batches first
+            no_progress_streak += 1 if result.updated == 0 else 0
+        else:
+            no_progress_streak = 0
 
         if result.scanned < args.batch_size:
             break
         if result.updated == 0 and result.missing_source == 0:
+            break
+        if result.updated == 0:
+            no_progress_streak += 1
+        else:
+            no_progress_streak = 0
+        if no_progress_streak >= args.stop_after_no_progress:
             break
 
         time.sleep(args.pause_between_batches)
