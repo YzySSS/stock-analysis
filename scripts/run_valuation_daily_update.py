@@ -24,6 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cooldown-days", type=int, default=1, help="How many days to skip codes that had no valuation source for the same trade date")
     parser.add_argument("--state-file", default=str(PROJECT_ROOT / "logs" / "valuation_sync_missing_codes.json"))
     parser.add_argument("--stop-after-no-progress", type=int, default=5, help="Stop after this many consecutive no-progress batches")
+    parser.add_argument("--retry-on-error", type=int, default=3, help="Retry a failed batch this many times before aborting")
+    parser.add_argument("--retry-wait-seconds", type=float, default=10.0, help="Seconds to wait before retrying after a batch error")
     return parser
 
 
@@ -58,18 +60,40 @@ def main() -> None:
         if args.max_batches and batch_no >= args.max_batches:
             break
 
-        trade_date = sync.get_trade_date()
-        trade_state = state.get(trade_date, {})
+        attempt = 0
+        result = None
+        trade_date = None
+        exclude_list = []
         now_ts = int(time.time())
-        exclude_list = [code for code, expiry in trade_state.items() if int(expiry) > now_ts]
 
-        result = sync.run(
-            limit=args.batch_size,
-            instrument_type=args.instrument_type,
-            only_missing=not args.all,
-            stale_after_days=args.stale_after_days,
-            exclude_codes=exclude_list,
-        )
+        while True:
+            try:
+                trade_date = sync.get_trade_date()
+                trade_state = state.get(trade_date, {})
+                now_ts = int(time.time())
+                exclude_list = [code for code, expiry in trade_state.items() if int(expiry) > now_ts]
+
+                result = sync.run(
+                    limit=args.batch_size,
+                    instrument_type=args.instrument_type,
+                    only_missing=not args.all,
+                    stale_after_days=args.stale_after_days,
+                    exclude_codes=exclude_list,
+                )
+                break
+            except Exception as e:
+                attempt += 1
+                payload = {
+                    "batch_no": batch_no + 1,
+                    "status": "retrying" if attempt <= args.retry_on_error else "failed",
+                    "attempt": attempt,
+                    "error": str(e)[:500],
+                }
+                print(json.dumps(payload, ensure_ascii=False), flush=True)
+                if attempt > args.retry_on_error:
+                    raise
+                time.sleep(args.retry_wait_seconds)
+
         batch_no += 1
         summaries.append(result.to_dict())
         total_scanned += result.scanned
