@@ -61,7 +61,7 @@ let lastTrackingState = {
 function renderTrackingTable(items, summary = {}) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(11, '暂无跟踪数据');
+    body.innerHTML = renderEmptyRow(12, '暂无跟踪数据');
     return;
   }
 
@@ -91,6 +91,7 @@ function renderTrackingTable(items, summary = {}) {
         <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
         <td>${escapeHtml(item.review_status || '-')}</td>
         <td>${escapeHtml(reviewNote)}</td>
+        <td><button class="btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-run-id="${escapeHtml(item.run_id || item.latest_run_id || '')}" data-code="${escapeHtml(item.code || '')}">删除</button></td>
       </tr>
     `;
   }).join('');
@@ -124,29 +125,32 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 20, instr
     : `当前显示最新复盘快照，共 ${items.length} 条`;
 }
 
-async function deleteCurrentRun() {
-  const runId = qs('#tracking-run-id').value.trim() || lastTrackingState.resolvedRunId || lastTrackingState.runId;
+async function deleteTrackingItem(button) {
+  const runId = button?.dataset?.runId || '';
+  const code = button?.dataset?.code || '';
   const instrumentType = qs('#tracking-instrument-type').value || lastTrackingState.instrumentType || 'stock';
-  if (!runId) {
-    qs('#tracking-summary-text').textContent = '删除失败：当前页面没解析到可删除的 run_id，请先点“查看当前复盘池”或手动输入 run_id';
+  if (!runId || !code) {
+    qs('#tracking-summary-text').textContent = '删除失败：当前行缺少 run_id 或 code';
     return;
   }
 
-  if (!window.confirm(`确认删除 run_id=${runId} 的选股结果吗？此操作会删除该 run 在当前类型下的全部记录。`)) {
+  if (!window.confirm(`确认删除 ${code} 这条复盘记录吗？`)) {
     return;
   }
 
-  const button = qs('#tracking-delete-btn');
-  if (button) button.disabled = true;
+  button.disabled = true;
   try {
-    const query = new URLSearchParams({ run_id: runId, instrument_type: instrumentType });
-    const data = await fetchJson(`/api/tracking/run?${query.toString()}`, { method: 'DELETE' });
-    qs('#tracking-run-id').value = '';
-    lastTrackingState.resolvedRunId = '';
-    qs('#tracking-summary-text').textContent = `已删除 run_id=${data.run_id}，共删除 ${data.deleted_count} 条记录`;
-    await loadTrackingData({ limit: lastTrackingState.limit, instrumentType });
+    const query = new URLSearchParams({ run_id: runId, code, instrument_type: instrumentType });
+    await fetchJson(`/api/tracking/item?${query.toString()}`, { method: 'DELETE' });
+    qs('#tracking-summary-text').textContent = `已删除 ${code} 的复盘记录`;
+    await loadTrackingData({
+      runId: lastTrackingState.runId,
+      strategyId: lastTrackingState.strategyId,
+      limit: lastTrackingState.limit,
+      instrumentType,
+    });
   } finally {
-    if (button) button.disabled = false;
+    button.disabled = false;
   }
 }
 
@@ -161,7 +165,7 @@ async function handleTrackingFilter(event) {
     });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `加载失败: ${error.message}`;
-    qs('#tracking-results-body').innerHTML = renderEmptyRow(11, error.message);
+    qs('#tracking-results-body').innerHTML = renderEmptyRow(12, error.message);
   }
 }
 
@@ -175,12 +179,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       instrumentType: qs('#tracking-instrument-type').value,
     });
   });
-  qs('#tracking-delete-btn').addEventListener('click', deleteCurrentRun);
+  qs('#tracking-results-body').addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-action="delete-tracking-item"]');
+    if (!button) return;
+    await deleteTrackingItem(button);
+  });
 
   try {
     await loadTrackingData({ strategyId: 'lowvol_reversal' });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
-    qs('#tracking-results-body').innerHTML = renderEmptyRow(11, error.message);
+    qs('#tracking-results-body').innerHTML = renderEmptyRow(12, error.message);
   }
 });

@@ -85,8 +85,12 @@ def get_tracking_by_run(
     }
 
 
-@router.delete("/tracking/run")
-def delete_tracking_run(run_id: str = Query(...), instrument_type: str = Query(default="stock")) -> dict:
+@router.delete("/tracking/item")
+def delete_tracking_item(
+    run_id: str = Query(...),
+    code: str = Query(...),
+    instrument_type: str = Query(default="stock"),
+) -> dict:
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -94,26 +98,27 @@ def delete_tracking_run(run_id: str = Query(...), instrument_type: str = Query(d
                 SELECT COUNT(*)
                 FROM selection_result sr
                 INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sr.run_id = %s AND sb.instrument_type = %s
+                WHERE sr.run_id = %s AND sr.code = %s AND sb.instrument_type = %s
                 """,
-                (run_id, instrument_type),
+                (run_id, code, instrument_type),
             )
             matched_count = int((cursor.fetchone() or [0])[0] or 0)
             if matched_count <= 0:
-                raise HTTPException(status_code=404, detail="未找到可删除的选股结果")
+                raise HTTPException(status_code=404, detail="未找到可删除的复盘记录")
 
             cursor.execute(
                 """
                 DELETE sr
                 FROM selection_result sr
                 INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sr.run_id = %s AND sb.instrument_type = %s
+                WHERE sr.run_id = %s AND sr.code = %s AND sb.instrument_type = %s
                 """,
-                (run_id, instrument_type),
+                (run_id, code, instrument_type),
             )
 
     return {
         "run_id": run_id,
+        "code": code,
         "instrument_type": instrument_type,
         "deleted_count": matched_count,
     }
