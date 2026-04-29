@@ -13,13 +13,12 @@ function updateTrackingStats(summary = {}, items = []) {
   qs('#tracking-stat-max-drawdown').textContent = formatPercent(summary.max_drawdown_pct);
 }
 
-function renderReviewSummary(summary = {}, runId = '', items = []) {
+function renderReviewSummary(summary = {}, items = []) {
   const container = qs('#tracking-review-summary');
   const best = summary.best_item;
   const worst = summary.worst_item;
   const strategyName = items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照';
   const selectionDate = items[0]?.selection_date || '-';
-  const resolvedRunId = runId || items[0]?.run_id || items[0]?.latest_run_id || '';
   container.innerHTML = `
     <article class="strategy-item">
       <div class="strategy-item-head">
@@ -27,7 +26,6 @@ function renderReviewSummary(summary = {}, runId = '', items = []) {
         <span class="badge status-ok">${summary.count ?? 0} 条</span>
       </div>
       <div class="muted">选股日期：${escapeHtml(selectionDate)} · 策略：${escapeHtml(items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照')} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
-      <div class="muted">当前 run_id：${resolvedRunId ? escapeHtml(resolvedRunId) : '未解析到'}</div>
       <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)} · 超额收益：${formatPercent(summary.excess_return_pct)}</div>
       <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
       <div class="muted">表现最好：${best ? `${escapeHtml(best.name || best.code || '-')} (${formatPercent(best.price_change_pct)})` : '暂无'}</div>
@@ -51,8 +49,6 @@ function renderReviewNotes(summary = {}, items = []) {
 }
 
 let lastTrackingState = {
-  runId: '',
-  resolvedRunId: '',
   strategyId: '',
   limit: 20,
   instrumentType: 'stock',
@@ -97,32 +93,21 @@ function renderTrackingTable(items, summary = {}) {
   }).join('');
 }
 
-async function loadTrackingData({ runId = '', strategyId = '', limit = 20, instrumentType = 'stock' } = {}) {
+async function loadTrackingData({ strategyId = '', limit = 20, instrumentType = 'stock' } = {}) {
   const summaryText = qs('#tracking-summary-text');
   summaryText.textContent = '加载中...';
-  if (!runId) {
-    qs('#tracking-run-id').value = '';
-  }
 
-  const url = runId
-    ? `/api/tracking?run_id=${encodeURIComponent(runId)}&limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}`
-    : `/api/tracking/latest?limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}${strategyId ? `&strategy_id=${encodeURIComponent(strategyId)}` : ''}`;
+  const url = `/api/tracking/latest?limit=${limit}&instrument_type=${encodeURIComponent(instrumentType)}${strategyId ? `&strategy_id=${encodeURIComponent(strategyId)}` : ''}`;
 
   const data = await fetchJson(url);
   const items = data.items || [];
   const summary = data.summary || {};
-  const resolvedRunId = runId || data.run_id || items[0]?.run_id || items[0]?.latest_run_id || '';
-  lastTrackingState = { runId, resolvedRunId, strategyId, limit, instrumentType };
-  if (resolvedRunId && !runId) {
-    qs('#tracking-run-id').value = resolvedRunId;
-  }
+  lastTrackingState = { strategyId, limit, instrumentType };
   renderTrackingTable(items, summary);
   updateTrackingStats(summary, items);
-  renderReviewSummary(summary, resolvedRunId, items);
+  renderReviewSummary(summary, items);
   renderReviewNotes(summary, items);
-  summaryText.textContent = resolvedRunId
-    ? `当前显示 run_id=${resolvedRunId} 的复盘结果，共 ${items.length} 条`
-    : `当前显示最新复盘快照，共 ${items.length} 条`;
+  summaryText.textContent = `当前显示最新复盘快照，共 ${items.length} 条`;
 }
 
 async function deleteTrackingItem(button) {
@@ -145,7 +130,6 @@ async function deleteTrackingItem(button) {
     await fetchJson(`/api/tracking/item?${query.toString()}`, { method: 'DELETE' });
     qs('#tracking-summary-text').textContent = `已删除 ${code} 的复盘记录`;
     await loadTrackingData({
-      runId: lastTrackingState.runId,
       strategyId: lastTrackingState.strategyId,
       limit: lastTrackingState.limit,
       instrumentType,
@@ -159,8 +143,7 @@ async function handleTrackingFilter(event) {
   event.preventDefault();
   try {
     await loadTrackingData({
-      runId: qs('#tracking-run-id').value.trim(),
-      strategyId: '',
+      strategyId: 'lowvol_reversal',
       limit: Number(qs('#tracking-limit').value || 20),
       instrumentType: qs('#tracking-instrument-type').value,
     });
@@ -173,7 +156,6 @@ async function handleTrackingFilter(event) {
 document.addEventListener('DOMContentLoaded', async () => {
   qs('#tracking-filter-form').addEventListener('submit', handleTrackingFilter);
   qs('#tracking-latest-btn').addEventListener('click', async () => {
-    qs('#tracking-run-id').value = '';
     await loadTrackingData({
       strategyId: 'lowvol_reversal',
       limit: Number(qs('#tracking-limit').value || 20),
