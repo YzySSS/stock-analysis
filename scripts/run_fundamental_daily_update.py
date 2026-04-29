@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-batches", type=int, default=0, help="0 means no explicit batch cap")
     parser.add_argument("--stale-after-days", type=int, default=30)
     parser.add_argument("--all", action="store_true", help="Sync stale records instead of only missing ones")
+    parser.add_argument("--profit-yoy-only", action="store_true", help="Only refill rows where profit_yoy is still null")
     return parser
 
 
@@ -42,8 +43,9 @@ def main() -> None:
 
         result = sync.run(
             limit=args.batch_size,
-            only_missing=not args.all,
+            only_missing=not args.all and not args.profit_yoy_only,
             stale_after_days=args.stale_after_days,
+            only_missing_profit_yoy=args.profit_yoy_only,
         )
         batch_no += 1
         summaries.append(result.to_dict())

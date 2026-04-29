@@ -107,6 +107,7 @@ class FundamentalSync:
         limit: Optional[int] = 200,
         only_missing: bool = True,
         stale_after_days: Optional[int] = 30,
+        only_missing_profit_yoy: bool = False,
     ) -> List[str]:
         sql = """
         SELECT code FROM stock_basic
@@ -116,7 +117,9 @@ class FundamentalSync:
         """
         params: List[Any] = []
 
-        if only_missing:
+        if only_missing_profit_yoy:
+            sql += " AND profit_yoy IS NULL"
+        elif only_missing:
             sql += " AND (roe IS NULL OR roa IS NULL OR grossprofit_margin IS NULL OR revenue_yoy IS NULL)"
         elif stale_after_days is not None:
             cutoff = datetime.now() - timedelta(days=stale_after_days)
@@ -258,6 +261,7 @@ class FundamentalSync:
         limit: Optional[int] = 50,
         only_missing: bool = True,
         stale_after_days: Optional[int] = 30,
+        only_missing_profit_yoy: bool = False,
     ) -> FundamentalSyncResult:
         self.ensure_columns()
         result = FundamentalSyncResult(run_id=self.build_run_id())
@@ -268,11 +272,17 @@ class FundamentalSync:
                 "limit": limit,
                 "only_missing": only_missing,
                 "stale_after_days": stale_after_days,
+                "only_missing_profit_yoy": only_missing_profit_yoy,
             },
         )
 
         try:
-            codes = self.fetch_stock_codes(limit=limit, only_missing=only_missing, stale_after_days=stale_after_days)
+            codes = self.fetch_stock_codes(
+                limit=limit,
+                only_missing=only_missing,
+                stale_after_days=stale_after_days,
+                only_missing_profit_yoy=only_missing_profit_yoy,
+            )
             result.scanned = len(codes)
 
             for code in codes:
