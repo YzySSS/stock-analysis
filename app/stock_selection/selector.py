@@ -330,7 +330,8 @@ class StockSelector:
             return run_id or self.build_run_id()
 
         final_run_id = run_id or self.build_run_id()
-        final_trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
+        result_trade_dates = [item.get("trade_date") for item in results if item.get("trade_date")]
+        final_trade_date = trade_date or (result_trade_dates[0] if result_trade_dates else datetime.now().strftime("%Y-%m-%d"))
         sql = """
         INSERT INTO selection_result (
             run_id, trade_date, strategy_id, code, score, rank_no, metadata_json
@@ -353,6 +354,7 @@ class StockSelector:
                 "factors": item.get("factors", {}),
                 "explain": item.get("explain", {}),
                 "raw_metrics": {
+                    "open": item.get("open"),
                     "close": item.get("close"),
                     "pe_tushare": item.get("pe_tushare"),
                     "pb_tushare": item.get("pb_tushare"),

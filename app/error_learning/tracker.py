@@ -185,6 +185,10 @@ class SelectionResultTracker:
         metadata = metadata or {}
         explain = metadata.get("explain", {}) or {}
         raw_metrics = metadata.get("raw_metrics", {})
+        if selected_open_price is None:
+            selected_open_price = self._to_float(raw_metrics.get("open"))
+        if selected_close_price is None:
+            selected_close_price = self._to_float(raw_metrics.get("close"))
         summary = explain.get("summary", {}) or {}
         factor_scores = {
             **raw_metrics,
