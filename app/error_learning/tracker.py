@@ -72,18 +72,51 @@ class SelectionResultTracker:
             sql += " AND sr.run_id = %s"
             params.append(run_id)
             sql += " ORDER BY sr.rank_no ASC, sr.id ASC LIMIT %s"
+            params.append(limit)
         else:
             latest_trade_date_sql = "SELECT MAX(sr2.trade_date) FROM selection_result sr2 INNER JOIN stock_basic sb2 ON sr2.code = sb2.code WHERE sb2.instrument_type = %s"
             latest_params: List[Any] = [instrument_type]
             if strategy_id:
                 latest_trade_date_sql += " AND sr2.strategy_id = %s"
                 latest_params.append(strategy_id)
-                sql += " AND sr.strategy_id = %s"
-                params.append(strategy_id)
-            sql += f" AND sr.trade_date = ({latest_trade_date_sql})"
+            sql = """
+            SELECT
+                sr.run_id,
+                sr.run_id AS latest_run_id,
+                sr.rank_no,
+                sr.trade_date AS selection_date,
+                sr.strategy_id,
+                sr.code,
+                sr.score,
+                sr.metadata_json,
+                sb.name,
+                sb.industry,
+                sb.instrument_type,
+                selected_dk.open AS selected_open_price,
+                selected_dk.close AS selected_close_price,
+                COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
+                latest_dk.trade_date AS latest_trade_date,
+                latest_dk.close AS current_price
+            FROM selection_result sr
+            INNER JOIN (
+                SELECT code, trade_date, strategy_id, MAX(id) AS max_id
+                FROM selection_result
+                WHERE trade_date = (""" + latest_trade_date_sql + """)
+            """
+            params = []
             params.extend(latest_params)
+            if strategy_id:
+                sql += " AND strategy_id = %s"
+                params.append(strategy_id)
+            sql += " GROUP BY code, trade_date, strategy_id ) latest_sr ON sr.id = latest_sr.max_id "
+            sql += " INNER JOIN stock_basic sb ON sr.code = sb.code "
+            sql += " LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date "
+            sql += " LEFT JOIN daily_kline metadata_selected_dk ON sr.code = metadata_selected_dk.code AND metadata_selected_dk.trade_date = CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d') END "
+            sql += " LEFT JOIN ( SELECT d1.code, d1.trade_date, d1.close FROM daily_kline d1 INNER JOIN ( SELECT code, MAX(trade_date) AS max_date FROM daily_kline GROUP BY code ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date ) latest_dk ON sr.code = latest_dk.code "
+            sql += " WHERE sb.instrument_type = %s "
+            params.append(instrument_type)
             sql += " ORDER BY sr.rank_no ASC, sr.id DESC LIMIT %s"
-        params.append(limit)
+            params.append(limit)
 
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
