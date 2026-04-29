@@ -273,7 +273,7 @@ class StockSelector:
         }
 
     def build_factor_analysis(self, instrument_type: str = "stock", limit: int = 200) -> Dict[str, Dict[str, Any]]:
-        data_bundle = self.load_candidates_from_mysql(limit=limit, instrument_type=instrument_type)
+        data_bundle = self.load_candidates_from_mysql(candidate_limit=limit, instrument_type=instrument_type)
         candidates = data_bundle.get("candidates", [])
         stats = {
             "turnover": self._factor_coverage(candidates, "turnover_score"),

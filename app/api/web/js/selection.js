@@ -75,6 +75,7 @@ function renderSelectionPlaceholder(message = '请先设置条件并点击“运
 }
 
 function normalizeRunResponse(result) {
+  const runDate = result.run_id?.match(/^selection(?:_preview)?_(\d{4})(\d{2})(\d{2})_/) ? `${result.run_id.match(/^selection(?:_preview)?_(\d{4})(\d{2})(\d{2})_/)[1]}-${result.run_id.match(/^selection(?:_preview)?_(\d{4})(\d{2})(\d{2})_/)[2]}-${result.run_id.match(/^selection(?:_preview)?_(\d{4})(\d{2})(\d{2})_/)[3]}` : null;
   const items = (result.results || []).map((item) => {
     const explain = item.explain || {};
     const factorScores = {
@@ -87,7 +88,7 @@ function normalizeRunResponse(result) {
       rank_no: item.rank_no ?? null,
       code: item.code,
       name: item.name,
-      selection_date: item.trade_date || '',
+      selection_date: runDate || item.trade_date || '',
       strategy_id: item.strategy_id,
       score: item.score,
       strategy_display_name: item.strategy_display_name,
@@ -197,6 +198,11 @@ function renderSelectionResults(data) {
     const lowvol = factorScores.lowvol ?? '-';
     const reversal = factorScores.reversal ?? '-';
     const factorSummary = `换手 ${turnover} / 低波 ${lowvol} / 反转 ${reversal}`;
+    const fundamentalMissingFields = Array.isArray(factorScores.fundamental_missing_fields) ? factorScores.fundamental_missing_fields : [];
+    const fundamentalCompleteness = factorScores.fundamental_completeness == null ? null : Number(factorScores.fundamental_completeness) * 100;
+    const fundamentalHint = fundamentalMissingFields.length
+      ? `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 缺失 ${fundamentalMissingFields.join(', ')}`
+      : `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 关键字段齐全`;
     const detailText = [
       `策略：${item.strategy_display_name || item.strategy_id || '-'}`,
       `策略版本：${item.strategy_version || '-'}`,
@@ -210,6 +216,7 @@ function renderSelectionResults(data) {
       `最大回撤：${item.max_drawdown_pct ?? '-'}%`,
       `三因子：${factorSummary}`,
       `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
+      `基本面：${fundamentalHint}`,
       `详细原因：${reasonsList.join('；') || '-'}`,
       `详细风险：${risksList.join('；') || '-'}`,
     ].join('\n');
@@ -244,6 +251,7 @@ function renderSelectionResults(data) {
         <td>
           <div>${escapeHtml(risks)}</div>
           <div class="muted">共 ${risksList.length} 条</div>
+          <div class="muted">${escapeHtml(fundamentalHint)}</div>
         </td>
         <td>
           <button class="btn ${isSaved ? 'btn-secondary' : 'btn-primary'}" type="button" data-selection-save="${escapeHtml(saveKey)}" ${isSaved ? 'disabled' : ''}>${isSaved ? '已保存' : '保存'}</button>

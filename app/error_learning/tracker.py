@@ -44,11 +44,18 @@ class SelectionResultTracker:
             sb.instrument_type,
             selected_dk.open AS selected_open_price,
             selected_dk.close AS selected_close_price,
+            COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
             latest_dk.trade_date AS latest_trade_date,
             latest_dk.close AS current_price
         FROM selection_result sr
         INNER JOIN stock_basic sb ON sr.code = sb.code
         LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date
+        LEFT JOIN daily_kline metadata_selected_dk
+          ON sr.code = metadata_selected_dk.code
+         AND metadata_selected_dk.trade_date = CASE
+              WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL
+              ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d')
+             END
         LEFT JOIN (
             SELECT d1.code, d1.trade_date, d1.close
             FROM daily_kline d1
@@ -157,6 +164,7 @@ class SelectionResultTracker:
         selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
+        metric_trade_date = str(row["metric_trade_date"]) if row.get("metric_trade_date") else latest_trade_date
         selection_dt = self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
         base_price = selected_close_price or selected_open_price
@@ -183,6 +191,15 @@ class SelectionResultTracker:
             **metadata.get("factors", {}),
             **summary,
         }
+
+        factor_scores = {
+            **factor_scores,
+            "trade_date": metric_trade_date or factor_scores.get("trade_date"),
+        }
+        fundamental_keys = ["pe_tushare", "pb_tushare", "roe", "roa", "grossprofit_margin", "netprofit_margin", "revenue_yoy", "profit_yoy"]
+        missing_fundamentals = [key for key in fundamental_keys if factor_scores.get(key) is None]
+        factor_scores["fundamental_missing_fields"] = missing_fundamentals
+        factor_scores["fundamental_completeness"] = round((len(fundamental_keys) - len(missing_fundamentals)) / len(fundamental_keys), 4)
 
         return SelectionTrackingRecord(
             run_id=row.get("run_id"),
@@ -236,6 +253,10 @@ class SelectionResultTracker:
             "revenue_yoy": self._to_float(row.get("revenue_yoy")),
             "profit_yoy": self._to_float(row.get("profit_yoy")),
         }
+        fundamental_keys = ["pe_tushare", "pb_tushare", "roe", "roa", "grossprofit_margin", "netprofit_margin", "revenue_yoy", "profit_yoy"]
+        missing_fundamentals = [key for key in fundamental_keys if factor_scores.get(key) is None]
+        factor_scores["fundamental_missing_fields"] = missing_fundamentals
+        factor_scores["fundamental_completeness"] = round((len(fundamental_keys) - len(missing_fundamentals)) / len(fundamental_keys), 4)
 
         return SelectionTrackingRecord(
             latest_run_id=None,
