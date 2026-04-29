@@ -69,6 +69,11 @@ CORE_TABLE_DDL = [
         trade_date DATE NOT NULL,
         pe_tushare DECIMAL(12,4) DEFAULT NULL,
         pb_tushare DECIMAL(12,4) DEFAULT NULL,
+        turnover_rate DECIMAL(12,4) DEFAULT NULL,
+        turnover_rate_f DECIMAL(12,4) DEFAULT NULL,
+        volume_ratio DECIMAL(12,4) DEFAULT NULL,
+        total_mv DECIMAL(20,4) DEFAULT NULL,
+        circ_mv DECIMAL(20,4) DEFAULT NULL,
         roe DECIMAL(12,4) DEFAULT NULL,
         roa DECIMAL(12,4) DEFAULT NULL,
         grossprofit_margin DECIMAL(12,4) DEFAULT NULL,
@@ -76,12 +81,18 @@ CORE_TABLE_DDL = [
         revenue_yoy DECIMAL(12,4) DEFAULT NULL,
         profit_yoy DECIMAL(12,4) DEFAULT NULL,
         fundamental_period VARCHAR(16) DEFAULT NULL,
-        source VARCHAR(32) DEFAULT 'tushare_stock_basic_snapshot',
+        fundamental_publish_date DATE DEFAULT NULL,
+        valuation_source VARCHAR(32) DEFAULT NULL,
+        fundamental_source VARCHAR(32) DEFAULT NULL,
+        valuation_updated_at DATETIME DEFAULT NULL,
+        fundamental_updated_at DATETIME DEFAULT NULL,
+        completeness_score DECIMAL(8,4) DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_factor_input_daily (code, trade_date),
         KEY idx_factor_input_trade_date (trade_date),
-        KEY idx_factor_input_code (code)
+        KEY idx_factor_input_code (code),
+        KEY idx_factor_input_period (fundamental_period)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -125,6 +136,100 @@ CORE_TABLE_DDL = [
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_task_name (task_name),
         KEY idx_task_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_run (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        run_id VARCHAR(64) NOT NULL,
+        strategy_id VARCHAR(64) NOT NULL,
+        strategy_version VARCHAR(32) DEFAULT NULL,
+        instrument_type VARCHAR(16) NOT NULL DEFAULT 'stock',
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
+        return_mode VARCHAR(16) NOT NULL,
+        use_adjusted_price TINYINT(1) NOT NULL DEFAULT 0,
+        status VARCHAR(32) NOT NULL DEFAULT 'running',
+        sample_days INT DEFAULT 0,
+        total_picks INT DEFAULT 0,
+        total_trades INT DEFAULT 0,
+        request_json JSON DEFAULT NULL,
+        summary_json JSON DEFAULT NULL,
+        error_message TEXT,
+        started_at DATETIME NOT NULL,
+        finished_at DATETIME DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_backtest_run_id (run_id),
+        KEY idx_backtest_strategy (strategy_id),
+        KEY idx_backtest_status (status),
+        KEY idx_backtest_date_range (start_date, end_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_pick (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        run_id VARCHAR(64) NOT NULL,
+        strategy_id VARCHAR(64) NOT NULL,
+        trade_date DATE NOT NULL,
+        code VARCHAR(16) NOT NULL,
+        rank_no INT DEFAULT NULL,
+        score DECIMAL(12,4) DEFAULT NULL,
+        entry_price DECIMAL(12,4) DEFAULT NULL,
+        entry_price_type VARCHAR(16) DEFAULT 'open',
+        factor_json JSON DEFAULT NULL,
+        explain_json JSON DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_backtest_pick (run_id, trade_date, code),
+        KEY idx_backtest_pick_run (run_id),
+        KEY idx_backtest_pick_date (trade_date),
+        KEY idx_backtest_pick_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_trade (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        run_id VARCHAR(64) NOT NULL,
+        strategy_id VARCHAR(64) NOT NULL,
+        trade_date DATE NOT NULL,
+        code VARCHAR(16) NOT NULL,
+        entry_date DATE NOT NULL,
+        entry_price DECIMAL(12,4) NOT NULL,
+        exit_date_1d DATE DEFAULT NULL,
+        exit_price_1d DECIMAL(12,4) DEFAULT NULL,
+        return_1d_pct DECIMAL(12,4) DEFAULT NULL,
+        exit_date_3d DATE DEFAULT NULL,
+        exit_price_3d DECIMAL(12,4) DEFAULT NULL,
+        return_3d_pct DECIMAL(12,4) DEFAULT NULL,
+        max_gain_pct DECIMAL(12,4) DEFAULT NULL,
+        max_drawdown_pct DECIMAL(12,4) DEFAULT NULL,
+        benchmark_code VARCHAR(16) DEFAULT NULL,
+        benchmark_return_1d_pct DECIMAL(12,4) DEFAULT NULL,
+        benchmark_return_3d_pct DECIMAL(12,4) DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_backtest_trade (run_id, trade_date, code),
+        KEY idx_backtest_trade_run (run_id),
+        KEY idx_backtest_trade_date (trade_date),
+        KEY idx_backtest_trade_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_summary_daily (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        run_id VARCHAR(64) NOT NULL,
+        strategy_id VARCHAR(64) NOT NULL,
+        trade_date DATE NOT NULL,
+        pick_count INT DEFAULT 0,
+        avg_return_1d_pct DECIMAL(12,4) DEFAULT NULL,
+        avg_return_3d_pct DECIMAL(12,4) DEFAULT NULL,
+        win_rate_1d_pct DECIMAL(12,4) DEFAULT NULL,
+        win_rate_3d_pct DECIMAL(12,4) DEFAULT NULL,
+        benchmark_return_1d_pct DECIMAL(12,4) DEFAULT NULL,
+        benchmark_return_3d_pct DECIMAL(12,4) DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_backtest_summary_daily (run_id, trade_date),
+        KEY idx_backtest_summary_daily_run (run_id),
+        KEY idx_backtest_summary_daily_date (trade_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
 ]

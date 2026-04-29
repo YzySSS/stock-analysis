@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
+from app.api.routes.backtest import router as backtest_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.health import router as health_router
 from app.api.routes.selection import router as selection_router
@@ -29,5 +30,6 @@ app.include_router(system_router, prefix="/api")
 app.include_router(strategies_router, prefix="/api")
 app.include_router(selection_router, prefix="/api")
 app.include_router(tracking_router, prefix="/api")
+app.include_router(backtest_router, prefix="/api")
 app.include_router(stocks_router, prefix="/api")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
