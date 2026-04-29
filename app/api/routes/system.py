@@ -12,12 +12,14 @@ TRACKED_TASKS = [
     "daily_kline_increment",
     "daily_kline_backfill",
     "fundamental_sync",
+    "valuation_sync",
 ]
 
 TASK_NAME_LABELS = {
     "daily_kline_increment": "日线增量更新",
     "daily_kline_backfill": "历史日线补齐",
     "fundamental_sync": "基本面补齐",
+    "valuation_sync": "估值补齐",
 }
 
 
@@ -40,19 +42,23 @@ def _coverage_stats() -> dict:
                 SELECT
                     (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock') AS total_stock_codes,
                     (SELECT COUNT(DISTINCT dk.code) FROM daily_kline dk INNER JOIN stock_basic sb ON dk.code = sb.code WHERE sb.instrument_type='stock') AS daily_kline_covered_codes,
-                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (roe IS NOT NULL OR roa IS NOT NULL OR grossprofit_margin IS NOT NULL OR revenue_yoy IS NOT NULL)) AS fundamental_filled_codes
+                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (roe IS NOT NULL OR roa IS NOT NULL OR grossprofit_margin IS NOT NULL OR revenue_yoy IS NOT NULL)) AS fundamental_filled_codes,
+                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (pe_tushare IS NOT NULL OR pb_tushare IS NOT NULL)) AS valuation_filled_codes
                 """
             )
             row = cursor.fetchone() or {}
             total_codes = int(row.get("total_stock_codes") or 0)
             covered_codes = int(row.get("daily_kline_covered_codes") or 0)
             fundamental_filled = int(row.get("fundamental_filled_codes") or 0)
+            valuation_filled = int(row.get("valuation_filled_codes") or 0)
             return {
                 "total_stock_codes": total_codes,
                 "daily_kline_covered_codes": covered_codes,
                 "daily_kline_coverage_pct": round((covered_codes / total_codes) * 100, 2) if total_codes else None,
                 "fundamental_filled_codes": fundamental_filled,
                 "fundamental_coverage_pct": round((fundamental_filled / total_codes) * 100, 2) if total_codes else None,
+                "valuation_filled_codes": valuation_filled,
+                "valuation_coverage_pct": round((valuation_filled / total_codes) * 100, 2) if total_codes else None,
             }
 
 
@@ -65,6 +71,7 @@ def _latest_dates() -> dict:
                     (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_trade_date,
                     (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at,
                     (SELECT MAX(fundamental_updated_at) FROM stock_basic) AS fundamental_latest_updated_at,
+                    (SELECT MAX(valuation_updated_at) FROM stock_basic) AS valuation_latest_updated_at,
                     (SELECT MAX(created_at) FROM selection_result) AS selection_result_latest_created_at,
                     (SELECT MAX(trade_date) FROM selection_result) AS selection_result_latest_trade_date
                 """
