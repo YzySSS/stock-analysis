@@ -134,11 +134,21 @@ class StrategyService:
             overrides["score_threshold"] = float(score_threshold)
 
         selector = StockSelector(strategy_id=final_strategy_id, strategy_overrides=overrides)
+        candidate_limit = None if instrument_type == "stock" else max(limit, 200)
 
         if save:
-            result = selector.run_and_save(limit=limit, instrument_type=instrument_type, run_id=run_id)
+            result = selector.run_and_save(
+                limit=limit,
+                instrument_type=instrument_type,
+                run_id=run_id,
+                candidate_limit=candidate_limit,
+            )
         else:
-            items = selector.run_from_mysql(limit=limit, instrument_type=instrument_type)
+            items = selector.run_from_mysql(
+                limit=limit,
+                instrument_type=instrument_type,
+                candidate_limit=candidate_limit,
+            )
             transient_run_id = run_id or selector.build_run_id(prefix="selection_preview")
             for item in items:
                 item["run_id"] = transient_run_id

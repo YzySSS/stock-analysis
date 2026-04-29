@@ -185,7 +185,11 @@ class StockSelector:
             "missing_fields": sorted(set(missing_fields)),
         }
 
-    def load_candidates_from_mysql(self, limit: int = 50, instrument_type: str = "stock") -> Dict[str, Any]:
+    def load_candidates_from_mysql(
+        self,
+        candidate_limit: Optional[int] = None,
+        instrument_type: str = "stock",
+    ) -> Dict[str, Any]:
         sql = """
         SELECT
             sb.code,
@@ -214,11 +218,14 @@ class StockSelector:
         WHERE sb.is_delisted = 0
           AND sb.instrument_type = %s
         ORDER BY (dk.trade_date IS NULL), dk.trade_date DESC, sb.code
-        LIMIT %s
         """
+        params = [instrument_type]
+        if candidate_limit:
+            sql += " LIMIT %s"
+            params.append(int(candidate_limit))
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, (instrument_type, limit))
+                cursor.execute(sql, params)
                 rows = cursor.fetchall()
 
         candidates = [self._build_candidate(row) for row in rows]
@@ -304,9 +311,14 @@ class StockSelector:
             for index, item in enumerate(selected, start=1)
         ]
 
-    def run_from_mysql(self, limit: int = 50, instrument_type: str = "stock") -> List[Dict[str, Any]]:
-        data_bundle = self.load_candidates_from_mysql(limit=limit, instrument_type=instrument_type)
-        return self.run(data_bundle)
+    def run_from_mysql(
+        self,
+        limit: int = 50,
+        instrument_type: str = "stock",
+        candidate_limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        data_bundle = self.load_candidates_from_mysql(candidate_limit=candidate_limit, instrument_type=instrument_type)
+        return self.run(data_bundle)[:limit]
 
     def save_selection_results(
         self,
@@ -318,7 +330,7 @@ class StockSelector:
             return run_id or self.build_run_id()
 
         final_run_id = run_id or self.build_run_id()
-        final_trade_date = trade_date or results[0].get("trade_date") or datetime.now().strftime("%Y-%m-%d")
+        final_trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
         sql = """
         INSERT INTO selection_result (
             run_id, trade_date, strategy_id, code, score, rank_no, metadata_json
@@ -385,8 +397,14 @@ class StockSelector:
     def save_single_result(self, item: Dict[str, Any], run_id: Optional[str] = None) -> str:
         return self.save_selection_results([item], run_id=run_id, trade_date=item.get("trade_date"))
 
-    def run_and_save(self, limit: int = 50, instrument_type: str = "stock", run_id: Optional[str] = None) -> Dict[str, Any]:
-        results = self.run_from_mysql(limit=limit, instrument_type=instrument_type)
+    def run_and_save(
+        self,
+        limit: int = 50,
+        instrument_type: str = "stock",
+        run_id: Optional[str] = None,
+        candidate_limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        results = self.run_from_mysql(limit=limit, instrument_type=instrument_type, candidate_limit=candidate_limit)
         saved_run_id = self.save_selection_results(results, run_id=run_id)
         return {
             "run_id": saved_run_id,
