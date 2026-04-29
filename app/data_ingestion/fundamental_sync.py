@@ -162,6 +162,14 @@ class FundamentalSync:
             return None
         return value if value == value else None
 
+    @staticmethod
+    def _first_non_null(*values: Any) -> Optional[float]:
+        for value in values:
+            normalized = FundamentalSync._to_float(value)
+            if normalized is not None:
+                return normalized
+        return None
+
     def fetch_single_fundamental(self, code: str, result: Optional[FundamentalSyncResult] = None) -> Optional[FundamentalRecord]:
         ts_code = self.to_ts_code(code)
         fields = "ts_code,end_date,roe,roa,grossprofit_margin,profit_to_gr,or_yoy,netprofit_yoy,q_netprofit_yoy,profit_yoy"
@@ -178,10 +186,10 @@ class FundamentalSync:
                     grossprofit_margin=self._to_float(latest.get("grossprofit_margin")),
                     netprofit_margin=self._to_float(latest.get("profit_to_gr")),
                     revenue_yoy=self._to_float(latest.get("or_yoy")),
-                    profit_yoy=(
-                        self._to_float(latest.get("profit_yoy"))
-                        or self._to_float(latest.get("netprofit_yoy"))
-                        or self._to_float(latest.get("q_netprofit_yoy"))
+                    profit_yoy=self._first_non_null(
+                        latest.get("profit_yoy"),
+                        latest.get("netprofit_yoy"),
+                        latest.get("q_netprofit_yoy"),
                     ),
                     period=str(latest.get("end_date") or period),
                 )
