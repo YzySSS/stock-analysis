@@ -63,6 +63,28 @@ CORE_TABLE_DDL = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
+    CREATE TABLE IF NOT EXISTS factor_input_daily (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(16) NOT NULL,
+        trade_date DATE NOT NULL,
+        pe_tushare DECIMAL(12,4) DEFAULT NULL,
+        pb_tushare DECIMAL(12,4) DEFAULT NULL,
+        roe DECIMAL(12,4) DEFAULT NULL,
+        roa DECIMAL(12,4) DEFAULT NULL,
+        grossprofit_margin DECIMAL(12,4) DEFAULT NULL,
+        netprofit_margin DECIMAL(12,4) DEFAULT NULL,
+        revenue_yoy DECIMAL(12,4) DEFAULT NULL,
+        profit_yoy DECIMAL(12,4) DEFAULT NULL,
+        fundamental_period VARCHAR(16) DEFAULT NULL,
+        source VARCHAR(32) DEFAULT 'tushare_stock_basic_snapshot',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_factor_input_daily (code, trade_date),
+        KEY idx_factor_input_trade_date (trade_date),
+        KEY idx_factor_input_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS selection_result (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         run_id VARCHAR(64) NOT NULL,
