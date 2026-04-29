@@ -49,8 +49,8 @@ function renderReviewNotes(summary = {}, items = []) {
 }
 
 let lastTrackingState = {
-  strategyId: '',
-  limit: 20,
+  strategyId: 'lowvol_reversal',
+  limit: 200,
   instrumentType: 'stock',
 };
 
@@ -93,7 +93,7 @@ function renderTrackingTable(items, summary = {}) {
   }).join('');
 }
 
-async function loadTrackingData({ strategyId = '', limit = 20, instrumentType = 'stock' } = {}) {
+async function loadTrackingData({ strategyId = 'lowvol_reversal', limit = 200, instrumentType = 'stock' } = {}) {
   const summaryText = qs('#tracking-summary-text');
   summaryText.textContent = '加载中...';
 
@@ -114,7 +114,7 @@ async function deleteTrackingItem(button) {
   const code = button?.dataset?.code || '';
   const selectionDate = button?.dataset?.selectionDate || '';
   const strategyId = button?.dataset?.strategyId || '';
-  const instrumentType = qs('#tracking-instrument-type').value || lastTrackingState.instrumentType || 'stock';
+  const instrumentType = lastTrackingState.instrumentType || 'stock';
   if (!code || !selectionDate || !strategyId) {
     qs('#tracking-summary-text').textContent = '删除失败：当前行缺少 code / selection_date / strategy_id';
     return;
@@ -139,29 +139,7 @@ async function deleteTrackingItem(button) {
   }
 }
 
-async function handleTrackingFilter(event) {
-  event.preventDefault();
-  try {
-    await loadTrackingData({
-      strategyId: 'lowvol_reversal',
-      limit: Number(qs('#tracking-limit').value || 20),
-      instrumentType: qs('#tracking-instrument-type').value,
-    });
-  } catch (error) {
-    qs('#tracking-summary-text').textContent = `加载失败: ${error.message}`;
-    qs('#tracking-results-body').innerHTML = renderEmptyRow(12, error.message);
-  }
-}
-
 document.addEventListener('DOMContentLoaded', async () => {
-  qs('#tracking-filter-form').addEventListener('submit', handleTrackingFilter);
-  qs('#tracking-latest-btn').addEventListener('click', async () => {
-    await loadTrackingData({
-      strategyId: 'lowvol_reversal',
-      limit: Number(qs('#tracking-limit').value || 20),
-      instrumentType: qs('#tracking-instrument-type').value,
-    });
-  });
   qs('#tracking-results-body').addEventListener('click', async (event) => {
     const button = event.target.closest('[data-action="delete-tracking-item"]');
     if (!button) return;
@@ -169,7 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   try {
-    await loadTrackingData({ strategyId: 'lowvol_reversal' });
+    await loadTrackingData();
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
     qs('#tracking-results-body').innerHTML = renderEmptyRow(12, error.message);

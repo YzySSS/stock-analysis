@@ -67,32 +67,6 @@
       </section>
 
       <section class="card">
-        <div class="card-header with-actions">
-          <div>
-            <h2>查询条件</h2>
-          </div>
-        </div>
-        <form id="tracking-filter-form" class="inline-form">
-          <div class="form-group small-field">
-            <label for="tracking-limit">limit</label>
-            <input id="tracking-limit" type="number" value="20" min="1" max="200" />
-          </div>
-          <div class="form-group small-field">
-            <label for="tracking-instrument-type">类型</label>
-            <select id="tracking-instrument-type">
-              <option value="stock">股票</option>
-              <option value="etf">ETF</option>
-              <option value="index">指数</option>
-            </select>
-          </div>
-          <div class="actions align-end">
-            <button class="btn btn-primary" type="submit">查询</button>
-            <button id="tracking-latest-btn" class="btn btn-secondary" type="button">查看当前复盘池</button>
-          </div>
-        </form>
-      </section>
-
-      <section class="card">
         <div class="card-header">
           <h2>复盘概览</h2>
           <p id="tracking-summary-text" class="muted">正在加载...</p>
@@ -139,6 +113,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/tracking.js?v=20260429g"></script>
+  <script src="/static/js/tracking.js?v=20260429h"></script>
 </body>
 </html>
