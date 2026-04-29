@@ -164,7 +164,7 @@ class FundamentalSync:
 
     def fetch_single_fundamental(self, code: str, result: Optional[FundamentalSyncResult] = None) -> Optional[FundamentalRecord]:
         ts_code = self.to_ts_code(code)
-        fields = "ts_code,end_date,roe,roa,grossprofit_margin,profit_to_gr,or_yoy,profit_yoy"
+        fields = "ts_code,end_date,roe,roa,grossprofit_margin,profit_to_gr,or_yoy,netprofit_yoy,q_netprofit_yoy,profit_yoy"
         for period in self.periods:
             try:
                 df = self.pro.fina_indicator(ts_code=ts_code, period=period, fields=fields)
@@ -178,7 +178,11 @@ class FundamentalSync:
                     grossprofit_margin=self._to_float(latest.get("grossprofit_margin")),
                     netprofit_margin=self._to_float(latest.get("profit_to_gr")),
                     revenue_yoy=self._to_float(latest.get("or_yoy")),
-                    profit_yoy=self._to_float(latest.get("profit_yoy")),
+                    profit_yoy=(
+                        self._to_float(latest.get("profit_yoy"))
+                        or self._to_float(latest.get("netprofit_yoy"))
+                        or self._to_float(latest.get("q_netprofit_yoy"))
+                    ),
                     period=str(latest.get("end_date") or period),
                 )
                 if any(
