@@ -72,7 +72,7 @@ function renderTrackingTable(items, summary = {}) {
         ? '已验证正收益'
         : '需重点复盘回撤';
     return `
-      <tr>
+      <tr data-tracking-key="${escapeHtml(`${item.code || ''}__${item.selection_date || ''}__${item.strategy_id || ''}`)}">
         <td>
           <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '')}</a>
           <div class="muted">${escapeHtml(item.code || '')}</div>
@@ -128,6 +128,14 @@ async function deleteTrackingItem(button) {
   try {
     const query = new URLSearchParams({ code, selection_date: selectionDate, strategy_id: strategyId, instrument_type: instrumentType });
     await fetchJson(`/api/tracking/item?${query.toString()}`, { method: 'DELETE' });
+    const row = button.closest('tr');
+    if (row) {
+      row.remove();
+    }
+    const remainingRows = qsa('#tracking-results-body tr').filter((item) => !item.querySelector('td[colspan]'));
+    if (!remainingRows.length) {
+      qs('#tracking-results-body').innerHTML = renderEmptyRow(12, '暂无跟踪数据');
+    }
     qs('#tracking-summary-text').textContent = `已删除 ${code} 的复盘记录`;
     await loadTrackingData({
       strategyId: lastTrackingState.strategyId,
