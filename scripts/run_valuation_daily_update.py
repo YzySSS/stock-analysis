@@ -4,7 +4,6 @@ import argparse
 import json
 import sys
 import time
-from collections import deque
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,14 +21,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stale-after-days", type=int, default=7)
     parser.add_argument("--instrument-type", default="stock")
     parser.add_argument("--all", action="store_true", help="Sync stale records instead of only missing ones")
-    parser.add_argument("--cooldown-batches", type=int, default=50, help="How many batches to temporarily skip missing-source codes")
+    parser.add_argument("--cooldown-days", type=int, default=1, help="How many days to skip codes that had no valuation source for the same trade date")
+    parser.add_argument("--state-file", default=str(PROJECT_ROOT / "logs" / "valuation_sync_missing_codes.json"))
     parser.add_argument("--stop-after-no-progress", type=int, default=5, help="Stop after this many consecutive no-progress batches")
     return parser
+
+
+def load_state(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main() -> None:
     args = build_parser().parse_args()
     sync = ValuationSync()
+    state_path = Path(args.state_file)
+    state = load_state(state_path)
 
     batch_no = 0
     summaries = []
@@ -37,18 +53,15 @@ def main() -> None:
     total_updated = 0
     total_missing_source = 0
     no_progress_streak = 0
-    excluded_codes: dict[str, int] = {}
-    recent_missing_windows: deque[list[str]] = deque(maxlen=max(args.cooldown_batches, 1))
 
     while True:
         if args.max_batches and batch_no >= args.max_batches:
             break
 
-        if excluded_codes:
-            expired = [code for code, remain in excluded_codes.items() if remain <= 0]
-            for code in expired:
-                excluded_codes.pop(code, None)
-        exclude_list = list(excluded_codes.keys())
+        trade_date = sync.get_trade_date()
+        trade_state = state.get(trade_date, {})
+        now_ts = int(time.time())
+        exclude_list = [code for code, expiry in trade_state.items() if int(expiry) > now_ts]
 
         result = sync.run(
             limit=args.batch_size,
@@ -65,25 +78,32 @@ def main() -> None:
 
         missing_codes = []
         if result.missing_source:
-            # best-effort readback from task log payload isn't necessary here; reconstruct from exclusion list only after DB-side selection
-            pass
+            from app.shared.db import mysql_conn
+            with mysql_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT metadata_json FROM task_run_log WHERE task_name='valuation_sync' AND run_id=%s ORDER BY id DESC LIMIT 1",
+                        (result.run_id,),
+                    )
+                    row = cursor.fetchone() or {}
+                    metadata = row.get('metadata_json') or {}
+                    if isinstance(metadata, str):
+                        metadata = json.loads(metadata)
+                    missing_codes = metadata.get('missing_codes') or []
+            expiry = now_ts + args.cooldown_days * 86400
+            next_trade_state = state.setdefault(trade_date, {})
+            for code in missing_codes:
+                next_trade_state[code] = expiry
+            save_state(state_path, state)
 
         payload = {
             "batch_no": batch_no,
             **result.to_dict(),
-            "excluded_codes": len(excluded_codes),
+            "excluded_codes": len(exclude_list),
+            "new_missing_codes": len(missing_codes),
             "no_progress_streak": no_progress_streak,
         }
         print(json.dumps(payload, ensure_ascii=False), flush=True)
-
-        for code in list(excluded_codes.keys()):
-            excluded_codes[code] -= 1
-
-        if result.missing_source > 0 and result.updated < result.scanned:
-            # read the batch's missing codes from task log on next loop would be overkill; temporarily exclude the tail gap by querying later batches first
-            no_progress_streak += 1 if result.updated == 0 else 0
-        else:
-            no_progress_streak = 0
 
         if result.scanned < args.batch_size:
             break
