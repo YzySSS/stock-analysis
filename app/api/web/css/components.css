@@ -116,6 +116,35 @@
   padding: 10px 12px;
 }
 
+.tracking-filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: end;
+}
+
+.tracking-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.tracking-filter-field select {
+  background: var(--panel-soft);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  appearance: none;
+}
+
+.tracking-filter-field select:focus {
+  outline: 1px solid var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
 .stack-form {
   display: flex;
   flex-direction: column;

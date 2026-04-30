@@ -49,10 +49,9 @@ function renderReviewNotes(summary = {}, items = []) {
 }
 
 let lastTrackingState = {
-  strategyId: 'lowvol_reversal',
+  strategyId: '',
   limit: 200,
   instrumentType: 'stock',
-  runId: '',
   selectionDate: '',
 };
 
@@ -101,7 +100,7 @@ function renderSelectionDateOptions(dates = [], selectedValue = '') {
   select.innerHTML = '';
   const latestOption = document.createElement('option');
   latestOption.value = '';
-  latestOption.textContent = '最新日期';
+  latestOption.textContent = '全部日期';
   select.appendChild(latestOption);
 
   dates.forEach((value) => {
@@ -115,72 +114,40 @@ function renderSelectionDateOptions(dates = [], selectedValue = '') {
   select.value = selectedValue || '';
 }
 
-function renderRunOptions(runs = [], selectedRunId = '', selectedDate = '') {
-  const select = qs('#tracking-run-id');
-  if (!select) return;
-  select.innerHTML = '';
-  const latestOption = document.createElement('option');
-  latestOption.value = '';
-  latestOption.textContent = '自动按日期/最新匹配';
-  select.appendChild(latestOption);
-
-  const filteredRuns = selectedDate
-    ? runs.filter((item) => String(item.trade_date || '') === String(selectedDate))
-    : runs;
-
-  filteredRuns.forEach((item) => {
-    const option = document.createElement('option');
-    option.value = item.run_id || '';
-    const tradeDate = item.trade_date || '-';
-    const count = item.item_count ?? '-';
-    option.textContent = `${tradeDate} · ${item.run_id} · ${count} 条`;
-    if (item.run_id === selectedRunId) option.selected = true;
-    select.appendChild(option);
-  });
-
-  select.value = selectedRunId || '';
-}
-
 async function loadTrackingFilters(strategyId, instrumentType = 'stock') {
   const query = new URLSearchParams({ instrument_type: instrumentType });
   if (strategyId) query.set('strategy_id', strategyId);
   return fetchJson(`/api/tracking/filters?${query.toString()}`);
 }
 
-async function loadTrackingData({ strategyId = 'lowvol_reversal', limit = 200, instrumentType = 'stock', runId = '', selectionDate = '' } = {}) {
+async function loadTrackingData({ strategyId = '', limit = 200, instrumentType = 'stock', selectionDate = '' } = {}) {
   const summaryText = qs('#tracking-summary-text');
   summaryText.textContent = '加载中...';
 
   const filters = await loadTrackingFilters(strategyId, instrumentType);
   const selectionDates = filters.selection_dates || [];
-  const availableRuns = filters.available_runs || [];
   renderSelectionDateOptions(selectionDates, selectionDate);
-  renderRunOptions(availableRuns, runId, selectionDate);
 
   const query = new URLSearchParams({ limit: String(limit), instrument_type: instrumentType });
   if (strategyId) query.set('strategy_id', strategyId);
   if (selectionDate) query.set('selection_date', selectionDate);
-  if (runId) query.set('run_id', runId);
-
-  const url = runId
+  const url = selectionDate
     ? `/api/tracking?${query.toString()}`
-    : selectionDate
-      ? `/api/tracking?${query.toString()}`
-      : `/api/tracking/latest?${query.toString()}`;
+    : `/api/tracking/latest?${query.toString()}`;
 
   const data = await fetchJson(url);
   const items = data.items || [];
   const summary = data.summary || {};
-  lastTrackingState = { strategyId, limit, instrumentType, runId, selectionDate };
+  lastTrackingState = { strategyId, limit, instrumentType, selectionDate };
   renderTrackingTable(items, summary);
   updateTrackingStats(summary, items);
   renderReviewSummary(summary, items);
   renderReviewNotes(summary, items);
-  const modeText = runId
-    ? `当前显示指定批次 ${runId}`
-    : selectionDate
+  const modeText = selectionDate
       ? `当前显示 ${selectionDate} 的复盘结果`
-      : '当前显示最新复盘快照';
+      : strategyId
+        ? '当前显示该策略全部复盘中的最新日期快照'
+        : '当前显示全部策略最新复盘快照';
   summaryText.textContent = `${modeText}，共 ${items.length} 条`;
 }
 
@@ -207,7 +174,6 @@ async function deleteTrackingItem(button) {
       strategyId: lastTrackingState.strategyId,
       limit: lastTrackingState.limit,
       instrumentType,
-      runId: lastTrackingState.runId,
       selectionDate: lastTrackingState.selectionDate,
     });
   } finally {
@@ -218,7 +184,6 @@ async function deleteTrackingItem(button) {
 document.addEventListener('DOMContentLoaded', async () => {
   const strategySelect = qs('#tracking-strategy-id');
   const dateSelect = qs('#tracking-selection-date');
-  const runSelect = qs('#tracking-run-id');
   const refreshBtn = qs('#refresh-tracking-page');
 
   qs('#tracking-results-body').addEventListener('click', async (event) => {
@@ -229,10 +194,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   strategySelect?.addEventListener('change', async () => {
     await loadTrackingData({
-      strategyId: strategySelect.value || 'lowvol_reversal',
+      strategyId: strategySelect.value || '',
       limit: lastTrackingState.limit,
       instrumentType: lastTrackingState.instrumentType,
-      runId: '',
       selectionDate: '',
     });
   });
@@ -242,18 +206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
       limit: lastTrackingState.limit,
       instrumentType: lastTrackingState.instrumentType,
-      runId: '',
       selectionDate: dateSelect.value || '',
-    });
-  });
-
-  runSelect?.addEventListener('change', async () => {
-    await loadTrackingData({
-      strategyId: strategySelect?.value || lastTrackingState.strategyId,
-      limit: lastTrackingState.limit,
-      instrumentType: lastTrackingState.instrumentType,
-      runId: runSelect.value || '',
-      selectionDate: dateSelect?.value || '',
     });
   });
 
@@ -262,13 +215,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
       limit: lastTrackingState.limit,
       instrumentType: lastTrackingState.instrumentType,
-      runId: runSelect?.value || '',
       selectionDate: dateSelect?.value || '',
     });
   });
 
   try {
-    if (strategySelect) strategySelect.value = 'lowvol_reversal';
+    if (strategySelect) strategySelect.value = '';
     await loadTrackingData();
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
