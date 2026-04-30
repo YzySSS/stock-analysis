@@ -71,28 +71,6 @@
           <h2>复盘概览</h2>
           <p id="tracking-summary-text" class="muted">正在加载...</p>
         </div>
-        <div class="toolbar" style="margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
-          <label>
-            <span class="muted">策略</span>
-            <select id="tracking-strategy-id">
-              <option value="lowvol_reversal">低波动反转策略 (lowvol_reversal)</option>
-              <option value="v12_legacy">V12 多因子策略 (v12_legacy)</option>
-            </select>
-          </label>
-          <label>
-            <span class="muted">选股日期</span>
-            <select id="tracking-selection-date">
-              <option value="">最新日期</option>
-            </select>
-          </label>
-          <label>
-            <span class="muted">复盘批次</span>
-            <select id="tracking-run-id">
-              <option value="">自动按日期/最新匹配</option>
-            </select>
-          </label>
-          <button id="refresh-tracking-page" class="btn btn-secondary" type="button">刷新</button>
-        </div>
         <div id="tracking-review-summary" class="list-stack empty-state">加载中...</div>
       </section>
 
@@ -106,6 +84,28 @@
       <section class="card">
         <div class="card-header">
           <h2>个股复盘列表</h2>
+          <div class="toolbar" style="gap: 12px; flex-wrap: wrap; justify-content: flex-end;">
+            <label>
+              <span class="muted">策略</span>
+              <select id="tracking-strategy-id">
+                <option value="lowvol_reversal">低波动反转策略</option>
+                <option value="v12_legacy">V12 多因子策略</option>
+              </select>
+            </label>
+            <label>
+              <span class="muted">选股日期</span>
+              <select id="tracking-selection-date">
+                <option value="">最新日期</option>
+              </select>
+            </label>
+            <label>
+              <span class="muted">复盘批次</span>
+              <select id="tracking-run-id">
+                <option value="">自动匹配</option>
+              </select>
+            </label>
+            <button id="refresh-tracking-page" class="btn btn-secondary" type="button">刷新</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -135,6 +135,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/tracking.js?v=20260430a"></script>
+  <script src="/static/js/tracking.js?v=20260430b"></script>
 </body>
 </html>
