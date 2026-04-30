@@ -85,8 +85,6 @@ function renderReviewSummary(filteredSummary = {}, strategySummaries = [], pageI
 }
 
 function renderStrategyNoteCard(item) {
-  const positive = item.win_rate_pct == null ? null : Math.round((item.count ?? 0) * Number(item.win_rate_pct) / 100);
-  const negative = item.count == null || positive == null ? null : Math.max((item.count ?? 0) - positive, 0);
   const best = item.best_item;
   const worst = item.worst_item;
   return `
@@ -95,7 +93,7 @@ function renderStrategyNoteCard(item) {
         <strong>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')}</strong>
         <span class="badge status-ok">${item.count ?? 0} 条</span>
       </div>
-      <div>当前策略表现：正收益约 ${positive ?? '-'} 只，负收益约 ${negative ?? '-'} 只，胜率 ${formatPercent(item.win_rate_pct)}，超额收益 ${formatPercent(item.excess_return_pct)}。</div>
+      <div>当前策略表现：正收益 ${item.win_count ?? '-'} 只，负收益 ${item.loss_count ?? '-'} 只，持平 ${item.flat_count ?? '-'} 只，胜率 ${formatPercent(item.win_rate_pct)}，超额收益 ${formatPercent(item.excess_return_pct)}。</div>
       <div class="muted">成功侧：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明该策略在当前筛选范围内仍有较强延续性。` : '暂无足够样本。'}</div>
       <div class="muted">失败侧：${worst ? `${escapeHtml(worst.name || worst.code || '-')} 偏弱，需要重点复盘回撤来源与信号质量。` : '暂无明显失败样本。'}</div>
     </article>
@@ -109,24 +107,13 @@ function renderReviewNotes(filteredSummary = {}, strategySummaries = [], pageIte
     return;
   }
 
-  const positive = strategySummaries.reduce((sum, item) => {
-    const count = item.count ?? 0;
-    const winRate = item.win_rate_pct == null ? null : Number(item.win_rate_pct);
-    return sum + (winRate == null ? 0 : Math.round(count * winRate / 100));
-  }, 0);
-  const negative = strategySummaries.reduce((sum, item) => {
-    const count = item.count ?? 0;
-    const winRate = item.win_rate_pct == null ? null : Number(item.win_rate_pct);
-    return sum + (winRate == null ? 0 : Math.max(count - Math.round(count * winRate / 100), 0));
-  }, 0);
-  const flat = Math.max((filteredSummary.count ?? 0) - positive - negative, 0);
   const best = filteredSummary.best_item;
   const worst = filteredSummary.worst_item;
   const strategyLead = strategySummaries.length === 1
     ? `当前筛选结果对应 ${strategySummaries[0].strategy_display_name || strategySummaries[0].strategy_id || '单策略'}`
     : `当前筛选结果共 ${pageItems.length} 条`;
   container.innerHTML = `
-    <div>${strategyLead}：正收益约 ${positive} 只，负收益约 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(filteredSummary.win_rate_pct)}，超额收益 ${formatPercent(filteredSummary.excess_return_pct)}。</div>
+    <div>${strategyLead}：正收益 ${filteredSummary.win_count ?? '-'} 只，负收益 ${filteredSummary.loss_count ?? '-'} 只，持平 ${filteredSummary.flat_count ?? '-'} 只，胜率 ${formatPercent(filteredSummary.win_rate_pct)}，超额收益 ${formatPercent(filteredSummary.excess_return_pct)}。</div>
     <div class="muted">当前成功特征：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明筛选结果中存在表现延续较强的标的。` : '暂无足够样本。'}</div>
     <div class="muted">当前失败特征：${worst ? `${escapeHtml(worst.name || worst.code || '-')} 偏弱，需结合回撤和基本面缺口继续复盘。` : '暂无明显失败样本。'}</div>
   `;
@@ -180,6 +167,26 @@ function renderTrackingTable(items, summary = {}) {
   }).join('');
 }
 
+function renderStrategyOptions(options = [], selectedValue = '') {
+  const select = qs('#tracking-strategy-id');
+  if (!select) return;
+  select.innerHTML = '';
+  const allOption = document.createElement('option');
+  allOption.value = '';
+  allOption.textContent = '全部策略';
+  select.appendChild(allOption);
+
+  options.forEach((item) => {
+    const option = document.createElement('option');
+    option.value = item.strategy_id || '';
+    option.textContent = item.strategy_display_name || item.strategy_id || '';
+    if (option.value === selectedValue) option.selected = true;
+    select.appendChild(option);
+  });
+
+  select.value = selectedValue || '';
+}
+
 function renderSelectionDateOptions(dates = [], selectedValue = '') {
   const select = qs('#tracking-selection-date');
   if (!select) return;
@@ -225,6 +232,7 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
   summaryText.textContent = '加载中...';
 
   const filters = await loadTrackingFilters(strategyId, instrumentType);
+  renderStrategyOptions(filters.strategy_options || [], strategyId);
   const selectionDates = filters.selection_dates || [];
   renderSelectionDateOptions(selectionDates, selectionDate);
 
@@ -348,7 +356,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   try {
-    if (strategySelect) strategySelect.value = '';
     if (pageSizeSelect) pageSizeSelect.value = '10';
     await loadTrackingData({ limit: 10, offset: 0 });
   } catch (error) {

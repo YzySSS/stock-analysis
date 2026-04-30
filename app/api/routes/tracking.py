@@ -16,7 +16,9 @@ def _build_tracking_summary(items: list[dict]) -> dict:
     avg_return = round(sum(pct_values) / len(pct_values), 2) if pct_values else None
     benchmark_pct = 0.0
     excess_return_pct = round(avg_return - benchmark_pct, 2) if avg_return is not None else None
-    win_count = len([value for value in pct_values if value >= 0])
+    win_count = len([value for value in pct_values if value > 0])
+    flat_count = len([value for value in pct_values if value == 0])
+    loss_count = len([value for value in pct_values if value < 0])
     win_rate = round((win_count / len(pct_values)) * 100, 2) if pct_values else None
     max_gain = max((item.get("max_gain_pct") for item in items if item.get("max_gain_pct") is not None), default=None)
     max_drawdown = min((item.get("max_drawdown_pct") for item in items if item.get("max_drawdown_pct") is not None), default=None)
@@ -38,6 +40,9 @@ def _build_tracking_summary(items: list[dict]) -> dict:
         "benchmark_return_pct": benchmark_pct,
         "excess_return_pct": excess_return_pct,
         "win_rate_pct": win_rate,
+        "win_count": win_count,
+        "loss_count": loss_count,
+        "flat_count": flat_count,
         "max_gain_pct": max_gain,
         "max_drawdown_pct": max_drawdown,
         "best_item": {
@@ -327,8 +332,38 @@ def get_tracking_filters(
         if value and value not in seen:
             seen.add(value)
             seen_dates.append(value)
+
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    sr.strategy_id,
+                    MAX(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.strategy_display_name')), ''), sr.strategy_id)) AS strategy_display_name,
+                    COUNT(*) AS item_count,
+                    MAX(sr.created_at) AS last_created_at
+                FROM selection_result sr
+                INNER JOIN stock_basic sb ON sr.code = sb.code
+                WHERE sb.instrument_type = %s
+                GROUP BY sr.strategy_id
+                ORDER BY last_created_at DESC, sr.strategy_id ASC
+                """,
+                (instrument_type,),
+            )
+            strategy_rows = cursor.fetchall()
+
+    strategy_options = [
+        {
+            "strategy_id": str(row.get("strategy_id") or ""),
+            "strategy_display_name": str(row.get("strategy_display_name") or row.get("strategy_id") or ""),
+            "item_count": int(row.get("item_count") or 0),
+        }
+        for row in strategy_rows
+        if row.get("strategy_id")
+    ]
     return {
         "strategy_id": strategy_id,
         "selection_dates": seen_dates,
+        "strategy_options": strategy_options,
         "available_runs": runs,
     }
