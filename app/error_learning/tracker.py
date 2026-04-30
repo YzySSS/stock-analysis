@@ -52,6 +52,8 @@ class SelectionResultTracker:
             sb.instrument_type,
             selected_dk.open AS selected_open_price,
             selected_dk.close AS selected_close_price,
+            period_dk.max_high AS period_max_high,
+            period_dk.min_low AS period_min_low,
             COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
             latest_dk.trade_date AS latest_trade_date,
             latest_dk.close AS current_price
@@ -73,6 +75,14 @@ class SelectionResultTracker:
                 GROUP BY code
             ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
         ) latest_dk ON sr.code = latest_dk.code
+        LEFT JOIN (
+            SELECT sr_inner.id AS selection_result_id, MAX(dk.high) AS max_high, MIN(dk.low) AS min_low
+            FROM selection_result sr_inner
+            INNER JOIN daily_kline dk
+              ON dk.code = sr_inner.code
+             AND dk.trade_date BETWEEN sr_inner.trade_date AND (SELECT MAX(trade_date) FROM daily_kline)
+            GROUP BY sr_inner.id
+        ) period_dk ON sr.id = period_dk.selection_result_id
         WHERE sb.instrument_type = %s
         """
         params: List[Any] = [instrument_type]
@@ -110,6 +120,8 @@ class SelectionResultTracker:
                 sb.instrument_type,
                 selected_dk.open AS selected_open_price,
                 selected_dk.close AS selected_close_price,
+                period_dk.max_high AS period_max_high,
+                period_dk.min_low AS period_min_low,
                 COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
                 latest_dk.trade_date AS latest_trade_date,
                 latest_dk.close AS current_price
@@ -129,6 +141,7 @@ class SelectionResultTracker:
             sql += " LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date "
             sql += " LEFT JOIN daily_kline metadata_selected_dk ON sr.code = metadata_selected_dk.code AND metadata_selected_dk.trade_date = CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d') END "
             sql += " LEFT JOIN ( SELECT d1.code, d1.trade_date, d1.close FROM daily_kline d1 INNER JOIN ( SELECT code, MAX(trade_date) AS max_date FROM daily_kline GROUP BY code ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date ) latest_dk ON sr.code = latest_dk.code "
+            sql += " LEFT JOIN ( SELECT sr_inner.id AS selection_result_id, MAX(dk.high) AS max_high, MIN(dk.low) AS min_low FROM selection_result sr_inner INNER JOIN daily_kline dk ON dk.code = sr_inner.code AND dk.trade_date BETWEEN sr_inner.trade_date AND (SELECT MAX(trade_date) FROM daily_kline) GROUP BY sr_inner.id ) period_dk ON sr.id = period_dk.selection_result_id "
             sql += " WHERE sb.instrument_type = %s "
             params.append(instrument_type)
             sql += " ORDER BY sr.rank_no ASC, sr.id DESC LIMIT %s"
@@ -216,14 +229,20 @@ class SelectionResultTracker:
         metric_trade_date = str(row["metric_trade_date"]) if row.get("metric_trade_date") else latest_trade_date
         selection_dt = self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
-        base_price = selected_close_price or selected_open_price
+        base_price = selected_open_price or selected_close_price
         price_change_pct = None
         if base_price and current_price:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
         tracking_days = self._calc_tracking_days(selection_dt, latest_dt)
         review_status = "tracking" if latest_dt and selection_dt and latest_dt >= selection_dt else "pending"
-        max_gain_pct = price_change_pct if price_change_pct is not None and price_change_pct > 0 else 0.0 if price_change_pct is not None else None
-        max_drawdown_pct = price_change_pct if price_change_pct is not None and price_change_pct < 0 else 0.0 if price_change_pct is not None else None
+        period_max_high = self._to_float(row.get("period_max_high"))
+        period_min_low = self._to_float(row.get("period_min_low"))
+        max_gain_pct = None
+        max_drawdown_pct = None
+        if selected_open_price and period_max_high:
+            max_gain_pct = round((period_max_high - selected_open_price) / selected_open_price * 100, 2)
+        if selected_open_price and period_min_low:
+            max_drawdown_pct = round((period_min_low - selected_open_price) / selected_open_price * 100, 2)
 
         metadata = row.get("metadata_json")
         if isinstance(metadata, str):
@@ -287,7 +306,7 @@ class SelectionResultTracker:
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
         selection_dt = self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
-        base_price = selected_close_price or selected_open_price
+        base_price = selected_open_price or selected_close_price
         price_change_pct = None
         if base_price and current_price:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
