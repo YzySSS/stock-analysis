@@ -13,19 +13,46 @@ function updateTrackingStats(summary = {}, items = []) {
   qs('#tracking-stat-max-drawdown').textContent = formatPercent(summary.max_drawdown_pct);
 }
 
+function getStrategyLabel(item) {
+  return item?.strategy_display_name || item?.strategy_id || '-';
+}
+
+function summarizeStrategies(items = []) {
+  const counts = new Map();
+  items.forEach((item) => {
+    const key = getStrategyLabel(item);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+}
+
+function summarizeDates(items = []) {
+  const values = Array.from(new Set(items.map((item) => item.selection_date).filter(Boolean)));
+  values.sort().reverse();
+  return values;
+}
+
 function renderReviewSummary(summary = {}, items = []) {
   const container = qs('#tracking-review-summary');
   const best = summary.best_item;
   const worst = summary.worst_item;
-  const strategyName = items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照';
-  const selectionDate = items[0]?.selection_date || '-';
+  const strategies = summarizeStrategies(items);
+  const dates = summarizeDates(items);
+  const strategyText = strategies.length
+    ? strategies.map((item) => `${item.name}（${item.count}）`).join('、')
+    : '暂无';
+  const dateText = dates.length > 1
+    ? `${dates[0]} ~ ${dates[dates.length - 1]}`
+    : (dates[0] || '-');
+  const title = strategies.length === 1 ? strategies[0].name : '多策略复盘概览';
+
   container.innerHTML = `
     <article class="strategy-item">
       <div class="strategy-item-head">
-        <strong>${escapeHtml(strategyName)}</strong>
+        <strong>${escapeHtml(title)}</strong>
         <span class="badge status-ok">${summary.count ?? 0} 条</span>
       </div>
-      <div class="muted">选股日期：${escapeHtml(selectionDate)} · 策略：${escapeHtml(items[0]?.strategy_display_name || items[0]?.strategy_id || '最新复盘快照')} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
+      <div class="muted">覆盖日期：${escapeHtml(dateText)} · 覆盖策略：${escapeHtml(strategyText)} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
       <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)} · 超额收益：${formatPercent(summary.excess_return_pct)}</div>
       <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
       <div class="muted">表现最好：${best ? `${escapeHtml(best.name || best.code || '-')} (${formatPercent(best.price_change_pct)})` : '暂无'}</div>
@@ -41,9 +68,13 @@ function renderReviewNotes(summary = {}, items = []) {
   const flat = Math.max((summary.count ?? items.length ?? 0) - positive - negative, 0);
   const best = summary.best_item;
   const worst = summary.worst_item;
+  const strategies = summarizeStrategies(items);
+  const strategyLead = strategies.length <= 1
+    ? '当前这组策略样本'
+    : `当前页覆盖 ${strategies.length} 个策略样本`;
   container.innerHTML = `
-    <div>当前复盘判断：正收益 ${positive} 只，负收益 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(summary.win_rate_pct)}，超额收益 ${formatPercent(summary.excess_return_pct)}。</div>
-    <div class="muted">当前成功特征：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明本轮至少有部分标的延续了正向表现。` : '暂无足够样本。'}</div>
+    <div>${strategyLead}：正收益 ${positive} 只，负收益 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(summary.win_rate_pct)}，超额收益 ${formatPercent(summary.excess_return_pct)}。</div>
+    <div class="muted">当前成功特征：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明本页至少有部分标的延续了正向表现。` : '暂无足够样本。'}</div>
     <div class="muted">当前失败特征：${worst ? `${escapeHtml(worst.name || worst.code || '-')} 偏弱，需结合回撤和基本面缺口继续复盘。` : '暂无明显失败样本。'}</div>
   `;
 }
@@ -59,7 +90,7 @@ let lastTrackingState = {
 function renderTrackingTable(items, summary = {}) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(12, '暂无跟踪数据');
+    body.innerHTML = renderEmptyRow(13, '暂无跟踪数据');
     return;
   }
 
@@ -79,6 +110,7 @@ function renderTrackingTable(items, summary = {}) {
           <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '')}</a>
           <div class="muted">${escapeHtml(item.code || '')}</div>
         </td>
+        <td>${escapeHtml(getStrategyLabel(item))}</td>
         <td>${escapeHtml(item.selection_date || '')}</td>
         <td>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
@@ -147,11 +179,7 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
   if (strategyId) query.set('strategy_id', strategyId);
   if (selectionDate) query.set('selection_date', selectionDate);
 
-  const url = selectionDate
-    ? `/api/tracking?${query.toString()}`
-    : `/api/tracking?${query.toString()}`;
-
-  const data = await fetchJson(url);
+  const data = await fetchJson(`/api/tracking?${query.toString()}`);
   const items = data.items || [];
   const summary = data.summary || {};
   const pagination = data.pagination || {};
@@ -270,6 +298,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadTrackingData({ limit: 10, offset: 0 });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
-    qs('#tracking-results-body').innerHTML = renderEmptyRow(12, error.message);
+    qs('#tracking-results-body').innerHTML = renderEmptyRow(13, error.message);
   }
 });
