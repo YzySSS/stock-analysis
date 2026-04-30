@@ -148,6 +148,28 @@ def _count_tracking_items(
             return int(row.get("count") or 0)
 
 
+def _build_strategy_summaries(items: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        key = str(item.get("strategy_id") or "")
+        grouped.setdefault(key, []).append(item)
+
+    summaries: list[dict] = []
+    for key, group_items in grouped.items():
+        strategy_summary = _build_tracking_summary(group_items)
+        strategy_summary.update(
+            {
+                "strategy_id": key,
+                "strategy_display_name": group_items[0].get("strategy_display_name") or key,
+                "selection_dates": sorted({item.get("selection_date") for item in group_items if item.get("selection_date")}, reverse=True),
+            }
+        )
+        summaries.append(strategy_summary)
+
+    summaries.sort(key=lambda item: item.get("strategy_display_name") or item.get("strategy_id") or "")
+    return summaries
+
+
 def _tracking_payload(
     *,
     run_id: Optional[str] = None,
@@ -160,34 +182,17 @@ def _tracking_payload(
 ) -> dict:
     tracker = SelectionResultTracker()
     resolved_run_id = run_id
-    if not resolved_run_id and selection_date:
-        runs = _list_tracking_runs(
-            instrument_type=instrument_type,
-            strategy_id=strategy_id,
-            selection_date=selection_date,
-            limit=1,
-        )
-        resolved_run_id = runs[0].get("run_id") if runs else None
 
-    if latest_only and not resolved_run_id and not selection_date:
-        records = tracker.build_latest_selection_snapshot(
-            limit=limit,
-            instrument_type=instrument_type,
-            strategy_id=strategy_id,
-            offset=offset,
-            latest_only=True,
-        )
-    else:
-        records = tracker.build_latest_selection_snapshot(
-            limit=limit,
-            instrument_type=instrument_type,
-            run_id=resolved_run_id,
-            strategy_id=strategy_id,
-            selection_date=None if resolved_run_id else selection_date,
-            offset=offset,
-            latest_only=latest_only,
-        )
-    items = tracker.to_dict_list(records)
+    page_records = tracker.build_latest_selection_snapshot(
+        limit=limit,
+        instrument_type=instrument_type,
+        run_id=resolved_run_id,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        offset=offset,
+        latest_only=latest_only,
+    )
+    items = tracker.to_dict_list(page_records)
     total = _count_tracking_items(
         instrument_type=instrument_type,
         strategy_id=strategy_id,
@@ -195,11 +200,25 @@ def _tracking_payload(
         run_id=resolved_run_id,
         latest_only=latest_only,
     )
+
+    summary_records = tracker.build_latest_selection_snapshot(
+        limit=max(total, 1),
+        instrument_type=instrument_type,
+        run_id=resolved_run_id,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        offset=0,
+        latest_only=latest_only,
+    )
+    summary_items = tracker.to_dict_list(summary_records)
+
     return {
         "run_id": resolved_run_id,
         "strategy_id": strategy_id,
         "selection_date": selection_date,
         "summary": _build_tracking_summary(items),
+        "filtered_summary": _build_tracking_summary(summary_items),
+        "strategy_summaries": _build_strategy_summaries(summary_items),
         "items": items,
         "pagination": {
             "total": total,

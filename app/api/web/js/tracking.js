@@ -32,21 +32,15 @@ function summarizeDates(items = []) {
   return values;
 }
 
-function renderReviewSummary(summary = {}, items = []) {
-  const container = qs('#tracking-review-summary');
+function formatDateRange(dates = []) {
+  if (!dates.length) return '-';
+  return dates.length > 1 ? `${dates[0]} ~ ${dates[dates.length - 1]}` : dates[0];
+}
+
+function renderSummaryCard({ title, summary, strategyText, dateText }) {
   const best = summary.best_item;
   const worst = summary.worst_item;
-  const strategies = summarizeStrategies(items);
-  const dates = summarizeDates(items);
-  const strategyText = strategies.length
-    ? strategies.map((item) => `${item.name}（${item.count}）`).join('、')
-    : '暂无';
-  const dateText = dates.length > 1
-    ? `${dates[0]} ~ ${dates[dates.length - 1]}`
-    : (dates[0] || '-');
-  const title = strategies.length === 1 ? strategies[0].name : '多策略复盘概览';
-
-  container.innerHTML = `
+  return `
     <article class="strategy-item">
       <div class="strategy-item-head">
         <strong>${escapeHtml(title)}</strong>
@@ -61,20 +55,58 @@ function renderReviewSummary(summary = {}, items = []) {
   `;
 }
 
-function renderReviewNotes(summary = {}, items = []) {
+function renderReviewSummary(filteredSummary = {}, strategySummaries = [], pageItems = []) {
+  const container = qs('#tracking-review-summary');
+  if (strategySummaries.length > 1) {
+    container.innerHTML = strategySummaries.map((item) => renderSummaryCard({
+      title: item.strategy_display_name || item.strategy_id || '-',
+      summary: item,
+      strategyText: item.strategy_display_name || item.strategy_id || '-',
+      dateText: formatDateRange(item.selection_dates || []),
+    })).join('');
+    return;
+  }
+
+  const dates = summarizeDates(pageItems);
+  const strategies = strategySummaries.length
+    ? strategySummaries.map((item) => ({ name: item.strategy_display_name || item.strategy_id || '-', count: item.count ?? 0 }))
+    : summarizeStrategies(pageItems);
+  const strategyText = strategies.length
+    ? strategies.map((item) => `${item.name}（${item.count}）`).join('、')
+    : '暂无';
+  const title = strategySummaries[0]?.strategy_display_name || strategies[0]?.name || '复盘概览';
+
+  container.innerHTML = renderSummaryCard({
+    title,
+    summary: filteredSummary,
+    strategyText,
+    dateText: formatDateRange(strategySummaries[0]?.selection_dates || dates),
+  });
+}
+
+function renderReviewNotes(filteredSummary = {}, strategySummaries = [], pageItems = []) {
   const container = qs('#tracking-review-notes');
-  const positive = items.filter((item) => (item.price_change_pct ?? -999) >= 0).length;
-  const negative = items.filter((item) => (item.price_change_pct ?? 999) < 0).length;
-  const flat = Math.max((summary.count ?? items.length ?? 0) - positive - negative, 0);
-  const best = summary.best_item;
-  const worst = summary.worst_item;
-  const strategies = summarizeStrategies(items);
-  const strategyLead = strategies.length <= 1
-    ? '当前这组策略样本'
-    : `当前页覆盖 ${strategies.length} 个策略样本`;
+  const positive = strategySummaries.reduce((sum, item) => {
+    const count = item.count ?? 0;
+    const winRate = item.win_rate_pct == null ? null : Number(item.win_rate_pct);
+    return sum + (winRate == null ? 0 : Math.round(count * winRate / 100));
+  }, 0);
+  const negative = strategySummaries.reduce((sum, item) => {
+    const count = item.count ?? 0;
+    const winRate = item.win_rate_pct == null ? null : Number(item.win_rate_pct);
+    return sum + (winRate == null ? 0 : Math.max(count - Math.round(count * winRate / 100), 0));
+  }, 0);
+  const flat = Math.max((filteredSummary.count ?? 0) - positive - negative, 0);
+  const best = filteredSummary.best_item;
+  const worst = filteredSummary.worst_item;
+  const strategyLead = strategySummaries.length > 1
+    ? `当前筛选结果覆盖 ${strategySummaries.length} 个策略`
+    : strategySummaries.length === 1
+      ? `当前筛选结果对应 ${strategySummaries[0].strategy_display_name || strategySummaries[0].strategy_id || '单策略'}`
+      : `当前筛选结果共 ${pageItems.length} 条`;
   container.innerHTML = `
-    <div>${strategyLead}：正收益 ${positive} 只，负收益 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(summary.win_rate_pct)}，超额收益 ${formatPercent(summary.excess_return_pct)}。</div>
-    <div class="muted">当前成功特征：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明本页至少有部分标的延续了正向表现。` : '暂无足够样本。'}</div>
+    <div>${strategyLead}：正收益约 ${positive} 只，负收益约 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(filteredSummary.win_rate_pct)}，超额收益 ${formatPercent(filteredSummary.excess_return_pct)}。</div>
+    <div class="muted">当前成功特征：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明筛选结果中存在表现延续较强的标的。` : '暂无足够样本。'}</div>
     <div class="muted">当前失败特征：${worst ? `${escapeHtml(worst.name || worst.code || '-')} 偏弱，需结合回撤和基本面缺口继续复盘。` : '暂无明显失败样本。'}</div>
   `;
 }
@@ -181,20 +213,22 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
 
   const data = await fetchJson(`/api/tracking?${query.toString()}`);
   const items = data.items || [];
-  const summary = data.summary || {};
+  const filteredSummary = data.filtered_summary || data.summary || {};
+  const pageSummary = data.summary || {};
+  const strategySummaries = data.strategy_summaries || [];
   const pagination = data.pagination || {};
   lastTrackingState = { strategyId, limit, instrumentType, selectionDate, offset };
-  renderTrackingTable(items, summary);
-  updateTrackingStats(summary, items);
-  renderReviewSummary(summary, items);
-  renderReviewNotes(summary, items);
+  renderTrackingTable(items, filteredSummary);
+  updateTrackingStats(filteredSummary, items);
+  renderReviewSummary(filteredSummary, strategySummaries, items);
+  renderReviewNotes(filteredSummary, strategySummaries, items);
   renderPagination(pagination, limit);
   const modeText = selectionDate
       ? `当前显示 ${selectionDate} 的复盘结果`
       : strategyId
         ? '当前显示该策略全部历史复盘列表'
         : '当前显示全部策略历史复盘列表';
-  summaryText.textContent = `${modeText}，本页 ${items.length} 条`;
+  summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条`;
 }
 
 async function deleteTrackingItem(button) {
