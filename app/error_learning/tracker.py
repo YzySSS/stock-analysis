@@ -16,6 +16,8 @@ class SelectionResultTracker:
         run_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
         selection_date: Optional[str] = None,
+        offset: int = 0,
+        latest_only: bool = True,
     ) -> List[SelectionTrackingRecord]:
         rows = self._fetch_from_selection_result(
             limit=limit,
@@ -23,6 +25,8 @@ class SelectionResultTracker:
             run_id=run_id,
             strategy_id=strategy_id,
             selection_date=selection_date,
+            offset=offset,
+            latest_only=latest_only,
         )
         if rows:
             return [self._build_record_from_selection_result(row) for row in rows]
@@ -36,6 +40,8 @@ class SelectionResultTracker:
         run_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
         selection_date: Optional[str] = None,
+        offset: int = 0,
+        latest_only: bool = True,
     ) -> List[Dict[str, Any]]:
         sql = """
         SELECT
@@ -97,8 +103,14 @@ class SelectionResultTracker:
             if strategy_id:
                 sql += " AND sr.strategy_id = %s"
                 params.append(strategy_id)
-            sql += " ORDER BY sr.rank_no ASC, sr.id DESC LIMIT %s"
-            params.append(limit)
+            sql += " ORDER BY sr.trade_date DESC, sr.rank_no ASC, sr.id DESC LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+        elif not latest_only:
+            if strategy_id:
+                sql += " AND sr.strategy_id = %s"
+                params.append(strategy_id)
+            sql += " ORDER BY sr.trade_date DESC, sr.rank_no ASC, sr.id DESC LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
         else:
             latest_trade_date_sql = "SELECT MAX(sr2.trade_date) FROM selection_result sr2 INNER JOIN stock_basic sb2 ON sr2.code = sb2.code WHERE sb2.instrument_type = %s"
             latest_params: List[Any] = [instrument_type]

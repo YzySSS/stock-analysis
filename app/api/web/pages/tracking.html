@@ -99,6 +99,15 @@
                 <option value="">全部日期</option>
               </select>
             </label>
+            <label class="tracking-filter-field tracking-page-size-field">
+              <span class="muted">每页</span>
+              <select id="tracking-page-size">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
             <button id="refresh-tracking-page" class="btn btn-secondary" type="button">刷新</button>
           </div>
         </div>
@@ -125,11 +134,18 @@
             </tbody>
           </table>
         </div>
+        <div class="tracking-pagination">
+          <div id="tracking-pagination-summary" class="muted">加载中...</div>
+          <div class="tracking-pagination-actions">
+            <button id="tracking-prev-page" class="btn btn-secondary" type="button">上一页</button>
+            <button id="tracking-next-page" class="btn btn-secondary" type="button">下一页</button>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 
   <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/tracking.js?v=20260430c"></script>
+  <script src="/static/js/tracking.js?v=20260430d"></script>
 </body>
 </html>

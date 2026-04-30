@@ -86,12 +86,75 @@ def _list_tracking_runs(
             return cursor.fetchall()
 
 
+def _count_tracking_items(
+    instrument_type: str,
+    strategy_id: Optional[str] = None,
+    selection_date: Optional[str] = None,
+    run_id: Optional[str] = None,
+    latest_only: bool = False,
+) -> int:
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            if run_id:
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM selection_result sr
+                    INNER JOIN stock_basic sb ON sr.code = sb.code
+                    WHERE sb.instrument_type = %s AND sr.run_id = %s
+                    """,
+                    (instrument_type, run_id),
+                )
+                row = cursor.fetchone() or {}
+                return int(row.get("count") or 0)
+            if selection_date:
+                sql = """
+                SELECT COUNT(*) AS count
+                FROM selection_result sr
+                INNER JOIN stock_basic sb ON sr.code = sb.code
+                WHERE sb.instrument_type = %s AND sr.trade_date = %s
+                """
+                params: list[Any] = [instrument_type, selection_date]
+                if strategy_id:
+                    sql += " AND sr.strategy_id = %s"
+                    params.append(strategy_id)
+                cursor.execute(sql, params)
+                row = cursor.fetchone() or {}
+                return int(row.get("count") or 0)
+            if latest_only:
+                latest_runs = _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id, limit=20)
+                if not latest_runs:
+                    return 0
+                latest_date = str(latest_runs[0].get("trade_date") or "")
+                if not latest_date:
+                    return 0
+                return _count_tracking_items(
+                    instrument_type=instrument_type,
+                    strategy_id=strategy_id,
+                    selection_date=latest_date,
+                )
+            sql = """
+            SELECT COUNT(*) AS count
+            FROM selection_result sr
+            INNER JOIN stock_basic sb ON sr.code = sb.code
+            WHERE sb.instrument_type = %s
+            """
+            params = [instrument_type]
+            if strategy_id:
+                sql += " AND sr.strategy_id = %s"
+                params.append(strategy_id)
+            cursor.execute(sql, params)
+            row = cursor.fetchone() or {}
+            return int(row.get("count") or 0)
+
+
 def _tracking_payload(
     *,
     run_id: Optional[str] = None,
     strategy_id: Optional[str] = None,
     selection_date: Optional[str] = None,
     limit: int = 20,
+    offset: int = 0,
     instrument_type: str = "stock",
     latest_only: bool = False,
 ) -> dict:
@@ -111,6 +174,8 @@ def _tracking_payload(
             limit=limit,
             instrument_type=instrument_type,
             strategy_id=strategy_id,
+            offset=offset,
+            latest_only=True,
         )
     else:
         records = tracker.build_latest_selection_snapshot(
@@ -119,21 +184,37 @@ def _tracking_payload(
             run_id=resolved_run_id,
             strategy_id=strategy_id,
             selection_date=None if resolved_run_id else selection_date,
+            offset=offset,
+            latest_only=latest_only,
         )
     items = tracker.to_dict_list(records)
+    total = _count_tracking_items(
+        instrument_type=instrument_type,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        run_id=resolved_run_id,
+        latest_only=latest_only,
+    )
     return {
         "run_id": resolved_run_id,
         "strategy_id": strategy_id,
         "selection_date": selection_date,
         "summary": _build_tracking_summary(items),
         "items": items,
+        "pagination": {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        },
         "available_runs": _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id),
     }
 
 
 @router.get("/tracking/latest")
 def get_latest_tracking(
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=10, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     instrument_type: str = Query(default="stock"),
     strategy_id: Optional[str] = Query(default=None),
     selection_date: Optional[str] = Query(default=None),
@@ -142,6 +223,7 @@ def get_latest_tracking(
         strategy_id=strategy_id,
         selection_date=selection_date,
         limit=limit,
+        offset=offset,
         instrument_type=instrument_type,
         latest_only=True,
     )
@@ -152,7 +234,8 @@ def get_tracking_by_run(
     run_id: Optional[str] = Query(default=None),
     strategy_id: Optional[str] = Query(default=None),
     selection_date: Optional[str] = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=10, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
     return _tracking_payload(
@@ -160,6 +243,7 @@ def get_tracking_by_run(
         strategy_id=strategy_id,
         selection_date=selection_date,
         limit=limit,
+        offset=offset,
         instrument_type=instrument_type,
     )
 

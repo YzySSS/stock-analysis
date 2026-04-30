@@ -131,6 +131,10 @@
   min-width: 150px;
 }
 
+.tracking-page-size-field {
+  min-width: 88px;
+}
+
 .tracking-filter-field select {
   background: var(--panel-soft);
   border: 1px solid var(--panel-border);
@@ -143,6 +147,20 @@
 .tracking-filter-field select:focus {
   outline: 1px solid var(--primary);
   box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.tracking-pagination {
+  margin-top: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tracking-pagination-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .stack-form {

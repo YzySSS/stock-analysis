@@ -50,9 +50,10 @@ function renderReviewNotes(summary = {}, items = []) {
 
 let lastTrackingState = {
   strategyId: '',
-  limit: 200,
+  limit: 10,
   instrumentType: 'stock',
   selectionDate: '',
+  offset: 0,
 };
 
 function renderTrackingTable(items, summary = {}) {
@@ -79,7 +80,7 @@ function renderTrackingTable(items, summary = {}) {
           <div class="muted">${escapeHtml(item.code || '')}</div>
         </td>
         <td>${escapeHtml(item.selection_date || '')}</td>
-        <td>${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</td>
+        <td>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</td>
         <td>${formatNumber(item.current_price, 2)}</td>
         <td class="${getPctClass(pct)}">${formatPercent(pct)}</td>
         <td class="${getPctClass(excessReturn)}">${formatPercent(excessReturn)}</td>
@@ -114,13 +115,27 @@ function renderSelectionDateOptions(dates = [], selectedValue = '') {
   select.value = selectedValue || '';
 }
 
+function renderPagination(pagination = {}, pageSize = 10) {
+  const total = Number(pagination.total || 0);
+  const offset = Number(pagination.offset || 0);
+  const limit = Number(pagination.limit || pageSize || 10);
+  const currentPage = Math.floor(offset / limit) + 1;
+  const totalPages = Math.max(Math.ceil(total / limit), 1);
+  const start = total === 0 ? 0 : offset + 1;
+  const end = Math.min(offset + limit, total);
+
+  qs('#tracking-pagination-summary').textContent = `第 ${currentPage} / ${totalPages} 页 · 显示 ${start}-${end} / 共 ${total} 条`;
+  qs('#tracking-prev-page').disabled = offset <= 0;
+  qs('#tracking-next-page').disabled = offset + limit >= total;
+}
+
 async function loadTrackingFilters(strategyId, instrumentType = 'stock') {
   const query = new URLSearchParams({ instrument_type: instrumentType });
   if (strategyId) query.set('strategy_id', strategyId);
   return fetchJson(`/api/tracking/filters?${query.toString()}`);
 }
 
-async function loadTrackingData({ strategyId = '', limit = 200, instrumentType = 'stock', selectionDate = '' } = {}) {
+async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 'stock', selectionDate = '', offset = 0 } = {}) {
   const summaryText = qs('#tracking-summary-text');
   summaryText.textContent = '加载中...';
 
@@ -128,27 +143,30 @@ async function loadTrackingData({ strategyId = '', limit = 200, instrumentType =
   const selectionDates = filters.selection_dates || [];
   renderSelectionDateOptions(selectionDates, selectionDate);
 
-  const query = new URLSearchParams({ limit: String(limit), instrument_type: instrumentType });
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset), instrument_type: instrumentType });
   if (strategyId) query.set('strategy_id', strategyId);
   if (selectionDate) query.set('selection_date', selectionDate);
+
   const url = selectionDate
     ? `/api/tracking?${query.toString()}`
-    : `/api/tracking/latest?${query.toString()}`;
+    : `/api/tracking?${query.toString()}`;
 
   const data = await fetchJson(url);
   const items = data.items || [];
   const summary = data.summary || {};
-  lastTrackingState = { strategyId, limit, instrumentType, selectionDate };
+  const pagination = data.pagination || {};
+  lastTrackingState = { strategyId, limit, instrumentType, selectionDate, offset };
   renderTrackingTable(items, summary);
   updateTrackingStats(summary, items);
   renderReviewSummary(summary, items);
   renderReviewNotes(summary, items);
+  renderPagination(pagination, limit);
   const modeText = selectionDate
       ? `当前显示 ${selectionDate} 的复盘结果`
       : strategyId
-        ? '当前显示该策略全部复盘中的最新日期快照'
-        : '当前显示全部策略最新复盘快照';
-  summaryText.textContent = `${modeText}，共 ${items.length} 条`;
+        ? '当前显示该策略全部历史复盘列表'
+        : '当前显示全部策略历史复盘列表';
+  summaryText.textContent = `${modeText}，本页 ${items.length} 条`;
 }
 
 async function deleteTrackingItem(button) {
@@ -175,6 +193,7 @@ async function deleteTrackingItem(button) {
       limit: lastTrackingState.limit,
       instrumentType,
       selectionDate: lastTrackingState.selectionDate,
+      offset: 0,
     });
   } finally {
     button.disabled = false;
@@ -184,7 +203,10 @@ async function deleteTrackingItem(button) {
 document.addEventListener('DOMContentLoaded', async () => {
   const strategySelect = qs('#tracking-strategy-id');
   const dateSelect = qs('#tracking-selection-date');
+  const pageSizeSelect = qs('#tracking-page-size');
   const refreshBtn = qs('#refresh-tracking-page');
+  const prevBtn = qs('#tracking-prev-page');
+  const nextBtn = qs('#tracking-next-page');
 
   qs('#tracking-results-body').addEventListener('click', async (event) => {
     const button = event.target.closest('[data-action="delete-tracking-item"]');
@@ -195,33 +217,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   strategySelect?.addEventListener('change', async () => {
     await loadTrackingData({
       strategyId: strategySelect.value || '',
-      limit: lastTrackingState.limit,
+      limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: '',
+      offset: 0,
     });
   });
 
   dateSelect?.addEventListener('change', async () => {
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
-      limit: lastTrackingState.limit,
+      limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: dateSelect.value || '',
+      offset: 0,
+    });
+  });
+
+  pageSizeSelect?.addEventListener('change', async () => {
+    await loadTrackingData({
+      strategyId: strategySelect?.value || lastTrackingState.strategyId,
+      limit: Number(pageSizeSelect.value || 10),
+      instrumentType: lastTrackingState.instrumentType,
+      selectionDate: dateSelect?.value || '',
+      offset: 0,
     });
   });
 
   refreshBtn?.addEventListener('click', async () => {
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
-      limit: lastTrackingState.limit,
+      limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: dateSelect?.value || '',
+      offset: lastTrackingState.offset || 0,
     });
+  });
+
+  prevBtn?.addEventListener('click', async () => {
+    const nextOffset = Math.max((lastTrackingState.offset || 0) - (lastTrackingState.limit || 10), 0);
+    await loadTrackingData({ ...lastTrackingState, offset: nextOffset });
+  });
+
+  nextBtn?.addEventListener('click', async () => {
+    const nextOffset = (lastTrackingState.offset || 0) + (lastTrackingState.limit || 10);
+    await loadTrackingData({ ...lastTrackingState, offset: nextOffset });
   });
 
   try {
     if (strategySelect) strategySelect.value = '';
-    await loadTrackingData();
+    if (pageSizeSelect) pageSizeSelect.value = '10';
+    await loadTrackingData({ limit: 10, offset: 0 });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
     qs('#tracking-results-body').innerHTML = renderEmptyRow(12, error.message);
