@@ -84,8 +84,31 @@ function renderReviewSummary(filteredSummary = {}, strategySummaries = [], pageI
   });
 }
 
+function renderStrategyNoteCard(item) {
+  const positive = item.win_rate_pct == null ? null : Math.round((item.count ?? 0) * Number(item.win_rate_pct) / 100);
+  const negative = item.count == null || positive == null ? null : Math.max((item.count ?? 0) - positive, 0);
+  const best = item.best_item;
+  const worst = item.worst_item;
+  return `
+    <article class="strategy-item">
+      <div class="strategy-item-head">
+        <strong>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')}</strong>
+        <span class="badge status-ok">${item.count ?? 0} 条</span>
+      </div>
+      <div>当前策略表现：正收益约 ${positive ?? '-'} 只，负收益约 ${negative ?? '-'} 只，胜率 ${formatPercent(item.win_rate_pct)}，超额收益 ${formatPercent(item.excess_return_pct)}。</div>
+      <div class="muted">成功侧：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明该策略在当前筛选范围内仍有较强延续性。` : '暂无足够样本。'}</div>
+      <div class="muted">失败侧：${worst ? `${escapeHtml(worst.name || worst.code || '-')} 偏弱，需要重点复盘回撤来源与信号质量。` : '暂无明显失败样本。'}</div>
+    </article>
+  `;
+}
+
 function renderReviewNotes(filteredSummary = {}, strategySummaries = [], pageItems = []) {
   const container = qs('#tracking-review-notes');
+  if (strategySummaries.length > 1) {
+    container.innerHTML = strategySummaries.map(renderStrategyNoteCard).join('');
+    return;
+  }
+
   const positive = strategySummaries.reduce((sum, item) => {
     const count = item.count ?? 0;
     const winRate = item.win_rate_pct == null ? null : Number(item.win_rate_pct);
@@ -99,11 +122,9 @@ function renderReviewNotes(filteredSummary = {}, strategySummaries = [], pageIte
   const flat = Math.max((filteredSummary.count ?? 0) - positive - negative, 0);
   const best = filteredSummary.best_item;
   const worst = filteredSummary.worst_item;
-  const strategyLead = strategySummaries.length > 1
-    ? `当前筛选结果覆盖 ${strategySummaries.length} 个策略`
-    : strategySummaries.length === 1
-      ? `当前筛选结果对应 ${strategySummaries[0].strategy_display_name || strategySummaries[0].strategy_id || '单策略'}`
-      : `当前筛选结果共 ${pageItems.length} 条`;
+  const strategyLead = strategySummaries.length === 1
+    ? `当前筛选结果对应 ${strategySummaries[0].strategy_display_name || strategySummaries[0].strategy_id || '单策略'}`
+    : `当前筛选结果共 ${pageItems.length} 条`;
   container.innerHTML = `
     <div>${strategyLead}：正收益约 ${positive} 只，负收益约 ${negative} 只，持平 ${flat} 只，胜率 ${formatPercent(filteredSummary.win_rate_pct)}，超额收益 ${formatPercent(filteredSummary.excess_return_pct)}。</div>
     <div class="muted">当前成功特征：${best ? `${escapeHtml(best.name || best.code || '-')} 领跑，说明筛选结果中存在表现延续较强的标的。` : '暂无足够样本。'}</div>
