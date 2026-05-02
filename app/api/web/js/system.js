@@ -149,13 +149,36 @@ function renderKlineShortfallHint(klineShortfall) {
           <div class="preview-main">
             <strong>${escapeHtml(item.code || '-')}</strong>
             <div class="muted">${escapeHtml(item.name || '-')} · 最近落库 ${escapeHtml(item.last_trade_date || '-')}</div>
+            <div class="muted">${renderShortfallReason(item)}</div>
           </div>
           <div class="preview-side">
-            <span class="muted">${item.is_st ? 'ST/风险票' : '普通股票'}</span>
+            <span class="muted">${renderShortfallBadge(item)}</span>
           </div>
         </div>
       `).join('')}
     </div>
-    <div class="muted">这类缺口表示“最新交易日单票源数据缺失”，不等于整批日线任务失败。</div>
+    <div class="muted">这类缺口表示“最新交易日单票无可用日线”，其中部分是停牌/暂停上市，不等于整批日线任务失败。</div>
   `;
+}
+
+function renderShortfallBadge(item) {
+  if (item.status_label === 'paused_listing') return '暂停上市';
+  if (item.status_label === 'suspended') return '停牌中';
+  return item.is_st ? 'ST/风险票' : '源数据缺口';
+}
+
+function renderShortfallReason(item) {
+  if (item.status_label === 'paused_listing') {
+    const pausedDate = item.paused_listing_date || '-';
+    const suspensionDate = item.suspension?.suspension_date || '-';
+    const reason = item.suspension?.reason || '状态异常';
+    return `已于 ${escapeHtml(pausedDate)} 暂停上市；停牌起始 ${escapeHtml(suspensionDate)}，原因：${escapeHtml(reason)}`;
+  }
+  if (item.status_label === 'suspended') {
+    const suspensionDate = item.suspension?.suspension_date || '-';
+    const resumeDate = item.suspension?.resume_date || '-';
+    const reason = item.suspension?.reason || '未披露';
+    return `停牌起始 ${escapeHtml(suspensionDate)}，截止 ${escapeHtml(resumeDate)}，原因：${escapeHtml(reason)}`;
+  }
+  return '最新交易日未取到该票日线，需继续核查源数据或股票状态。';
 }

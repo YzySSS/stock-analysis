@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from fastapi import APIRouter
+
+import akshare as ak
 
 from app.shared.db import mysql_conn, ping_mysql
 
@@ -16,6 +19,8 @@ TRACKED_TASKS = [
 ]
 
 KLINE_LATEST_SAMPLE_LIMIT = 20
+
+SUSPENSION_LOOKBACK_DAYS = 30
 
 TASK_NAME_LABELS = {
     "daily_kline_increment": "日线增量更新",
@@ -112,16 +117,36 @@ def _kline_latest_shortfall() -> dict:
             count_row = cursor.fetchone() or {}
             missing_count = int(count_row.get("missing_count") or 0)
 
+            suspension_map = _fetch_recent_suspension_map(latest_trade_date)
+            paused_map = _fetch_paused_listing_map()
+
             items = []
             for row in sample_rows:
+                code = row.get("code")
+                plain_code = str(code or "").split(".")[-1]
+                suspension = suspension_map.get(plain_code)
+                paused_listing = paused_map.get(plain_code)
+                reason_tags = []
+                status_label = "source_missing"
+                if paused_listing:
+                    status_label = "paused_listing"
+                    reason_tags.append("暂停上市")
+                if suspension:
+                    if status_label == "source_missing":
+                        status_label = "suspended"
+                    reason_tags.append("停牌")
                 items.append(
                     {
-                        "code": row.get("code"),
+                        "code": code,
                         "name": row.get("name"),
                         "is_st": bool(row.get("is_st")),
                         "is_delisted": bool(row.get("is_delisted")),
                         "last_trade_date": str(row.get("last_trade_date")) if row.get("last_trade_date") else None,
                         "gap_days": None,
+                        "status_label": status_label,
+                        "reason_tags": reason_tags,
+                        "paused_listing_date": paused_listing,
+                        "suspension": suspension,
                     }
                 )
 
@@ -131,6 +156,52 @@ def _kline_latest_shortfall() -> dict:
                 "sample_codes": [item["code"] for item in items],
                 "items": items,
             }
+
+
+def _fetch_paused_listing_map() -> dict[str, str]:
+    try:
+        df = ak.stock_info_sh_delist(symbol="全部")
+    except Exception:
+        return {}
+    if df is None or df.empty:
+        return {}
+
+    result: dict[str, str] = {}
+    for _, row in df.iterrows():
+        code = str(row.get("公司代码") or "").strip()
+        paused_date = row.get("暂停上市日期")
+        if not code or paused_date is None:
+            continue
+        result[code] = str(paused_date)
+    return result
+
+
+def _fetch_recent_suspension_map(latest_trade_date: object) -> dict[str, dict]:
+    if latest_trade_date is None:
+        return {}
+
+    latest_dt = latest_trade_date if isinstance(latest_trade_date, datetime) else datetime.strptime(str(latest_trade_date), "%Y-%m-%d")
+    result: dict[str, dict] = {}
+    for days_back in range(SUSPENSION_LOOKBACK_DAYS + 1):
+        date_str = (latest_dt - timedelta(days=days_back)).strftime("%Y%m%d")
+        try:
+            df = ak.stock_tfp_em(date=date_str)
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        for _, row in df.iterrows():
+            code = str(row.get("代码") or "").strip()
+            if not code or code in result:
+                continue
+            result[code] = {
+                "suspension_date": str(row.get("停牌时间")) if row.get("停牌时间") is not None else None,
+                "resume_date": str(row.get("停牌截止时间")) if row.get("停牌截止时间") is not None else None,
+                "reason": row.get("停牌原因"),
+                "market": row.get("所属市场"),
+                "expected_resume_date": str(row.get("预计复牌时间")) if row.get("预计复牌时间") is not None else None,
+            }
+    return result
 
 
 def _latest_dates() -> dict:
