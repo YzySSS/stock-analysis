@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
 from fastapi import APIRouter
 
 import akshare as ak
@@ -21,6 +23,8 @@ TRACKED_TASKS = [
 KLINE_LATEST_SAMPLE_LIMIT = 20
 
 SUSPENSION_LOOKBACK_DAYS = 30
+STATUS_CACHE_TTL_SECONDS = 1800
+STATUS_FILE_CACHE_PATH = Path(__file__).resolve().parents[2] / "logs" / "system_status_external_cache.json"
 
 TASK_NAME_LABELS = {
     "daily_kline_increment": "日线增量更新",
@@ -117,8 +121,8 @@ def _kline_latest_shortfall() -> dict:
             count_row = cursor.fetchone() or {}
             missing_count = int(count_row.get("missing_count") or 0)
 
-            suspension_map = _fetch_recent_suspension_map(latest_trade_date)
-            paused_map = _fetch_paused_listing_map()
+            cache_key = _status_cache_key()
+            suspension_map, paused_map = _get_external_status_maps(cache_key, str(latest_trade_date))
 
             items = []
             for row in sample_rows:
@@ -158,7 +162,59 @@ def _kline_latest_shortfall() -> dict:
             }
 
 
-def _fetch_paused_listing_map() -> dict[str, str]:
+def _status_cache_key(now: datetime | None = None) -> int:
+    current = now or datetime.now()
+    return int(current.timestamp()) // STATUS_CACHE_TTL_SECONDS
+
+
+def _load_external_status_file_cache(cache_key: int) -> dict | None:
+    if not STATUS_FILE_CACHE_PATH.exists():
+        return None
+    try:
+        payload = json.loads(STATUS_FILE_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if payload.get("cache_key") != cache_key:
+        return None
+    return payload
+
+
+def _save_external_status_file_cache(cache_key: int, payload: dict) -> None:
+    STATUS_FILE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATUS_FILE_CACHE_PATH.write_text(
+        json.dumps(
+            {
+                "cache_key": cache_key,
+                "cached_at": datetime.now().isoformat(timespec="seconds"),
+                **payload,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _get_external_status_maps(cache_key: int, latest_trade_date_str: str) -> tuple[dict[str, dict], dict[str, str]]:
+    cached = _load_external_status_file_cache(cache_key)
+    if cached and cached.get("latest_trade_date") == latest_trade_date_str:
+        return cached.get("suspension_map") or {}, cached.get("paused_map") or {}
+
+    suspension_map = _fetch_recent_suspension_map_cached(cache_key, latest_trade_date_str)
+    paused_map = _fetch_paused_listing_map_cached(cache_key)
+    _save_external_status_file_cache(
+        cache_key,
+        {
+            "latest_trade_date": latest_trade_date_str,
+            "suspension_map": suspension_map,
+            "paused_map": paused_map,
+        },
+    )
+    return suspension_map, paused_map
+
+
+@lru_cache(maxsize=4)
+def _fetch_paused_listing_map_cached(_cache_key: int) -> dict[str, str]:
     try:
         df = ak.stock_info_sh_delist(symbol="全部")
     except Exception:
@@ -176,7 +232,9 @@ def _fetch_paused_listing_map() -> dict[str, str]:
     return result
 
 
-def _fetch_recent_suspension_map(latest_trade_date: object) -> dict[str, dict]:
+@lru_cache(maxsize=8)
+def _fetch_recent_suspension_map_cached(_cache_key: int, latest_trade_date_str: str) -> dict[str, dict]:
+    latest_trade_date: object = latest_trade_date_str
     if latest_trade_date is None:
         return {}
 
