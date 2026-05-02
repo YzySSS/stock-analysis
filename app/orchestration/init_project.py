@@ -139,6 +139,26 @@ CORE_TABLE_DDL = [
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
+    CREATE TABLE IF NOT EXISTS stock_status_snapshot (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(16) NOT NULL,
+        trade_date DATE NOT NULL,
+        status_label VARCHAR(32) NOT NULL DEFAULT 'normal',
+        status_reason VARCHAR(255) DEFAULT NULL,
+        suspension_date DATE DEFAULT NULL,
+        resume_date DATE DEFAULT NULL,
+        paused_listing_date DATE DEFAULT NULL,
+        expected_resume_date DATE DEFAULT NULL,
+        source VARCHAR(32) NOT NULL DEFAULT 'derived',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_stock_status_snapshot (code, trade_date),
+        KEY idx_stock_status_trade_date (trade_date),
+        KEY idx_stock_status_label (status_label),
+        KEY idx_stock_status_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
     CREATE TABLE IF NOT EXISTS backtest_run (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         run_id VARCHAR(64) NOT NULL,

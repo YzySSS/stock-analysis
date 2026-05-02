@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
-from functools import lru_cache
-from pathlib import Path
 from fastapi import APIRouter
-
-import akshare as ak
 
 from app.shared.db import mysql_conn, ping_mysql
 
@@ -22,15 +17,12 @@ TRACKED_TASKS = [
 
 KLINE_LATEST_SAMPLE_LIMIT = 20
 
-SUSPENSION_LOOKBACK_DAYS = 30
-STATUS_CACHE_TTL_SECONDS = 1800
-STATUS_FILE_CACHE_PATH = Path(__file__).resolve().parents[2] / "logs" / "system_status_external_cache.json"
-
 TASK_NAME_LABELS = {
     "daily_kline_increment": "日线增量更新",
     "daily_kline_backfill": "历史日线补齐",
     "fundamental_sync": "基本面补齐",
     "valuation_sync": "估值补齐",
+    "stock_status_snapshot_refresh": "状态快照刷新",
 }
 
 
@@ -121,23 +113,17 @@ def _kline_latest_shortfall() -> dict:
             count_row = cursor.fetchone() or {}
             missing_count = int(count_row.get("missing_count") or 0)
 
-            cache_key = _status_cache_key()
-            suspension_map, paused_map = _get_external_status_maps(cache_key, str(latest_trade_date))
+            status_map = _fetch_stock_status_snapshot_map(str(latest_trade_date))
 
             items = []
             for row in sample_rows:
                 code = row.get("code")
-                plain_code = str(code or "").split(".")[-1]
-                suspension = suspension_map.get(plain_code)
-                paused_listing = paused_map.get(plain_code)
+                snapshot = status_map.get(code, {})
+                status_label = snapshot.get("status_label") or "source_missing"
                 reason_tags = []
-                status_label = "source_missing"
-                if paused_listing:
-                    status_label = "paused_listing"
+                if status_label == "paused_listing":
                     reason_tags.append("暂停上市")
-                if suspension:
-                    if status_label == "source_missing":
-                        status_label = "suspended"
+                if status_label == "suspended":
                     reason_tags.append("停牌")
                 items.append(
                     {
@@ -149,8 +135,14 @@ def _kline_latest_shortfall() -> dict:
                         "gap_days": None,
                         "status_label": status_label,
                         "reason_tags": reason_tags,
-                        "paused_listing_date": paused_listing,
-                        "suspension": suspension,
+                        "paused_listing_date": snapshot.get("paused_listing_date"),
+                        "suspension": {
+                            "suspension_date": snapshot.get("suspension_date"),
+                            "resume_date": snapshot.get("resume_date"),
+                            "reason": snapshot.get("status_reason"),
+                            "market": None,
+                            "expected_resume_date": snapshot.get("expected_resume_date"),
+                        } if snapshot else None,
                     }
                 )
 
@@ -162,103 +154,29 @@ def _kline_latest_shortfall() -> dict:
             }
 
 
-def _status_cache_key(now: datetime | None = None) -> int:
-    current = now or datetime.now()
-    return int(current.timestamp()) // STATUS_CACHE_TTL_SECONDS
-
-
-def _load_external_status_file_cache(cache_key: int) -> dict | None:
-    if not STATUS_FILE_CACHE_PATH.exists():
-        return None
-    try:
-        payload = json.loads(STATUS_FILE_CACHE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if payload.get("cache_key") != cache_key:
-        return None
-    return payload
-
-
-def _save_external_status_file_cache(cache_key: int, payload: dict) -> None:
-    STATUS_FILE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATUS_FILE_CACHE_PATH.write_text(
-        json.dumps(
-            {
-                "cache_key": cache_key,
-                "cached_at": datetime.now().isoformat(timespec="seconds"),
-                **payload,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
-def _get_external_status_maps(cache_key: int, latest_trade_date_str: str) -> tuple[dict[str, dict], dict[str, str]]:
-    cached = _load_external_status_file_cache(cache_key)
-    if cached and cached.get("latest_trade_date") == latest_trade_date_str:
-        return cached.get("suspension_map") or {}, cached.get("paused_map") or {}
-
-    suspension_map = _fetch_recent_suspension_map_cached(cache_key, latest_trade_date_str)
-    paused_map = _fetch_paused_listing_map_cached(cache_key)
-    _save_external_status_file_cache(
-        cache_key,
-        {
-            "latest_trade_date": latest_trade_date_str,
-            "suspension_map": suspension_map,
-            "paused_map": paused_map,
-        },
-    )
-    return suspension_map, paused_map
-
-
-@lru_cache(maxsize=4)
-def _fetch_paused_listing_map_cached(_cache_key: int) -> dict[str, str]:
-    try:
-        df = ak.stock_info_sh_delist(symbol="全部")
-    except Exception:
-        return {}
-    if df is None or df.empty:
-        return {}
-
-    result: dict[str, str] = {}
-    for _, row in df.iterrows():
-        code = str(row.get("公司代码") or "").strip()
-        paused_date = row.get("暂停上市日期")
-        if not code or paused_date is None:
-            continue
-        result[code] = str(paused_date)
-    return result
-
-
-@lru_cache(maxsize=8)
-def _fetch_recent_suspension_map_cached(_cache_key: int, latest_trade_date_str: str) -> dict[str, dict]:
-    latest_trade_date: object = latest_trade_date_str
-    if latest_trade_date is None:
-        return {}
-
-    latest_dt = latest_trade_date if isinstance(latest_trade_date, datetime) else datetime.strptime(str(latest_trade_date), "%Y-%m-%d")
-    result: dict[str, dict] = {}
-    for days_back in range(SUSPENSION_LOOKBACK_DAYS + 1):
-        date_str = (latest_dt - timedelta(days=days_back)).strftime("%Y%m%d")
-        try:
-            df = ak.stock_tfp_em(date=date_str)
-        except Exception:
-            continue
-        if df is None or df.empty:
-            continue
-        for _, row in df.iterrows():
-            code = str(row.get("代码") or "").strip()
-            if not code or code in result:
-                continue
-            result[code] = {
-                "suspension_date": str(row.get("停牌时间")) if row.get("停牌时间") is not None else None,
-                "resume_date": str(row.get("停牌截止时间")) if row.get("停牌截止时间") is not None else None,
-                "reason": row.get("停牌原因"),
-                "market": row.get("所属市场"),
-                "expected_resume_date": str(row.get("预计复牌时间")) if row.get("预计复牌时间") is not None else None,
-            }
+def _fetch_stock_status_snapshot_map(trade_date: str) -> dict[str, dict]:
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT code, status_label, status_reason, suspension_date, resume_date,
+                       paused_listing_date, expected_resume_date
+                FROM stock_status_snapshot
+                WHERE trade_date = %s
+                """,
+                (trade_date,),
+            )
+            rows = cursor.fetchall() or []
+    result = {}
+    for row in rows:
+        result[row.get("code")] = {
+            "status_label": row.get("status_label"),
+            "status_reason": row.get("status_reason"),
+            "suspension_date": str(row.get("suspension_date")) if row.get("suspension_date") else None,
+            "resume_date": str(row.get("resume_date")) if row.get("resume_date") else None,
+            "paused_listing_date": str(row.get("paused_listing_date")) if row.get("paused_listing_date") else None,
+            "expected_resume_date": str(row.get("expected_resume_date")) if row.get("expected_resume_date") else None,
+        }
     return result
 
 
