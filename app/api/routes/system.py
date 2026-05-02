@@ -270,6 +270,103 @@ def _field_missing_stats() -> dict:
             }
 
 
+def _valuation_gap_breakdown() -> dict:
+    kline_shortfall = _kline_latest_shortfall()
+    shortfall_map = {
+        item.get("code"): item
+        for item in (kline_shortfall.get("items") or [])
+        if item.get("code")
+    }
+
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT code, name, is_st, is_delisted, pe_tushare, pb_tushare, valuation_updated_at
+                FROM stock_basic
+                WHERE instrument_type = 'stock' AND (pe_tushare IS NULL OR pb_tushare IS NULL)
+                ORDER BY code
+                """
+            )
+            rows = cursor.fetchall() or []
+
+    pb = {
+        "missing_total": 0,
+        "non_fault_missing": 0,
+        "source_missing": 0,
+        "actionable_missing": 0,
+        "never_updated": 0,
+        "sample_non_fault": [],
+        "sample_source_missing": [],
+        "sample_actionable": [],
+    }
+    pe = {
+        "missing_total": 0,
+        "non_fault_missing": 0,
+        "source_missing": 0,
+        "actionable_missing": 0,
+        "never_updated": 0,
+        "sample_non_fault": [],
+        "sample_source_missing": [],
+        "sample_actionable": [],
+        "not_applicable_hint": None,
+    }
+
+    def push_sample(bucket: list, item: dict, limit: int = 10) -> None:
+        if len(bucket) < limit:
+            bucket.append(item)
+
+    for row in rows:
+        code = row.get("code")
+        status = shortfall_map.get(code, {})
+        status_label = status.get("status_label")
+        is_non_fault = bool(row.get("is_delisted")) or status_label in {"paused_listing", "suspended"}
+        valuation_updated_at = row.get("valuation_updated_at")
+        has_pb_gap = row.get("pb_tushare") is None
+        has_pe_gap = row.get("pe_tushare") is None
+        item = {
+            "code": code,
+            "name": row.get("name"),
+            "is_st": bool(row.get("is_st")),
+            "status_label": status_label,
+            "valuation_updated_at": str(valuation_updated_at) if valuation_updated_at else None,
+        }
+
+        if has_pb_gap:
+            pb["missing_total"] += 1
+            if valuation_updated_at is None:
+                pb["never_updated"] += 1
+            if is_non_fault:
+                pb["non_fault_missing"] += 1
+                push_sample(pb["sample_non_fault"], item)
+            elif valuation_updated_at is None:
+                pb["actionable_missing"] += 1
+                push_sample(pb["sample_actionable"], item)
+            else:
+                pb["source_missing"] += 1
+                push_sample(pb["sample_source_missing"], item)
+
+        if has_pe_gap:
+            pe["missing_total"] += 1
+            if valuation_updated_at is None:
+                pe["never_updated"] += 1
+            if is_non_fault:
+                pe["non_fault_missing"] += 1
+                push_sample(pe["sample_non_fault"], item)
+            elif valuation_updated_at is None:
+                pe["actionable_missing"] += 1
+                push_sample(pe["sample_actionable"], item)
+            else:
+                pe["source_missing"] += 1
+                push_sample(pe["sample_source_missing"], item)
+
+    pe["not_applicable_hint"] = "PE 缺口中可能混有亏损股票导致的口径不适用，当前先未单独拆出。"
+    return {
+        "pb": pb,
+        "pe": pe,
+    }
+
+
 def _decode_metadata(value: object) -> dict | None:
     if value is None:
         return None
@@ -339,4 +436,5 @@ def system_status() -> dict:
         "latest": _latest_dates(),
         "task_runs": _latest_task_runs(),
         "field_missing": _field_missing_stats(),
+        "valuation_gap_breakdown": _valuation_gap_breakdown(),
     }

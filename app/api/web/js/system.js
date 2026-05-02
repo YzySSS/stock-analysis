@@ -13,6 +13,7 @@ async function loadSystemPage() {
     const coverage = data.coverage || {};
     const klineShortfall = data.kline_latest_shortfall || {};
     const fieldMissing = data.field_missing || {};
+    const valuationGap = data.valuation_gap_breakdown || {};
     const taskRuns = data.task_runs || [];
     const totalStockCodes = Number(coverage.total_stock_codes || 0);
     const klineCovered = Number(coverage.daily_kline_covered_codes || 0);
@@ -111,11 +112,19 @@ async function loadSystemPage() {
     if (!worstFields.length) {
       shortfallPanel.innerHTML = '<div class="empty-state">暂无主要短板分析</div>';
     } else {
+      const pb = valuationGap.pb || {};
+      const pe = valuationGap.pe || {};
       shortfallPanel.innerHTML = `
         <div><strong>最缺字段 Top ${worstFields.length}</strong></div>
         ${worstFields.map((item, index) => `
           <div>${index + 1}. <strong>${escapeHtml(item.field)}</strong> · 缺失 ${escapeHtml(item.missing_count)} 条 · 覆盖率 ${formatPercent(item.coverage_pct)}</div>
         `).join('')}
+        <div style="margin-top:12px;"><strong>PB 缺口拆分</strong></div>
+        <div>非故障缺口 ${escapeHtml(pb.non_fault_missing ?? 0)} · 上游缺口 ${escapeHtml(pb.source_missing ?? 0)} · 待处理 ${escapeHtml(pb.actionable_missing ?? 0)}</div>
+        <div class="muted">PB 总缺口 ${escapeHtml(pb.missing_total ?? 0)}，其中从未成功更新过的有 ${escapeHtml(pb.never_updated ?? 0)}。</div>
+        <div style="margin-top:12px;"><strong>PE 缺口拆分（V1）</strong></div>
+        <div>非故障缺口 ${escapeHtml(pe.non_fault_missing ?? 0)} · 上游缺口 ${escapeHtml(pe.source_missing ?? 0)} · 待处理 ${escapeHtml(pe.actionable_missing ?? 0)}</div>
+        <div class="muted">${escapeHtml(pe.not_applicable_hint || '')}</div>
         <div class="muted">这几个字段会直接影响选股解释、因子分析和单票详情的可信度。</div>
       `;
     }
