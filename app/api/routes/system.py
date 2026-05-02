@@ -15,6 +15,8 @@ TRACKED_TASKS = [
     "valuation_sync",
 ]
 
+KLINE_LATEST_SAMPLE_LIMIT = 20
+
 TASK_NAME_LABELS = {
     "daily_kline_increment": "日线增量更新",
     "daily_kline_backfill": "历史日线补齐",
@@ -59,6 +61,75 @@ def _coverage_stats() -> dict:
                 "fundamental_coverage_pct": round((fundamental_filled / total_codes) * 100, 2) if total_codes else None,
                 "valuation_filled_codes": valuation_filled,
                 "valuation_coverage_pct": round((valuation_filled / total_codes) * 100, 2) if total_codes else None,
+            }
+
+
+def _kline_latest_shortfall() -> dict:
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM daily_kline")
+            row = cursor.fetchone() or {}
+            latest_trade_date = row.get("latest_trade_date")
+            if latest_trade_date is None:
+                return {
+                    "latest_trade_date": None,
+                    "missing_count": 0,
+                    "sample_codes": [],
+                    "items": [],
+                }
+
+            cursor.execute(
+                """
+                SELECT sb.code, sb.name, sb.is_st, sb.is_delisted,
+                       (
+                         SELECT MAX(dk2.trade_date)
+                         FROM daily_kline dk2
+                         WHERE dk2.code = sb.code
+                       ) AS last_trade_date
+                FROM stock_basic sb
+                LEFT JOIN daily_kline dk
+                  ON dk.code = sb.code AND dk.trade_date = %s
+                WHERE sb.instrument_type = 'stock'
+                  AND dk.code IS NULL
+                ORDER BY sb.code
+                LIMIT %s
+                """,
+                (latest_trade_date, KLINE_LATEST_SAMPLE_LIMIT),
+            )
+            sample_rows = cursor.fetchall() or []
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS missing_count
+                FROM stock_basic sb
+                LEFT JOIN daily_kline dk
+                  ON dk.code = sb.code AND dk.trade_date = %s
+                WHERE sb.instrument_type = 'stock'
+                  AND dk.code IS NULL
+                """,
+                (latest_trade_date,),
+            )
+            count_row = cursor.fetchone() or {}
+            missing_count = int(count_row.get("missing_count") or 0)
+
+            items = []
+            for row in sample_rows:
+                items.append(
+                    {
+                        "code": row.get("code"),
+                        "name": row.get("name"),
+                        "is_st": bool(row.get("is_st")),
+                        "is_delisted": bool(row.get("is_delisted")),
+                        "last_trade_date": str(row.get("last_trade_date")) if row.get("last_trade_date") else None,
+                        "gap_days": None,
+                    }
+                )
+
+            return {
+                "latest_trade_date": str(latest_trade_date),
+                "missing_count": missing_count,
+                "sample_codes": [item["code"] for item in items],
+                "items": items,
             }
 
 
@@ -193,6 +264,7 @@ def system_status() -> dict:
         },
         "table_counts": table_counts,
         "coverage": _coverage_stats(),
+        "kline_latest_shortfall": _kline_latest_shortfall(),
         "latest": _latest_dates(),
         "task_runs": _latest_task_runs(),
         "field_missing": _field_missing_stats(),

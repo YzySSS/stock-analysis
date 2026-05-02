@@ -11,6 +11,7 @@ async function loadSystemPage() {
     const counts = data.table_counts || {};
     const latest = data.latest || {};
     const coverage = data.coverage || {};
+    const klineShortfall = data.kline_latest_shortfall || {};
     const fieldMissing = data.field_missing || {};
     const taskRuns = data.task_runs || [];
     const totalStockCodes = Number(coverage.total_stock_codes || 0);
@@ -85,7 +86,9 @@ async function loadSystemPage() {
     gapPanel.innerHTML = `
       <div><strong>K 线待补股票:</strong> ${klineMissing}</div>
       <div><strong>基本面待补股票:</strong> ${fundamentalMissing}</div>
+      <div><strong>最新 K 线日期缺口:</strong> ${escapeHtml(klineShortfall.missing_count ?? 0)}</div>
       <div class="muted">当前最大缺口仍是基本面覆盖，V1 展示可信度主要受它影响。</div>
+      ${renderKlineShortfallHint(klineShortfall)}
     `;
 
     if (!fieldMissing.items?.length) {
@@ -131,3 +134,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   qs('#refresh-system-page').addEventListener('click', loadSystemPage);
   await loadSystemPage();
 });
+
+function renderKlineShortfallHint(klineShortfall) {
+  const latestTradeDate = klineShortfall.latest_trade_date || '-';
+  const items = Array.isArray(klineShortfall.items) ? klineShortfall.items : [];
+  if (!items.length) {
+    return `<div class="muted">最新交易日 ${escapeHtml(latestTradeDate)} 全量覆盖，没有单票源数据缺口。</div>`;
+  }
+  return `
+    <div class="muted">最新交易日 ${escapeHtml(latestTradeDate)} 仍有 ${escapeHtml(klineShortfall.missing_count ?? items.length)} 只股票缺失，以下为样本：</div>
+    <div class="list-stack">
+      ${items.map((item) => `
+        <div class="preview-item">
+          <div class="preview-main">
+            <strong>${escapeHtml(item.code || '-')}</strong>
+            <div class="muted">${escapeHtml(item.name || '-')} · 最近落库 ${escapeHtml(item.last_trade_date || '-')}</div>
+          </div>
+          <div class="preview-side">
+            <span class="muted">${item.is_st ? 'ST/风险票' : '普通股票'}</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="muted">这类缺口表示“最新交易日单票源数据缺失”，不等于整批日线任务失败。</div>
+  `;
+}
