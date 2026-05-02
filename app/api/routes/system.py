@@ -247,12 +247,8 @@ def _field_missing_stats() -> dict:
 
 
 def _valuation_gap_breakdown() -> dict:
-    kline_shortfall = _kline_latest_shortfall()
-    shortfall_map = {
-        item.get("code"): item
-        for item in (kline_shortfall.get("items") or [])
-        if item.get("code")
-    }
+    latest_trade_date = _latest_dates().get("daily_kline_latest_trade_date")
+    status_map = _fetch_stock_status_snapshot_map(latest_trade_date) if latest_trade_date else {}
 
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -294,7 +290,7 @@ def _valuation_gap_breakdown() -> dict:
 
     for row in rows:
         code = row.get("code")
-        status = shortfall_map.get(code, {})
+        status = status_map.get(code, {})
         status_label = status.get("status_label")
         is_non_fault = bool(row.get("is_delisted")) or status_label in {"paused_listing", "suspended"}
         valuation_updated_at = row.get("valuation_updated_at")
@@ -305,6 +301,7 @@ def _valuation_gap_breakdown() -> dict:
             "name": row.get("name"),
             "is_st": bool(row.get("is_st")),
             "status_label": status_label,
+            "status_reason": status.get("status_reason"),
             "valuation_updated_at": str(valuation_updated_at) if valuation_updated_at else None,
         }
 
