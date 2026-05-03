@@ -305,6 +305,7 @@ def _valuation_gap_breakdown() -> dict:
             "status_label": status_label,
             "status_reason": status.get("status_reason"),
             "valuation_updated_at": str(valuation_updated_at) if valuation_updated_at else None,
+            "profit_yoy": float(row.get("profit_yoy")) if row.get("profit_yoy") is not None else None,
         }
 
         if has_pb_gap:
@@ -342,7 +343,7 @@ def _valuation_gap_breakdown() -> dict:
                 pe["source_missing"] += 1
                 push_sample(pe["sample_source_missing"], item)
 
-    pe["not_applicable_hint"] = "先按 profit_yoy < 0 近似识别“亏损 / PE 不适用”，后续若补到更直接的净利润口径，可再收紧定义。"
+    pe["not_applicable_hint"] = "当前按 profit_yoy < 0 近似识别“亏损 / PE 不适用”。这能先把明显不该算故障的部分拆出来，但它仍是近似口径，不等同于严格净利润为负。"
     return {
         "pb": pb,
         "pe": pe,
