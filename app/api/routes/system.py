@@ -254,7 +254,7 @@ def _valuation_gap_breakdown() -> dict:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT code, name, is_st, is_delisted, pe_tushare, pb_tushare, valuation_updated_at
+                SELECT code, name, is_st, is_delisted, pe_tushare, pb_tushare, valuation_updated_at, profit_yoy
                 FROM stock_basic
                 WHERE instrument_type = 'stock' AND (pe_tushare IS NULL OR pb_tushare IS NULL)
                 ORDER BY code
@@ -275,10 +275,12 @@ def _valuation_gap_breakdown() -> dict:
     pe = {
         "missing_total": 0,
         "non_fault_missing": 0,
+        "not_applicable_missing": 0,
         "source_missing": 0,
         "actionable_missing": 0,
         "never_updated": 0,
         "sample_non_fault": [],
+        "sample_not_applicable": [],
         "sample_source_missing": [],
         "sample_actionable": [],
         "not_applicable_hint": None,
@@ -323,9 +325,16 @@ def _valuation_gap_breakdown() -> dict:
             pe["missing_total"] += 1
             if valuation_updated_at is None:
                 pe["never_updated"] += 1
+
+            profit_yoy = row.get("profit_yoy")
+            is_loss_like = profit_yoy is not None and float(profit_yoy) < 0
+
             if is_non_fault:
                 pe["non_fault_missing"] += 1
                 push_sample(pe["sample_non_fault"], item)
+            elif is_loss_like:
+                pe["not_applicable_missing"] += 1
+                push_sample(pe["sample_not_applicable"], item)
             elif valuation_updated_at is None:
                 pe["actionable_missing"] += 1
                 push_sample(pe["sample_actionable"], item)
@@ -333,7 +342,7 @@ def _valuation_gap_breakdown() -> dict:
                 pe["source_missing"] += 1
                 push_sample(pe["sample_source_missing"], item)
 
-    pe["not_applicable_hint"] = "PE 缺口中可能混有亏损股票导致的口径不适用，当前先未单独拆出。"
+    pe["not_applicable_hint"] = "先按 profit_yoy < 0 近似识别“亏损 / PE 不适用”，后续若补到更直接的净利润口径，可再收紧定义。"
     return {
         "pb": pb,
         "pe": pe,

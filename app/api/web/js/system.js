@@ -123,7 +123,7 @@ async function loadSystemPage() {
         <div>非故障缺口 ${escapeHtml(pb.non_fault_missing ?? 0)} · 上游缺口 ${escapeHtml(pb.source_missing ?? 0)} · 待处理 ${escapeHtml(pb.actionable_missing ?? 0)}</div>
         <div class="muted">PB 总缺口 ${escapeHtml(pb.missing_total ?? 0)}，其中从未成功更新过的有 ${escapeHtml(pb.never_updated ?? 0)}。</div>
         <div style="margin-top:12px;"><strong>PE 缺口拆分（V1）</strong></div>
-        <div>非故障缺口 ${escapeHtml(pe.non_fault_missing ?? 0)} · 上游缺口 ${escapeHtml(pe.source_missing ?? 0)} · 待处理 ${escapeHtml(pe.actionable_missing ?? 0)}</div>
+        <div>非故障缺口 ${escapeHtml(pe.non_fault_missing ?? 0)} · 口径不适用 ${escapeHtml(pe.not_applicable_missing ?? 0)} · 上游缺口 ${escapeHtml(pe.source_missing ?? 0)} · 待处理 ${escapeHtml(pe.actionable_missing ?? 0)}</div>
         <div class="muted">${escapeHtml(pe.not_applicable_hint || '')}</div>
         <div class="muted">这几个字段会直接影响选股解释、因子分析和单票详情的可信度。</div>
       `;
