@@ -42,6 +42,7 @@ class StockSelector:
         netprofit_margin = float(row["netprofit_margin"]) if row.get("netprofit_margin") is not None else None
         revenue_yoy = float(row["revenue_yoy"]) if row.get("revenue_yoy") is not None else None
         profit_yoy = float(row["profit_yoy"]) if row.get("profit_yoy") is not None else None
+        eps = float(row["eps"]) if row.get("eps") is not None else None
         close = float(row["close"]) if row.get("close") is not None else None
         has_trade_data = row.get("trade_date") is not None
 
@@ -135,6 +136,7 @@ class StockSelector:
             "netprofit_margin": netprofit_margin,
             "revenue_yoy": revenue_yoy,
             "profit_yoy": profit_yoy,
+            "eps": eps,
         }
 
         if roa is None:
@@ -147,6 +149,8 @@ class StockSelector:
             missing_fields.append("revenue_yoy")
         if profit_yoy is None:
             missing_fields.append("profit_yoy")
+        if eps is None:
+            missing_fields.append("eps")
 
         if roa is not None and roa >= 6:
             reasons.append("ROA 表现较稳")
@@ -171,6 +175,7 @@ class StockSelector:
             "netprofit_margin": netprofit_margin,
             "revenue_yoy": revenue_yoy,
             "profit_yoy": profit_yoy,
+            "eps": eps,
             "fundamental_context": fundamental_context,
             "value_score": self._round_score(value_score),
             "quality_score": self._round_score(quality_score),
@@ -203,6 +208,7 @@ class StockSelector:
             sb.netprofit_margin,
             sb.revenue_yoy,
             sb.profit_yoy,
+            sb.eps,
             dk.close,
             dk.trade_date
         FROM stock_basic sb
@@ -255,6 +261,7 @@ class StockSelector:
                 "netprofit_margin": item.get("netprofit_margin"),
                 "revenue_yoy": item.get("revenue_yoy"),
                 "profit_yoy": item.get("profit_yoy"),
+                "eps": item.get("eps"),
                 "trade_date": item.get("trade_date"),
             },
             "fundamental_context": item.get("fundamental_context", {}),

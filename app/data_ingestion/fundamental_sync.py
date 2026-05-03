@@ -21,6 +21,7 @@ class FundamentalRecord:
     netprofit_margin: Optional[float]
     revenue_yoy: Optional[float]
     profit_yoy: Optional[float]
+    eps: Optional[float]
     period: Optional[str]
 
 
@@ -97,6 +98,8 @@ class FundamentalSync:
                     cursor.execute("ALTER TABLE stock_basic ADD COLUMN revenue_yoy DECIMAL(12,4) DEFAULT NULL")
                 if "profit_yoy" not in columns:
                     cursor.execute("ALTER TABLE stock_basic ADD COLUMN profit_yoy DECIMAL(12,4) DEFAULT NULL")
+                if "eps" not in columns:
+                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN eps DECIMAL(12,4) DEFAULT NULL")
                 if "fundamental_period" not in columns:
                     cursor.execute("ALTER TABLE stock_basic ADD COLUMN fundamental_period VARCHAR(16) DEFAULT NULL")
                 if "fundamental_updated_at" not in columns:
@@ -175,7 +178,7 @@ class FundamentalSync:
 
     def fetch_single_fundamental(self, code: str, result: Optional[FundamentalSyncResult] = None) -> Optional[FundamentalRecord]:
         ts_code = self.to_ts_code(code)
-        fields = "ts_code,end_date,roe,roa,grossprofit_margin,profit_to_gr,or_yoy,netprofit_yoy,q_netprofit_yoy,profit_yoy"
+        fields = "ts_code,end_date,roe,roa,grossprofit_margin,profit_to_gr,or_yoy,netprofit_yoy,q_netprofit_yoy,profit_yoy,eps"
         for period in self.periods:
             try:
                 df = self.pro.fina_indicator(ts_code=ts_code, period=period, fields=fields)
@@ -194,6 +197,7 @@ class FundamentalSync:
                         latest.get("netprofit_yoy"),
                         latest.get("q_netprofit_yoy"),
                     ),
+                    eps=self._to_float(latest.get("eps")),
                     period=str(latest.get("end_date") or period),
                 )
                 if any(
@@ -205,6 +209,7 @@ class FundamentalSync:
                         record.netprofit_margin,
                         record.revenue_yoy,
                         record.profit_yoy,
+                        record.eps,
                     ]
                 ):
                     return record
@@ -232,6 +237,7 @@ class FundamentalSync:
             netprofit_margin = %s,
             revenue_yoy = %s,
             profit_yoy = %s,
+            eps = %s,
             fundamental_period = %s,
             fundamental_updated_at = NOW()
         WHERE code = %s
@@ -247,6 +253,7 @@ class FundamentalSync:
                         record.netprofit_margin,
                         record.revenue_yoy,
                         record.profit_yoy,
+                        record.eps,
                         record.period,
                         record.code,
                     ),

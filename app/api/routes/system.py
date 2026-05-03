@@ -254,7 +254,7 @@ def _valuation_gap_breakdown() -> dict:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT code, name, is_st, is_delisted, pe_tushare, pb_tushare, valuation_updated_at, profit_yoy
+                SELECT code, name, is_st, is_delisted, pe_tushare, pb_tushare, valuation_updated_at, profit_yoy, eps
                 FROM stock_basic
                 WHERE instrument_type = 'stock' AND (pe_tushare IS NULL OR pb_tushare IS NULL)
                 ORDER BY code
@@ -306,6 +306,7 @@ def _valuation_gap_breakdown() -> dict:
             "status_reason": status.get("status_reason"),
             "valuation_updated_at": str(valuation_updated_at) if valuation_updated_at else None,
             "profit_yoy": float(row.get("profit_yoy")) if row.get("profit_yoy") is not None else None,
+            "eps": float(row.get("eps")) if row.get("eps") is not None else None,
         }
 
         if has_pb_gap:
@@ -327,12 +328,17 @@ def _valuation_gap_breakdown() -> dict:
             if valuation_updated_at is None:
                 pe["never_updated"] += 1
 
+            eps = row.get("eps")
             profit_yoy = row.get("profit_yoy")
+            is_not_applicable = eps is not None and float(eps) <= 0
             is_loss_like = profit_yoy is not None and float(profit_yoy) < 0
 
             if is_non_fault:
                 pe["non_fault_missing"] += 1
                 push_sample(pe["sample_non_fault"], item)
+            elif is_not_applicable:
+                pe["not_applicable_missing"] += 1
+                push_sample(pe["sample_not_applicable"], item)
             elif is_loss_like:
                 pe["not_applicable_missing"] += 1
                 push_sample(pe["sample_not_applicable"], item)
@@ -343,7 +349,7 @@ def _valuation_gap_breakdown() -> dict:
                 pe["source_missing"] += 1
                 push_sample(pe["sample_source_missing"], item)
 
-    pe["not_applicable_hint"] = "当前按 profit_yoy < 0 近似识别“亏损 / PE 不适用”。这能先把明显不该算故障的部分拆出来，但它仍是近似口径，不等同于严格净利润为负。"
+    pe["not_applicable_hint"] = "当前优先按 eps <= 0 识别“PE 不适用”；若 eps 暂缺，再退化用 profit_yoy < 0 近似识别。"
     return {
         "pb": pb,
         "pe": pe,

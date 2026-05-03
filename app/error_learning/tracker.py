@@ -291,7 +291,7 @@ class SelectionResultTracker:
             **factor_scores,
             "trade_date": metric_trade_date or factor_scores.get("trade_date"),
         }
-        fundamental_keys = ["pe_tushare", "pb_tushare", "roe", "roa", "grossprofit_margin", "netprofit_margin", "revenue_yoy", "profit_yoy"]
+        fundamental_keys = ["pe_tushare", "pb_tushare", "roe", "roa", "grossprofit_margin", "netprofit_margin", "revenue_yoy", "profit_yoy", "eps"]
         missing_fundamentals = [key for key in fundamental_keys if factor_scores.get(key) is None]
         factor_scores["fundamental_missing_fields"] = missing_fundamentals
         factor_scores["fundamental_completeness"] = round((len(fundamental_keys) - len(missing_fundamentals)) / len(fundamental_keys), 4)
@@ -347,8 +347,9 @@ class SelectionResultTracker:
             "netprofit_margin": self._to_float(row.get("netprofit_margin")),
             "revenue_yoy": self._to_float(row.get("revenue_yoy")),
             "profit_yoy": self._to_float(row.get("profit_yoy")),
+            "eps": self._to_float(row.get("eps")),
         }
-        fundamental_keys = ["pe_tushare", "pb_tushare", "roe", "roa", "grossprofit_margin", "netprofit_margin", "revenue_yoy", "profit_yoy"]
+        fundamental_keys = ["pe_tushare", "pb_tushare", "roe", "roa", "grossprofit_margin", "netprofit_margin", "revenue_yoy", "profit_yoy", "eps"]
         missing_fundamentals = [key for key in fundamental_keys if factor_scores.get(key) is None]
         factor_scores["fundamental_missing_fields"] = missing_fundamentals
         factor_scores["fundamental_completeness"] = round((len(fundamental_keys) - len(missing_fundamentals)) / len(fundamental_keys), 4)
