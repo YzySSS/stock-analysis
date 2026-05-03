@@ -111,6 +111,7 @@ class FundamentalSync:
         only_missing: bool = True,
         stale_after_days: Optional[int] = 30,
         only_missing_profit_yoy: bool = False,
+        prioritize_missing_pe: bool = False,
     ) -> List[str]:
         sql = """
         SELECT code FROM stock_basic
@@ -120,10 +121,12 @@ class FundamentalSync:
         """
         params: List[Any] = []
 
-        if only_missing_profit_yoy:
+        if prioritize_missing_pe:
+            sql += " AND pe_tushare IS NULL AND (eps IS NULL OR profit_yoy IS NULL OR fundamental_updated_at IS NULL)"
+        elif only_missing_profit_yoy:
             sql += " AND profit_yoy IS NULL"
         elif only_missing:
-            sql += " AND (roe IS NULL OR roa IS NULL OR grossprofit_margin IS NULL OR revenue_yoy IS NULL)"
+            sql += " AND (roe IS NULL OR roa IS NULL OR grossprofit_margin IS NULL OR revenue_yoy IS NULL OR eps IS NULL)"
         elif stale_after_days is not None:
             cutoff = datetime.now() - timedelta(days=stale_after_days)
             sql += " AND (fundamental_updated_at IS NULL OR fundamental_updated_at < %s)"
@@ -269,6 +272,7 @@ class FundamentalSync:
         only_missing: bool = True,
         stale_after_days: Optional[int] = 30,
         only_missing_profit_yoy: bool = False,
+        prioritize_missing_pe: bool = False,
     ) -> FundamentalSyncResult:
         self.ensure_columns()
         result = FundamentalSyncResult(run_id=self.build_run_id())
@@ -280,6 +284,7 @@ class FundamentalSync:
                 "only_missing": only_missing,
                 "stale_after_days": stale_after_days,
                 "only_missing_profit_yoy": only_missing_profit_yoy,
+                "prioritize_missing_pe": prioritize_missing_pe,
             },
         )
 
@@ -289,6 +294,7 @@ class FundamentalSync:
                 only_missing=only_missing,
                 stale_after_days=stale_after_days,
                 only_missing_profit_yoy=only_missing_profit_yoy,
+                prioritize_missing_pe=prioritize_missing_pe,
             )
             result.scanned = len(codes)
 

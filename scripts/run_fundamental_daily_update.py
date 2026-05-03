@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stale-after-days", type=int, default=30)
     parser.add_argument("--all", action="store_true", help="Sync stale records instead of only missing ones")
     parser.add_argument("--profit-yoy-only", action="store_true", help="Only refill rows where profit_yoy is still null")
+    parser.add_argument("--prioritize-missing-pe", action="store_true", help="Prioritize stocks where PE is missing and EPS/fundamentals are still incomplete")
     return parser
 
 
@@ -43,9 +44,10 @@ def main() -> None:
 
         result = sync.run(
             limit=args.batch_size,
-            only_missing=not args.all and not args.profit_yoy_only,
+            only_missing=not args.all and not args.profit_yoy_only and not args.prioritize_missing_pe,
             stale_after_days=args.stale_after_days,
             only_missing_profit_yoy=args.profit_yoy_only,
+            prioritize_missing_pe=args.prioritize_missing_pe,
         )
         batch_no += 1
         summaries.append(result.to_dict())
