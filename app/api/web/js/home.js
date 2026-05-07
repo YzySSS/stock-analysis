@@ -128,7 +128,8 @@ function updateMarketTimeCard() {
   const timeText = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
   const session = marketSessionInfo(now);
   setText('#home-market-clock', timeText);
-  setText('#home-market-calendar', `${dateText} · ${weekday}`);
+  setText('#home-market-date', dateText);
+  setText('#home-market-weekday', weekday);
   setText('#home-market-session', session.label);
   setText('#home-market-countdown', `距离${session.targetLabel} ${formatHms(session.target - now)}`);
   const sessionEl = qs('#home-market-session');
