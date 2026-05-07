@@ -457,15 +457,22 @@ def stock_detail(
 
             intraday_rows = []
             if intraday_limit > 0:
+                intraday_trade_date = realtime_snapshot.get("trade_date") if realtime_snapshot else None
+                if not intraday_trade_date:
+                    cursor.execute(
+                        "SELECT MAX(trade_date) AS trade_date FROM stock_realtime_intraday WHERE code = %s",
+                        (code,),
+                    )
+                    intraday_trade_date = (cursor.fetchone() or {}).get("trade_date")
                 cursor.execute(
                     """
                     SELECT quote_minute, latest_price, pct_chg, volume, amount
                     FROM stock_realtime_intraday
-                    WHERE code = %s AND trade_date = CURDATE()
+                    WHERE code = %s AND trade_date = %s
                     ORDER BY quote_minute DESC
                     LIMIT %s
                     """,
-                    (code, intraday_limit),
+                    (code, intraday_trade_date, intraday_limit),
                 )
                 intraday_rows = cursor.fetchall()
 

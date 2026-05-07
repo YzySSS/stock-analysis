@@ -43,7 +43,12 @@ async function loadSystemPage() {
       title: '最新交易日',
       state: latest.daily_kline_latest_trade_date || '-',
       stateClass: 'neutral',
-      lines: [`选股交易日 ${latest.selection_result_latest_trade_date || '-'}`, 'A股正常交易'],
+      lines: [
+        `选股交易日 ${latest.selection_result_latest_trade_date || '-'}`,
+        latest.daily_kline_latest_is_partial
+          ? `最新可用 ${latest.daily_kline_latest_available_trade_date || '-'} 仅 ${latest.daily_kline_latest_available_count || 0} 条`
+          : 'A股正常交易',
+      ],
     });
     panels.lastRun.innerHTML = renderTopMetricCard({
       icon: '◷',

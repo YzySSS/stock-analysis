@@ -16,6 +16,7 @@ _SYSTEM_STATUS_CACHE_AT = 0.0
 TRACKED_TASKS = [
     "daily_kline_increment",
     "daily_kline_backfill",
+    "daily_kline_realtime_eod_backfill",
     "fundamental_sync",
     "valuation_sync",
     "stock_status_snapshot_refresh",
@@ -32,6 +33,7 @@ KLINE_LATEST_SAMPLE_LIMIT = 20
 TASK_NAME_LABELS = {
     "daily_kline_increment": "日线增量更新",
     "daily_kline_backfill": "历史日线补齐",
+    "daily_kline_realtime_eod_backfill": "日线收盘快照兜底",
     "fundamental_sync": "基本面补齐",
     "valuation_sync": "估值补齐",
     "stock_status_snapshot_refresh": "状态快照刷新",
@@ -348,7 +350,21 @@ def _latest_dates() -> dict:
             cursor.execute(
                 """
                 SELECT
-                    (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_trade_date,
+                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock') AS total_stock_codes,
+                    (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_available_trade_date,
+                    (
+                      SELECT grouped.trade_date
+                      FROM (
+                        SELECT trade_date, COUNT(*) AS row_count
+                        FROM daily_kline
+                        GROUP BY trade_date
+                      ) grouped
+                      WHERE grouped.row_count >= (
+                        SELECT COUNT(*) * 0.95 FROM stock_basic WHERE instrument_type='stock'
+                      )
+                      ORDER BY grouped.trade_date DESC
+                      LIMIT 1
+                    ) AS daily_kline_latest_complete_trade_date,
                     (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at,
                     (SELECT MAX(fundamental_updated_at) FROM stock_basic) AS fundamental_latest_updated_at,
                     (SELECT MAX(valuation_updated_at) FROM stock_basic) AS valuation_latest_updated_at,
@@ -357,10 +373,35 @@ def _latest_dates() -> dict:
                 """
             )
             row = cursor.fetchone() or {}
-            return {
+            total_stock_codes = int(row.get("total_stock_codes") or 0)
+            latest_available = row.get("daily_kline_latest_available_trade_date")
+            latest_complete = row.get("daily_kline_latest_complete_trade_date")
+            latest_available_count = 0
+            latest_complete_count = 0
+            if latest_available:
+                cursor.execute("SELECT COUNT(*) AS count FROM daily_kline WHERE trade_date = %s", (latest_available,))
+                latest_available_count = int((cursor.fetchone() or {}).get("count") or 0)
+            if latest_complete:
+                cursor.execute("SELECT COUNT(*) AS count FROM daily_kline WHERE trade_date = %s", (latest_complete,))
+                latest_complete_count = int((cursor.fetchone() or {}).get("count") or 0)
+
+            result = {
                 key: str(value) if value is not None else None
                 for key, value in row.items()
+                if key != "total_stock_codes"
             }
+            result.update(
+                {
+                    "daily_kline_latest_trade_date": str(latest_complete) if latest_complete else (str(latest_available) if latest_available else None),
+                    "daily_kline_latest_available_trade_date": str(latest_available) if latest_available else None,
+                    "daily_kline_latest_available_count": latest_available_count,
+                    "daily_kline_latest_complete_trade_date": str(latest_complete) if latest_complete else None,
+                    "daily_kline_latest_complete_count": latest_complete_count,
+                    "daily_kline_latest_is_partial": bool(latest_available and latest_complete and latest_available != latest_complete),
+                    "total_stock_codes": total_stock_codes,
+                }
+            )
+            return result
 
 
 def _data_baseline_summary() -> dict:
@@ -369,7 +410,7 @@ def _data_baseline_summary() -> dict:
     Keep this bounded to simple aggregate queries and cache the whole endpoint.
     """
     latest = _latest_dates()
-    latest_kline_date = latest.get("daily_kline_latest_trade_date")
+    latest_kline_date = latest.get("daily_kline_latest_complete_trade_date") or latest.get("daily_kline_latest_trade_date")
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM stock_basic WHERE instrument_type='stock'")
@@ -718,6 +759,7 @@ def _scheduled_tasks() -> list[dict]:
     return [
         {"task_name": "daily_kline_increment", "task_label": "日线增量更新", "schedule": "每天 02:00"},
         {"task_name": "daily_kline_backfill", "task_label": "历史日线补齐", "schedule": "每天 02:15"},
+        {"task_name": "daily_kline_realtime_eod_backfill", "task_label": "日线收盘快照兜底", "schedule": "按需 / BaoStock 卡住或最新日线缺口时"},
         {"task_name": "fundamental_sync", "task_label": "基本面补齐", "schedule": "每天 02:40"},
         {"task_name": "valuation_sync", "task_label": "估值补齐", "schedule": "每天 02:50"},
         {"task_name": "stock_status_snapshot_refresh", "task_label": "状态快照刷新", "schedule": "每天 03:05"},
