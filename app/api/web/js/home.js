@@ -171,10 +171,6 @@ function renderMarketOverview(overview) {
   const bjLimit = overview.limit_breakdown?.board30;
   const bjLimitText = bjLimit ? ` · 北证 ${bjLimit.up ?? 0}/${bjLimit.down ?? 0}` : '';
   setText('#home-market-big-move', `大涨 ${overview.strong_up_count ?? '-'} · 大跌 ${overview.strong_down_count ?? '-'}${bjLimitText}`);
-  const activeTotal = (overview.up_count ?? 0) + (overview.down_count ?? 0);
-  const sectorTime = overview.sector_fund_flow_time ? ` · 板块资金 ${overview.sector_fund_flow_time}` : '';
-  setText('#home-market-total', `${overview.total ?? '-'} 只`);
-  setText('#home-market-source', `数据更新 ${overview.latest_quote_time || '-'} · 样本 ${overview.total ?? '-'} 只${sectorTime}`);
   updateMarketTimeCard();
   renderSectorList('#home-strong-sectors', overview.strong_sectors, '暂无强势板块统计');
   renderSectorList('#home-weak-sectors', overview.weak_sectors, '暂无弱势板块统计');
