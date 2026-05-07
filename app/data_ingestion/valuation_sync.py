@@ -153,10 +153,22 @@ class ValuationSync:
         updated = 0
         missing_source = 0
         missing_codes: List[str] = []
+        if not codes:
+            return 0, 0, 0, []
+
+        placeholders = ",".join(["%s"] * len(codes))
+        current_by_code: Dict[str, tuple[Optional[float], Optional[float]]] = {}
+        sql = f"SELECT code, pe_tushare, pb_tushare FROM stock_basic WHERE code IN ({placeholders})"
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, codes)
+                for row in cursor.fetchall():
+                    current_by_code[row["code"]] = (row.get("pe_tushare"), row.get("pb_tushare"))
+
         sql = """
         UPDATE stock_basic
-        SET pe_tushare = %s,
-            pb_tushare = %s,
+        SET pe_tushare = COALESCE(%s, pe_tushare),
+            pb_tushare = COALESCE(%s, pb_tushare),
             valuation_updated_at = NOW()
         WHERE code = %s
         """
@@ -168,6 +180,18 @@ class ValuationSync:
                         missing_source += 1
                         missing_codes.append(code)
                         continue
+
+                    current_pe, current_pb = current_by_code.get(code, (None, None))
+                    fills_pe = current_pe is None and item.pe_tushare is not None
+                    fills_pb = current_pb is None and item.pb_tushare is not None
+                    needs_pb = require_missing_pb and current_pb is None
+                    needs_any = allow_missing_pe_only and (current_pe is None or current_pb is None)
+                    if not fills_pe and not fills_pb:
+                        if needs_pb or needs_any:
+                            missing_source += 1
+                            missing_codes.append(code)
+                        continue
+
                     cursor.execute(sql, (item.pe_tushare, item.pb_tushare, code))
                     updated += 1
         return len(codes), updated, missing_source, missing_codes
