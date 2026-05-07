@@ -6114,16 +6114,16 @@ body[data-page="home"] .home-card-market-item {
 body[data-page="home"] .home-card-market-item.home-market-time-card {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: auto 1fr auto;
-  gap: 8px;
-  align-content: center;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-content: stretch;
   min-height: 128px;
-  padding: 10px 12px 9px;
+  padding: 15px 18px 13px;
 }
 
 body[data-page="home"] .market-time-title {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 900;
   line-height: 1;
 }
@@ -6136,21 +6136,22 @@ body[data-page="home"] .market-time-title em {
 
 body[data-page="home"] .home-market-time-card .market-time-body {
   display: grid;
-  grid-template-columns: 66px minmax(80px, 1fr);
+  grid-template-columns: minmax(88px, 0.42fr) minmax(120px, 1fr);
   align-items: center;
-  gap: 13px;
+  gap: 22px;
+  min-height: 92px;
 }
 
 body[data-page="home"] .home-market-time-card .market-time-info {
   display: grid;
   align-content: center;
-  gap: 1px;
+  gap: 4px;
   min-width: 0;
 }
 
 body[data-page="home"] .home-market-time-card strong {
   margin: 1px 0 0;
-  font-size: 18px;
+  font-size: clamp(24px, 1.75vw, 32px);
   color: #7dd3fc !important;
   letter-spacing: 0;
   line-height: 1.05;
@@ -6163,7 +6164,7 @@ body[data-page="home"] .home-market-time-card b {
   border-radius: 999px;
   color: #38bdf8 !important;
   background: transparent !important;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -6187,15 +6188,15 @@ body[data-page="home"] #home-market-date,
 body[data-page="home"] #home-market-weekday {
   display: block;
   color: #8fa3bd;
-  font-size: 11px;
-  line-height: 1.22;
+  font-size: 13px;
+  line-height: 1.25;
 }
 
 body[data-page="home"] #home-market-countdown {
   display: block;
   color: #7dd3fc;
   font-weight: 850;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
   margin-top: 0;
   white-space: nowrap;
@@ -6207,8 +6208,8 @@ body[data-page="home"] .home-market-time-card small + small {
 
 body[data-page="home"] .market-time-clock {
   position: relative;
-  width: 62px;
-  height: 62px;
+  width: clamp(82px, 5.2vw, 104px);
+  height: clamp(82px, 5.2vw, 104px);
   border-radius: 999px;
   border: 1px solid rgba(56, 189, 248, 0.38);
   background:
@@ -6220,7 +6221,7 @@ body[data-page="home"] .market-time-clock {
 body[data-page="home"] .market-time-clock::before {
   content: '';
   position: absolute;
-  inset: 8px;
+  inset: 10px;
   border-radius: inherit;
   background: #06182c;
 }
@@ -6230,9 +6231,9 @@ body[data-page="home"] .market-time-clock::after {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
   border-radius: 999px;
   background: #e0f2fe;
 }
@@ -6242,18 +6243,18 @@ body[data-page="home"] .clock-hand {
   left: 50%;
   bottom: 50%;
   z-index: 2;
-  width: 2px;
+  width: 3px;
   transform-origin: bottom center;
   border-radius: 999px;
   background: #e0f2fe;
 }
 
 body[data-page="home"] .clock-hand.hour {
-  height: 19px;
+  height: 28px;
 }
 
 body[data-page="home"] .clock-hand.minute {
-  height: 27px;
+  height: 40px;
   background: #ef4444;
 }
 
