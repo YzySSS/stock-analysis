@@ -34,8 +34,6 @@ function renderOverviewConsole(overview) {
   qs('#stock-overview-high').textContent = formatNumber(quote.high_price, 2);
   qs('#stock-overview-low').textContent = formatNumber(quote.low_price, 2);
   qs('#stock-overview-amount').textContent = formatMoneyCN(quote.amount);
-  const trendLabelEl = qs('#stock-overview-trend');
-  if (trendLabelEl) trendLabelEl.textContent = `趋势 ${technical.trend_label || '-'}`;
   qs('#stock-overview-amount-rank').textContent = formatRank(rankings.amount_rank, rankings.amount_percentile);
   qs('#stock-overview-pct-rank').textContent = formatRank(rankings.pct_chg_rank, rankings.pct_chg_percentile);
   qs('#stock-overview-mv-rank').textContent = formatRank(rankings.total_mv_rank, rankings.total_mv_percentile);
@@ -99,12 +97,9 @@ function renderFactorScorePills(factorScores, latestSelection = {}) {
   const container = qs('#stock-factor-score-pills');
   if (!container) return;
   const strategyName = latestSelection.strategy_display_name || latestSelection.strategy_id || '未关联策略';
-  const strategyVersion = latestSelection.strategy_version ? ` · ${latestSelection.strategy_version}` : '';
   const scoreLabel = qs('#stock-strategy-score-label');
-  const scoreSubtitle = qs('#stock-strategy-score-subtitle');
   const caption = qs('#stock-strategy-factor-caption');
   if (scoreLabel) scoreLabel.textContent = strategyName;
-  if (scoreSubtitle) scoreSubtitle.textContent = latestSelection.strategy_id ? `${latestSelection.strategy_id}${strategyVersion}` : '策略 -';
   if (caption) caption.textContent = `因子得分 · ${strategyName}`;
 
   const entries = getDisplayFactorEntries(factorScores);
@@ -594,8 +589,6 @@ async function loadStockDetail() {
     const realtime = data.realtime || {};
 
     qs('#stock-detail-title').textContent = `${escapeHtml(data.name || code)} (${escapeHtml(data.code || code)})`;
-    qs('#stock-detail-subtitle').textContent = `${escapeHtml(data.industry || '未分类行业')} · ${escapeHtml(data.market || '-')} · ${escapeHtml(data.instrument_type || '-')}`;
-
     qs('#stock-stat-close').textContent = formatNumber(realtime.latest_price ?? data.latest_kline?.close, 2);
     qs('#stock-stat-change').textContent = formatPercent(realtime.pct_chg ?? data.latest_kline?.intraday_change_pct);
     qs('#stock-stat-change').classList.remove('up', 'down');
@@ -712,7 +705,6 @@ async function loadStockDetail() {
     renderRecentNews(data.recent_news || []);
     renderSelectionHistory(data.selection_history || []);
   } catch (error) {
-    qs('#stock-detail-subtitle').textContent = '加载详情失败';
     ['#stock-detail-basic', '#stock-detail-factors', '#stock-detail-fundamentals', '#stock-detail-selection', '#stock-detail-reasons', '#stock-detail-tracking-summary', '#stock-detail-news', '#stock-detail-history'].forEach((selector) => {
       qs(selector).innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
     });
