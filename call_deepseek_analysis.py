@@ -10,7 +10,7 @@ with open('/root/.openclaw/workspace/股票分析项目/docs/V12_V6_DEEPSEEK_ANA
     analysis_content = f.read()
 
 # DeepSeek API配置
-api_key = "sk-51f77975d58f4f5691e98e110bebdc4c"
+api_key = os.getenv("DEEPSEEK_API_KEY", "")
 base_url = "https://api.deepseek.com/v1"
 
 # 构建请求
