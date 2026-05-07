@@ -8,100 +8,124 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
 </head>
 <body data-page="strategies">
-  <div class="app-shell">
+  <div class="app-shell dashboard-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
-      <div class="global-stock-search">
-        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
-        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
-      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
         <a href="/strategies" data-nav="strategies">策略管理</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
 
-    <main class="main-content">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">Strategies</p>
+    <main class="main-content dashboard-main strategies-dashboard strategy-quant-main">
+      <section class="strategy-quant-frame">
+        <header class="strategy-quant-titlebar">
           <h1>策略管理</h1>
-          <p class="page-subtitle">在这里看策略体系、版本状态和因子分析，不再把完整因子表塞在选股结果页里。</p>
-        </div>
-        <div class="header-actions">
-          <button id="refresh-strategies-page" class="btn btn-secondary" type="button">刷新策略</button>
-        </div>
-      </header>
+          <span>策略注册 / 状态 / 权重说明</span>
+        </header>
 
-      <section class="stat-grid compact-stats">
-        <article class="stat-card">
-          <div class="stat-label">默认策略</div>
-          <div id="strategies-default" class="stat-value">加载中...</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">策略数量</div>
-          <div id="strategies-count" class="stat-value">加载中...</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">可执行策略</div>
-          <div id="strategies-current-count" class="stat-value">加载中...</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">实验中/仅展示</div>
-          <div id="strategies-legacy-count" class="stat-value">加载中...</div>
-        </article>
-      </section>
+        <div class="strategy-quant-board">
+          <div class="strategy-quant-topnav">
+            <div>
+              <p class="eyebrow">Strategy Registry</p>
+              <h2>策略管理</h2>
+              <p>策略注册、版本与执行状态管理</p>
+            </div>
+            <button id="refresh-strategies-page" class="btn btn-secondary" type="button">刷新数据</button>
+          </div>
 
-      <section class="card">
-        <div class="card-header">
-          <h2>策略列表</h2>
-        </div>
-        <div id="strategies-list" class="strategy-grid empty-state">加载中...</div>
-      </section>
+          <section class="stat-grid compact-stats strategy-summary-strip">
+            <span id="strategies-default" hidden></span>
+            <article class="stat-card">
+              <div class="stat-label">策略数量</div>
+              <div id="strategies-count" class="stat-value">加载中...</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-label">可执行策略</div>
+              <div id="strategies-current-count" class="stat-value">加载中...</div>
+            </article>
+            <article class="stat-card">
+              <div class="stat-label">实验中/仅展示</div>
+              <div id="strategies-legacy-count" class="stat-value">加载中...</div>
+            </article>
+          </section>
 
-      <section class="card">
-        <div class="card-header">
-          <h2>策略详情</h2>
-        </div>
-        <div id="strategy-detail" class="strategy-detail empty-state">请选择策略</div>
-      </section>
+          <section id="strategies-list" class="strategy-hero-card-grid empty-state">加载中...</section>
 
-      <section class="card">
-        <div class="card-header">
-          <h2>因子分析</h2>
-        </div>
-        <div id="strategy-factor-summary" class="muted">请选择策略后查看因子分析</div>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>因子名</th>
-                <th>类别</th>
-                <th>方向</th>
-                <th>权重</th>
-                <th>CI</th>
-                <th>覆盖率</th>
-                <th>缺失率</th>
-                <th>启用</th>
-                <th>说明</th>
-              </tr>
-            </thead>
-            <tbody id="strategy-factors-body">
-              <tr><td colspan="9" class="empty-state">请选择策略</td></tr>
-            </tbody>
-          </table>
+          <section class="strategy-detail-matrix">
+            <div class="strategy-detail-header">
+              <strong>策略详情 / <span id="strategy-detail-name">请选择策略</span></strong>
+              <span id="strategy-detail-status" class="badge status-muted">未选择</span>
+            </div>
+            <div class="strategy-detail-columns">
+              <article class="strategy-matrix-card factor-weight-card">
+                <div class="card-header compact-card-header">
+                  <p class="card-kicker">Factors</p>
+                  <h3>因子权重</h3>
+                </div>
+                <div id="strategy-factor-summary" class="muted">请选择策略后查看因子分析</div>
+                <div id="strategy-factor-cards" class="strategy-factor-cards empty-state">请选择策略</div>
+              </article>
+
+              <article class="strategy-matrix-card">
+                <div class="card-header compact-card-header">
+                  <p class="card-kicker">Params</p>
+                  <h3>策略参数</h3>
+                </div>
+                <div id="strategy-detail" class="strategy-detail empty-state">请选择策略</div>
+              </article>
+
+              <article class="strategy-matrix-card readiness-card">
+                <div class="card-header compact-card-header">
+                  <p class="card-kicker">Readiness</p>
+                  <h3>数据就绪检查</h3>
+                </div>
+                <div id="strategy-readiness-list" class="strategy-readiness-list empty-state">请选择策略</div>
+              </article>
+            </div>
+          </section>
+
+          <section class="card strategy-table-console">
+            <div class="card-header">
+              <div>
+                <p class="card-kicker">Registry Table</p>
+                <h2>策略列表</h2>
+              </div>
+              <div class="strategy-table-search">搜索策略ID/名称</div>
+            </div>
+            <div class="table-wrapper strategy-factor-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>策略ID</th>
+                    <th>名称</th>
+                    <th>状态</th>
+                    <th>版本</th>
+                    <th>模式</th>
+                    <th>因子数</th>
+                    <th>阈值</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="strategy-factors-body">
+                  <tr><td colspan="8" class="empty-state">请选择策略</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </section>
     </main>
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/strategies.js"></script>
+  <script src="/static/js/strategies.js?v=20260507f"></script>
 </body>
 </html>

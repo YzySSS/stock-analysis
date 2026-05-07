@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <title>股票分析控制台 - 回测中心</title>
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
+</head>
+<body data-page="backtest">
+  <div class="app-shell dashboard-shell">
+    <aside class="sidebar">
+      <div class="brand">股票分析控制台</div>
+      <nav class="nav">
+        <a href="/" data-nav="home">首页</a>
+        <a href="/selection" data-nav="selection">选股中心</a>
+        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
+        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/system" data-nav="system">数据状态</a>
+      </nav>
+    </aside>
+
+    <main class="main-content dashboard-main backtest-dashboard">
+      <header class="backtest-title-bar">
+        <div>
+          <p class="eyebrow">Backtest</p>
+          <h1>回测中心</h1>
+          <p class="page-subtitle">V2-P0 最小闭环：先验证 lowvol_reversal 在历史输入层上的 1 日 / 3 日收益，不做复杂参数网格和多策略对比。</p>
+        </div>
+        <div class="header-actions">
+          <button id="refresh-backtest-page" class="btn btn-secondary" type="button">刷新最近结果</button>
+        </div>
+      </header>
+
+      <section class="card backtest-terminal-control">
+        <form id="backtest-form" class="backtest-terminal-form">
+          <div class="terminal-form-field strategy-field">
+            <label for="backtest-strategy-id">策略</label>
+            <select id="backtest-strategy-id">
+              <option value="lowvol_reversal">lowvol_reversal</option>
+            </select>
+          </div>
+          <div class="terminal-form-field">
+            <label for="backtest-start-date">开始日期</label>
+            <input id="backtest-start-date" type="date" value="2026-04-24" />
+          </div>
+          <div class="terminal-form-field">
+            <label for="backtest-end-date">结束日期</label>
+            <input id="backtest-end-date" type="date" value="2026-04-27" />
+          </div>
+          <div class="terminal-form-field small-field">
+            <label for="backtest-max-picks">持仓天数</label>
+            <div class="input-with-unit">
+              <input id="backtest-max-picks" type="number" value="3" min="1" max="50" />
+              <span>只/日</span>
+            </div>
+          </div>
+          <div class="terminal-form-field small-field">
+            <label for="backtest-score-threshold">分数底线</label>
+            <input id="backtest-score-threshold" type="number" value="60" min="0" max="100" step="1" />
+          </div>
+          <div class="terminal-form-field return-field">
+            <label for="backtest-return-mode">收益口径</label>
+            <select id="backtest-return-mode">
+              <option value="1d">1 日收益</option>
+              <option value="3d">3 日收益</option>
+            </select>
+          </div>
+          <button class="btn btn-primary backtest-run-button" type="submit">▶ 运行回测</button>
+        </form>
+        <div class="backtest-terminal-foot">
+          <span id="backtest-form-message" class="muted">当前 V2-P0 只支持 lowvol_reversal、非复权价格。</span>
+          <span class="muted">高级设置 ▾</span>
+        </div>
+      </section>
+
+      <section class="backtest-workbench-grid backtest-task-grid">
+        <div id="backtest-runs-list" class="backtest-task-cards empty-state">加载中...</div>
+      </section>
+
+      <section id="backtest-detail-section" class="backtest-detail-console split-detail-console">
+        <span id="backtest-run-id" class="muted backtest-run-id-inline" hidden></span>
+
+        <section class="stat-grid compact-stats backtest-metric-strip">
+          <article class="stat-card">
+            <div class="stat-label">交易日</div>
+            <div id="backtest-stat-days" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">入选次数</div>
+            <div id="backtest-stat-picks" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">总收益率</div>
+            <div id="backtest-stat-total-return" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">平均收益</div>
+            <div id="backtest-stat-avg-return" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">最大回撤</div>
+            <div id="backtest-stat-max-drawdown" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">胜率</div>
+            <div id="backtest-stat-win-rate" class="stat-value">-</div>
+          </article>
+        </section>
+
+        <div class="backtest-analysis-grid">
+          <article class="card backtest-equity-card">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Equity</p>
+                <h3>每日净值曲线</h3>
+              </div>
+              <div class="chart-tabs" id="backtest-chart-tabs">
+                <button class="active" type="button" data-backtest-chart-mode="equity">净值</button>
+                <button type="button" data-backtest-chart-mode="return">收益率</button>
+              </div>
+            </div>
+            <div class="backtest-equity-chart-wrap">
+              <svg id="backtest-equity-chart" viewBox="0 0 720 260" preserveAspectRatio="none"></svg>
+            </div>
+          </article>
+
+          <article class="card backtest-recent-card">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Recent</p>
+                <h3>最近回测</h3>
+              </div>
+              <span class="muted">更多 ›</span>
+            </div>
+            <div id="backtest-recent-runs-panel" class="backtest-recent-runs-panel empty-state">加载中...</div>
+            <div class="card-header compact-sub-header">
+              <p class="card-kicker">Daily</p>
+              <h3>日级结果</h3>
+            </div>
+            <div class="table-wrapper compact-table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>交易日</th>
+                    <th>入选</th>
+                    <th>1日收益</th>
+                    <th>3日收益</th>
+                  </tr>
+                </thead>
+                <tbody id="backtest-curve-body">
+                  <tr><td colspan="4" class="empty-state">点击已完成任务查看日级结果</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <article class="card backtest-trades-console">
+          <div class="card-header with-actions">
+            <div>
+              <p class="card-kicker">Trades</p>
+              <h3>交易明细</h3>
+            </div>
+            <div class="actions">
+              <button class="btn btn-secondary" type="button" disabled>导出</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>交易日</th>
+                  <th>代码</th>
+                  <th>买入价</th>
+                  <th>1 日卖出/收益</th>
+                  <th>3 日卖出/收益</th>
+                  <th>最大涨幅</th>
+                  <th>最大回撤</th>
+                </tr>
+              </thead>
+              <tbody id="backtest-trades-body">
+                <tr><td colspan="7" class="empty-state">点击已完成任务查看个股明细</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/backtest.js?v=20260507j"></script>
+</body>
+</html>

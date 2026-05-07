@@ -38,6 +38,7 @@ function renderStrategySummary(strategy) {
   const container = qs('#strategy-summary');
   if (!strategy) {
     container.innerHTML = '<div class="empty-state">暂无策略信息</div>';
+    renderSelectionFactorBars(null);
     return;
   }
 
@@ -65,13 +66,181 @@ function renderStrategySummary(strategy) {
       <div class="muted">${escapeHtml(strategy.availability_note || '暂无状态说明')} · 完整因子分析请前往 <a href="/strategies">策略管理</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
   `;
+  renderSelectionFactorBars(strategy);
+}
+
+function renderSelectionFactorBars(strategy) {
+  const container = qs('#selection-factor-bars');
+  if (!container) return;
+  const factors = strategy?.factors || [];
+  if (!factors.length) {
+    container.classList.add('empty-state');
+    container.innerHTML = '暂无因子配置';
+    return;
+  }
+  container.classList.remove('empty-state');
+  const weightFallback = Math.round(100 / Math.max(factors.length, 1));
+  container.innerHTML = factors.slice(0, 6).map((factor, index) => {
+    const rawWeight = factor.weight ?? factor.weight_pct ?? factor.ratio ?? null;
+    const weight = rawWeight == null ? weightFallback : Number(rawWeight) <= 1 ? Number(rawWeight) * 100 : Number(rawWeight);
+    const safeWeight = Math.max(6, Math.min(100, Number.isNaN(weight) ? weightFallback : weight));
+    const label = factor.name || factor.label || factor.key || `因子${index + 1}`;
+    return `
+      <div class="selection-factor-bar">
+        <div><span>${escapeHtml(label)}</span><b>${formatNumber(safeWeight, 0)}%</b></div>
+        <i style="width:${safeWeight}%"></i>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSelectionRunStatus(data = null, visibleItems = []) {
+  const state = qs('#selection-run-state');
+  if (!state) return;
+  const summary = data?.summary || {};
+  const originalCount = Number(summary.total_count ?? data?.items?.length ?? 0);
+  const qualifiedCount = visibleItems.length;
+  const successRate = originalCount ? (qualifiedCount / originalCount) * 100 : null;
+  const scores = visibleItems.map((item) => Number(item.score)).filter((value) => !Number.isNaN(value));
+  const avgScore = scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
+  qs('#selection-success-rate').textContent = successRate == null ? '-' : `${formatNumber(successRate, 0)}%`;
+  state.textContent = data ? (qualifiedCount ? '运行成功' : '无达标股') : '待运行';
+  state.classList.remove('up', 'down');
+  if (data && qualifiedCount) state.classList.add('up');
+  if (data && !qualifiedCount) state.classList.add('down');
+  qs('#selection-run-time').textContent = summary.run_created_at || summary.updated_at || summary.latest_trade_date || '-';
+  qs('#selection-qualified-count').textContent = data ? `${qualifiedCount} / ${originalCount || 0}` : '-';
+  qs('#selection-avg-score').textContent = formatNumber(avgScore, 1);
+  renderSelectionScoreSparkline(scores);
+}
+
+function renderSelectionScoreSparkline(scores = []) {
+  const svg = qs('#selection-score-sparkline');
+  if (!svg) return;
+  if (!scores.length) {
+    svg.innerHTML = '<text x="16" y="44" fill="#64748b" font-size="12">暂无评分分布</text>';
+    return;
+  }
+  const width = 320;
+  const height = 88;
+  const padding = { left: 14, right: 14, top: 12, bottom: 16 };
+  const values = scores.slice(0, 12);
+  const max = Math.max(100, ...values);
+  const min = Math.min(0, ...values);
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const step = plotWidth / Math.max(values.length - 1, 1);
+  const points = values.map((value, index) => {
+    const x = padding.left + index * step;
+    const y = padding.top + ((max - value) / (max - min || 1)) * plotHeight;
+    return `${x},${y}`;
+  }).join(' ');
+  svg.innerHTML = `
+    <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="rgba(148,163,184,.22)" />
+    <polyline points="${points}" fill="none" stroke="#38bdf8" stroke-width="2.5" />
+    ${values.map((value, index) => {
+      const x = padding.left + index * step;
+      const y = padding.top + ((max - value) / (max - min || 1)) * plotHeight;
+      return `<circle cx="${x}" cy="${y}" r="3" fill="${value >= 80 ? '#fb7185' : '#38bdf8'}" />`;
+    }).join('')}
+  `;
+}
+
+function syncInstrumentSegments() {
+  const select = qs('#instrument-type');
+  qsa('[data-instrument-value]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.instrumentValue === select.value);
+  });
+}
+
+function syncScoreInputs(source) {
+  const numberInput = qs('#selection-min-score');
+  const rangeInput = qs('#selection-min-score-range');
+  if (!numberInput || !rangeInput) return;
+  const value = Math.max(0, Math.min(100, Number(source.value || 0)));
+  numberInput.value = String(value);
+  rangeInput.value = String(value);
+}
+
+function updateRunTimeDisplay() {
+  const target = qs('#selection-run-time-display');
+  if (!target) return;
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  target.textContent = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 function renderSelectionPlaceholder(message = '请先设置条件并点击“运行”，再查看本次选股结果') {
   const body = qs('#selection-results-body');
   const summaryLine = qs('#selection-summary-line');
+  const cards = qs('#selection-result-cards');
   body.innerHTML = renderEmptyRow(14, message);
   summaryLine.textContent = message;
+  if (cards) {
+    cards.classList.add('empty-state');
+    cards.innerHTML = message;
+  }
+  renderSelectionRunStatus(null, []);
+}
+
+const FACTOR_LABELS = {
+  turnover: '换手',
+  lowvol: '低波',
+  reversal: '反转',
+  trend: '趋势',
+  momentum: '动量',
+  quality: '质量',
+  sentiment: '情绪',
+  value: '估值',
+};
+
+function formatFactorSummary(factors = {}, maxItems = 5) {
+  const entries = Object.entries(factors || {}).filter(([, value]) => value !== null && value !== undefined && value !== '');
+  if (!entries.length) return '-';
+  return entries.slice(0, maxItems).map(([key, value]) => `${FACTOR_LABELS[key] || key} ${formatNumber(value, 2)}`).join(' / ');
+}
+
+function renderSelectionResultCards(items = []) {
+  const container = qs('#selection-result-cards');
+  if (!container) return;
+  if (!items.length) {
+    container.classList.add('empty-state');
+    container.innerHTML = '暂无达标标的';
+    return;
+  }
+  container.classList.remove('empty-state');
+  container.innerHTML = items.slice(0, 6).map((item) => {
+    const factorSummary = formatFactorSummary(item.factors || item.factor_scores || {}, 4);
+    const reasons = (item.reason_summary || []).slice(0, 2).join('；') || '暂无原因摘要';
+    const risks = (item.risk_summary || []).slice(0, 1).join('；') || '暂无明显风险提示';
+    const pctClass = getPctClass(item.price_change_pct) || '';
+    return `
+      <article class="selection-stock-card">
+        <div class="selection-stock-head">
+          <div>
+            <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '-')}</a>
+            <span>${escapeHtml(item.code || '-')}</span>
+          </div>
+          <em>#${escapeHtml(item.rank_no ?? '-')}</em>
+        </div>
+        <div class="selection-stock-score-row">
+          <strong>${formatNumber(item.score, 2)}</strong>
+          <span class="${pctClass}">${formatPercent(item.price_change_pct)}</span>
+        </div>
+        <div class="selection-stock-meta">
+          <span>${escapeHtml(item.industry_display || item.industry || '暂无行业')}</span>
+          <span>${escapeHtml(item.selection_date || '-')}</span>
+        </div>
+        <div class="selection-stock-prices">
+          <span>入选 ${formatNumber(item.selected_close_price ?? item.selected_open_price, 2)}</span>
+          <span>最新 ${formatNumber(item.current_price, 2)}</span>
+        </div>
+        <div class="selection-factor-mini">${escapeHtml(factorSummary)}</div>
+        <div class="selection-card-note">${escapeHtml(reasons)}</div>
+        <div class="selection-card-risk">${escapeHtml(risks)}</div>
+      </article>
+    `;
+  }).join('');
 }
 
 function normalizeRunResponse(result) {
@@ -175,15 +344,21 @@ function renderSelectionResults(data) {
   summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
   topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分`;
 
+  renderSelectionRunStatus(data, items);
+
   if (!originalItems.length) {
+    renderSelectionResultCards([]);
     body.innerHTML = renderEmptyRow(14, '本次运行未产生任何入选结果');
     return;
   }
 
   if (!items.length) {
+    renderSelectionResultCards([]);
     body.innerHTML = renderEmptyRow(14, '无达标股：当前入选结果中没有股票达到设定分数底线');
     return;
   }
+
+  renderSelectionResultCards(items);
 
   body.innerHTML = items.map((item, index) => {
     const reasonsList = item.reason_summary || [];
@@ -194,10 +369,7 @@ function renderSelectionResults(data) {
     const factorScores = item.factor_scores || {};
     const saveKey = buildSelectionPersistKey(item);
     const isSaved = savedSelectionKeys.has(saveKey);
-    const turnover = factorScores.turnover ?? '-';
-    const lowvol = factorScores.lowvol ?? '-';
-    const reversal = factorScores.reversal ?? '-';
-    const factorSummary = `换手 ${turnover} / 低波 ${lowvol} / 反转 ${reversal}`;
+    const factorSummary = formatFactorSummary(item.factors || factorScores);
     const fundamentalMissingFields = Array.isArray(factorScores.fundamental_missing_fields) ? factorScores.fundamental_missing_fields : [];
     const fundamentalCompleteness = factorScores.fundamental_completeness == null ? null : Number(factorScores.fundamental_completeness) * 100;
     const fundamentalHint = fundamentalMissingFields.length
@@ -214,7 +386,7 @@ function renderSelectionResults(data) {
       `区间涨跌幅：${item.price_change_pct ?? '-'}%`,
       `最大浮盈：${item.max_gain_pct ?? '-'}%`,
       `最大回撤：${item.max_drawdown_pct ?? '-'}%`,
-      `三因子：${factorSummary}`,
+      `因子得分：${factorSummary}`,
       `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
       `基本面：${fundamentalHint}`,
       `详细原因：${reasonsList.join('；') || '-'}`,
@@ -263,7 +435,7 @@ function renderSelectionResults(data) {
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 版本：${escapeHtml(item.strategy_version || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
           <div class="muted">行业：${escapeHtml(item.industry_display || '暂无行业')} · 排名：第 ${escapeHtml(String(item.rank_no ?? '-'))} 名 · 总分：${escapeHtml(String(formatNumber(item.score, 2)))}</div>
           <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
-          <div class="muted">三因子得分：换手=${escapeHtml(String(turnover))} / 低波=${escapeHtml(String(lowvol))} / 反转=${escapeHtml(String(reversal))}</div>
+          <div class="muted">因子得分：${escapeHtml(factorSummary)}</div>
           <div class="score-chip-list">
             <span class="score-chip">value ${escapeHtml(String(factorScores.value_score ?? '-'))}</span>
             <span class="score-chip">quality ${escapeHtml(String(factorScores.quality_score ?? '-'))}</span>
@@ -433,7 +605,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   qs('#refresh-results').addEventListener('click', () => loadSelectionResults());
   qs('#refresh-selection-page').addEventListener('click', refreshSelectionPage);
-  qs('#selection-min-score').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : renderSelectionPlaceholder());
+  qs('#selection-min-score').addEventListener('change', (event) => {
+    syncScoreInputs(event.target);
+    lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : renderSelectionPlaceholder();
+  });
+  qs('#selection-min-score-range')?.addEventListener('input', (event) => {
+    syncScoreInputs(event.target);
+    lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : renderSelectionPlaceholder();
+  });
   qs('#selection-search').addEventListener('input', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
   qs('#selection-sort').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
   qs('#selection-industry').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
@@ -445,6 +624,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     hasExecutedSelection = Boolean((qs('#selection-run-id')?.value || '').trim());
     await loadSelectionResults();
   });
+  qsa('[data-instrument-value]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      qs('#instrument-type').value = button.dataset.instrumentValue;
+      syncInstrumentSegments();
+      hasExecutedSelection = false;
+      lastSelectionResponse = null;
+      await loadStrategyDetail(qs('#strategy-id')?.value || currentDefaultStrategy || '');
+      renderSelectionPlaceholder();
+    });
+  });
+  qs('#instrument-type').addEventListener('change', () => syncInstrumentSegments());
   qs('#strategy-id').addEventListener('change', async (event) => {
     hasExecutedSelection = false;
     lastSelectionResponse = null;
@@ -454,6 +644,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   try {
+    updateRunTimeDisplay();
+    syncScoreInputs(qs('#selection-min-score'));
+    syncInstrumentSegments();
     await loadStrategies();
     renderSelectionPlaceholder();
     bindTooltips();

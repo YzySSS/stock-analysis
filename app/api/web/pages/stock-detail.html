@@ -8,113 +8,173 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
 </head>
 <body data-page="stock-detail">
-  <div class="app-shell">
+  <div class="app-shell stock-detail-shell stock-terminal-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
-      <div class="global-stock-search">
-        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
-        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
-      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
         <a href="/strategies" data-nav="strategies">策略管理</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
 
-    <main class="main-content">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">Stock Detail</p>
+    <main class="main-content stock-terminal-main">
+      <section class="stock-terminal-hero">
+        <div class="stock-title-block">
+          <p class="eyebrow">Stock Workspace</p>
           <h1 id="stock-detail-title">个股详情</h1>
-          <p id="stock-detail-subtitle" class="page-desc">查看股票基础信息、因子和历史入选记录。</p>
+          <p id="stock-detail-subtitle" class="page-desc">实时行情 · 策略跟踪 · K线走势 · 舆情质量</p>
         </div>
-      </header>
+        <section class="stock-overview-console" aria-label="个股顶部工作台">
+          <div class="quote-console-main">
+            <div class="quote-price-line">
+              <strong id="stock-stat-close">-</strong>
+              <span id="stock-stat-change" class="quote-change">-</span>
+            </div>
+            <div class="quote-sub-grid">
+              <span>交易状态 <b id="stock-overview-status">-</b></span>
+              <span>今开 <b id="stock-overview-open">-</b></span>
+              <span>最高 <b id="stock-overview-high">-</b></span>
+              <span>最低 <b id="stock-overview-low">-</b></span>
+              <span>成交额 <b id="stock-overview-amount">-</b></span>
+              <span>行情时间 <b id="stock-stat-date">-</b></span>
+            </div>
+          </div>
 
-      <section class="stat-grid compact-stats">
-        <article class="stat-card">
-          <div class="stat-label">最新收盘</div>
-          <div id="stock-stat-close" class="stat-value">-</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">日内涨跌幅</div>
-          <div id="stock-stat-change" class="stat-value">-</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">最近选股分数</div>
-          <div id="stock-stat-score" class="stat-value">-</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">最近交易日</div>
-          <div id="stock-stat-date" class="stat-value">-</div>
-        </article>
+          <div class="overview-score-panel">
+            <div class="overview-score-ring">
+              <span>策略评分</span>
+              <strong id="stock-stat-score">-</strong>
+              <em id="stock-overview-trend">趋势 -</em>
+            </div>
+            <div id="stock-factor-score-pills" class="overview-factor-pills">
+              <span class="muted">因子得分加载中...</span>
+            </div>
+          </div>
+
+          <div class="overview-metric-grid">
+            <article><span>成交额排名</span><strong id="stock-overview-amount-rank">-</strong></article>
+            <article><span>涨幅排名</span><strong id="stock-overview-pct-rank">-</strong></article>
+            <article><span>市值排名</span><strong id="stock-overview-mv-rank">-</strong></article>
+            <article><span>资金强度</span><strong id="stock-overview-capital-score">-</strong></article>
+            <article><span>技术评分</span><strong id="stock-overview-tech-score">-</strong></article>
+            <article><span>行业PE差</span><strong id="stock-overview-pe-vs">-</strong></article>
+          </div>
+        </section>
       </section>
 
-      <section class="card">
+      <section class="stock-terminal-grid">
+        <section class="stock-primary-column">
+          <article class="card stock-chart-terminal main-chart-card">
+            <div class="card-header with-actions stock-terminal-card-head">
+              <div>
+                <p class="card-kicker">Intraday</p>
+                <h2>今日分钟走势</h2>
+              </div>
+              <div class="chart-tabs" aria-label="分时图选项">
+                <button class="active" type="button">分时</button>
+                <button type="button" disabled>五日</button>
+              </div>
+            </div>
+            <div class="chart-wrap terminal-chart-wrap intraday-terminal-chart">
+              <svg id="stock-intraday-chart" class="mini-chart enhanced-chart terminal-chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
+            </div>
+          </article>
+
+          <section class="stock-secondary-row">
+            <article class="card stock-chart-terminal kline-card">
+              <div class="card-header with-actions stock-terminal-card-head">
+                <div>
+                  <p class="card-kicker">Candlestick</p>
+                  <h2>日K走势</h2>
+                </div>
+                <div class="chart-tabs" aria-label="K线周期">
+                  <button class="active" type="button">日K</button>
+                  <button type="button" disabled>周K</button>
+                  <button type="button" disabled>月K</button>
+                </div>
+              </div>
+              <div class="chart-wrap terminal-chart-wrap kline-terminal-chart">
+                <svg id="stock-price-chart" class="mini-chart enhanced-chart terminal-chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
+              </div>
+            </article>
+
+            <article class="card stock-signal-panel">
+              <div class="card-header">
+                <p class="card-kicker">Signals</p>
+                <h2>策略与风险摘要</h2>
+              </div>
+              <div class="signal-stack">
+                <div class="signal-box">
+                  <h3>最近入选</h3>
+                  <div id="stock-detail-selection" class="detail-grid muted">加载中...</div>
+                </div>
+                <div class="signal-box">
+                  <h3>入选原因</h3>
+                  <div id="stock-detail-reasons" class="note-block">加载中...</div>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section class="stock-factor-row">
+            <article class="card compact-info-card factor-card">
+              <div class="card-header">
+                <p class="card-kicker">Valuation</p>
+                <h2>估值与因子</h2>
+              </div>
+              <div id="stock-detail-factors" class="detail-grid muted">加载中...</div>
+            </article>
+
+            <article class="card compact-info-card fundamental-card">
+              <div class="card-header">
+                <p class="card-kicker">Fundamental</p>
+                <h2>基本面</h2>
+              </div>
+              <div id="stock-detail-fundamentals" class="detail-grid muted">加载中...</div>
+            </article>
+          </section>
+        </section>
+
+        <aside class="stock-terminal-sidebar">
+          <article class="card stock-side-card profile-card">
+            <div class="card-header">
+              <p class="card-kicker">Profile</p>
+              <h2>基础信息</h2>
+            </div>
+            <div id="stock-detail-basic" class="detail-grid muted">加载中...</div>
+          </article>
+
+          <article class="card stock-side-card review-card">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Review</p>
+                <h2>跟踪复盘</h2>
+              </div>
+              <a id="stock-detail-tracking-link" class="btn btn-secondary" href="/tracking">查看</a>
+            </div>
+            <div id="stock-detail-tracking-summary" class="detail-grid muted">加载中...</div>
+          </article>
+
+          <article class="card stock-side-card news-card-compact">
+            <div class="card-header">
+              <p class="card-kicker">Sentiment</p>
+              <h2>最近舆情新闻</h2>
+            </div>
+            <div id="stock-detail-news" class="empty-state stock-news-list terminal-news-list">暂无舆情新闻</div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="card history-card terminal-history-card">
         <div class="card-header">
-          <h2>价格趋势</h2>
-        </div>
-        <div class="chart-wrap">
-          <svg id="stock-price-chart" class="mini-chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
-        </div>
-      </section>
-
-      <section class="content-grid two-columns stock-detail-panels">
-        <article class="card">
-          <div class="card-header">
-            <h2>基础信息</h2>
-          </div>
-          <div id="stock-detail-basic" class="detail-grid muted">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>估值与因子</h2>
-          </div>
-          <div id="stock-detail-factors" class="detail-grid muted">加载中...</div>
-        </article>
-      </section>
-
-      <section class="content-grid two-columns stock-detail-panels">
-        <article class="card">
-          <div class="card-header">
-            <h2>基本面</h2>
-          </div>
-          <div id="stock-detail-fundamentals" class="detail-grid muted">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>最近入选信息</h2>
-          </div>
-          <div id="stock-detail-selection" class="detail-grid muted">加载中...</div>
-        </article>
-      </section>
-
-      <section class="content-grid two-columns stock-detail-panels">
-        <article class="card">
-          <div class="card-header">
-            <h2>入选原因</h2>
-          </div>
-          <div id="stock-detail-reasons" class="note-block">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header with-actions">
-            <h2>跟踪复盘入口</h2>
-            <a id="stock-detail-tracking-link" class="btn btn-secondary" href="/tracking">查看复盘</a>
-          </div>
-          <div id="stock-detail-tracking-summary" class="detail-grid muted">加载中...</div>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
+          <p class="card-kicker">History</p>
           <h2>历史入选记录</h2>
         </div>
         <div id="stock-detail-history" class="empty-state">暂无数据</div>
@@ -123,6 +183,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/stock-detail.js"></script>
+  <script src="/static/js/stock-detail.js?v=20260507l"></script>
 </body>
 </html>

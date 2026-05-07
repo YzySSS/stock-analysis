@@ -8,34 +8,31 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
 </head>
 <body data-page="tracking">
-  <div class="app-shell">
+  <div class="app-shell dashboard-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
-      <div class="global-stock-search">
-        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
-        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
-      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
         <a href="/strategies" data-nav="strategies">策略管理</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
 
-    <main class="main-content">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">Tracking</p>
+    <main class="main-content dashboard-main tracking-dashboard">
+      <section class="dashboard-hero tracking-hero">
+        <div class="dashboard-hero-copy">
+          <p class="eyebrow">Tracking Review</p>
           <h1>跟踪复盘</h1>
+          <p class="page-desc">汇总选股后表现、胜率、回撤，并可逐条控制是否纳入统计。</p>
         </div>
-      </header>
 
-      <section class="stat-grid compact-stats">
+        <section class="stat-grid compact-stats hero-stats tracking-stat-strip">
         <article class="stat-card">
           <div class="stat-label">复盘条目数</div>
           <div id="tracking-stat-count" class="stat-value">-</div>
@@ -64,25 +61,31 @@
           <div class="stat-label">最大回撤</div>
           <div id="tracking-stat-max-drawdown" class="stat-value down">-</div>
         </article>
+        </section>
       </section>
 
-      <section class="card">
-        <div class="card-header">
-          <h2>复盘概览</h2>
+      <section class="tracking-review-grid">
+        <article class="card review-summary-card">
+          <div class="card-header">
+            <p class="card-kicker">Overview</p>
+            <h2>复盘概览</h2>
           <p id="tracking-summary-text" class="muted">正在加载...</p>
         </div>
         <div id="tracking-review-summary" class="list-stack empty-state">加载中...</div>
+        </article>
+
+        <article class="card review-notes-card">
+          <div class="card-header">
+            <p class="card-kicker">Attribution</p>
+            <h2>复盘备注 / 成败归因</h2>
+          </div>
+          <div id="tracking-review-notes" class="note-block">加载中...</div>
+        </article>
       </section>
 
-      <section class="card">
+      <section class="card tracking-table-console">
         <div class="card-header">
-          <h2>复盘备注 / 成败归因</h2>
-        </div>
-        <div id="tracking-review-notes" class="note-block">加载中...</div>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
+          <p class="card-kicker">Records</p>
           <h2>个股复盘列表</h2>
           <div class="toolbar tracking-filters">
             <label class="tracking-filter-field">
@@ -109,7 +112,8 @@
             <button id="refresh-tracking-page" class="btn btn-secondary" type="button">刷新</button>
           </div>
         </div>
-        <div class="table-wrap">
+        <div id="tracking-record-cards" class="tracking-record-cards empty-state">加载中...</div>
+        <div class="table-wrap tracking-detail-table">
           <table>
             <thead>
               <tr>
@@ -117,19 +121,20 @@
                 <th>选股策略</th>
                 <th>选股日期</th>
                 <th>入选价</th>
-                <th>最新价</th>
-                <th>区间收益</th>
+                <th>实时价</th>
+                <th>实时区间收益</th>
                 <th>超额收益</th>
                 <th>跟踪天数</th>
                 <th>最大浮盈</th>
                 <th>最大回撤</th>
                 <th>状态</th>
                 <th>复盘备注</th>
+                <th>统计</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody id="tracking-results-body">
-              <tr><td colspan="13" class="muted">加载中...</td></tr>
+              <tr><td colspan="14" class="muted">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -145,6 +150,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/tracking.js?v=20260430h"></script>
+  <script src="/static/js/tracking.js?v=20260507d"></script>
 </body>
 </html>

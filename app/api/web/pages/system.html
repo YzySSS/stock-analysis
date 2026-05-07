@@ -8,106 +8,90 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
 </head>
 <body data-page="system">
-  <div class="app-shell">
+  <div class="app-shell dashboard-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
-      <div class="global-stock-search">
-        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
-        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
-      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
         <a href="/strategies" data-nav="strategies">策略管理</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
 
-    <main class="main-content">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">Data Status</p>
-          <h1>数据状态</h1>
-        </div>
-        <div class="header-actions">
-          <button id="refresh-system-page" class="btn btn-secondary" type="button">刷新状态</button>
-        </div>
-      </header>
-
-      <section class="content-grid two-columns">
-        <article class="card">
-          <div class="card-header">
-            <h2>健康检查</h2>
+    <main class="main-content dashboard-main system-dashboard system-ops-main">
+      <section class="system-ops-frame">
+        <header class="system-ops-titlebar">
+          <div>
+            <p class="eyebrow">Ops Monitor</p>
+            <h1>数据状态</h1>
+            <p>数据库健康、任务调度、实时行情、资金流、舆情质量与数据基准总览。</p>
           </div>
-          <div id="system-health-panel" class="status-panel">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>数据覆盖率</h2>
+          <div class="header-actions">
+            <button id="refresh-system-page" class="btn btn-secondary" type="button">刷新状态</button>
           </div>
-          <div id="system-coverage-panel" class="status-panel">加载中...</div>
-        </article>
+        </header>
+
+        <section class="system-top-metric-grid">
+          <article id="system-api-panel" class="system-top-metric-card">加载中...</article>
+          <article id="system-db-panel" class="system-top-metric-card">加载中...</article>
+          <article id="system-latest-date-panel" class="system-top-metric-card">加载中...</article>
+          <article id="system-last-run-panel" class="system-top-metric-card">加载中...</article>
+        </section>
+
+        <section class="card system-baseline-console">
+          <div class="card-header">
+            <div>
+              <p class="card-kicker">Baseline</p>
+              <h2>数据基准总览</h2>
+            </div>
+            <span id="system-baseline-overall" class="system-section-note">覆盖率计算中...</span>
+          </div>
+          <div id="system-baseline-panel" class="system-baseline-grid status-panel">加载中...</div>
+        </section>
+
+        <section class="system-ops-grid merged-task-monitor">
+          <article class="card system-schedule-console">
+            <div class="card-header">
+              <div>
+                <p class="card-kicker">Task Monitor</p>
+                <h2>任务监控</h2>
+              </div>
+              <span class="system-section-note">计划时间 + 最近执行状态</span>
+            </div>
+            <div id="system-coverage-panel" class="system-task-grid status-panel">加载中...</div>
+          </article>
+          <div id="system-task-run-panel" hidden></div>
+        </section>
+
+        <section class="system-note-grid">
+          <article class="card system-note-card">
+            <div class="card-header compact-card-header">
+              <p class="card-kicker">Sentiment</p>
+              <h2>舆情质量详情</h2>
+            </div>
+            <div id="system-sentiment-quality-panel" class="status-panel">加载中...</div>
+          </article>
+          <article class="card system-note-card">
+            <div class="card-header compact-card-header">
+              <p class="card-kicker">Gaps</p>
+              <h2>缺口提示</h2>
+            </div>
+            <div id="system-gap-panel" class="status-panel">加载中...</div>
+            <div id="system-field-missing-panel" class="status-panel hidden"></div>
+            <div id="system-shortfall-panel" class="status-panel hidden"></div>
+          </article>
+        </section>
       </section>
-
-      <section class="content-grid two-columns">
-        <article class="card">
-          <div class="card-header">
-            <h2>最近同步结果</h2>
-          </div>
-          <div id="system-latest-panel" class="status-panel">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>最新同步状态</h2>
-          </div>
-          <div id="system-task-run-panel" class="status-panel">加载中...</div>
-        </article>
-      </section>
-
-      <section class="content-grid two-columns">
-        <article class="card">
-          <div class="card-header">
-            <h2>缺口提示</h2>
-          </div>
-          <div id="system-gap-panel" class="status-panel">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>页面说明</h2>
-          </div>
-          <div class="note-block">
-            <p>本页集中展示数据覆盖率、最近同步时间、关键表规模、字段缺失统计与当前主要短板，方便快速判断数据是否足够支撑 V1 页面使用。</p>
-          </div>
-        </article>
-      </section>
-
-      <section class="content-grid two-columns">
-        <article class="card">
-          <div class="card-header">
-            <h2>字段缺失统计</h2>
-          </div>
-          <div id="system-field-missing-panel" class="status-panel">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>当前主要短板</h2>
-          </div>
-          <div id="system-shortfall-panel" class="status-panel">加载中...</div>
-        </article>
-      </section>
-
     </main>
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/system.js"></script>
+  <script src="/static/js/system.js?v=20260507e"></script>
 </body>
 </html>

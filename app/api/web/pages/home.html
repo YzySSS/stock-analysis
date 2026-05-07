@@ -8,114 +8,121 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
 </head>
 <body data-page="home">
-  <div class="app-shell">
+  <div class="app-shell dashboard-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
-      <div class="global-stock-search">
-        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
-        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
-      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
         <a href="/strategies" data-nav="strategies">策略管理</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
 
-    <main class="main-content">
-      <header class="page-header">
-        <div>
-          <p class="eyebrow">Dashboard</p>
-          <h1>首页概览</h1>
-        </div>
-        <div class="header-actions">
-          <a class="btn btn-primary" href="/selection">去运行选股</a>
-        </div>
-      </header>
+    <main class="main-content dashboard-main home-dashboard home-portal-main">
+      <section class="home-portal-frame home-card-layout-frame">
+        <header class="home-card-titlebar">
+          <h1>首页</h1>
+          <span>市场概览 / 板块资金 / 最近跟踪</span>
+        </header>
 
-      <section class="stat-grid compact-stats">
-        <article class="stat-card">
-          <div class="stat-label">API 状态</div>
-          <div id="home-health-status" class="stat-value">加载中...</div>
-          <div id="home-health-detail" class="muted">正在获取健康检查结果</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">默认策略</div>
-          <div id="home-default-strategy" class="stat-value">加载中...</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">最新交易日</div>
-          <div id="home-latest-trade-date" class="stat-value">加载中...</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">最近跟踪数量</div>
-          <div id="home-tracking-count" class="stat-value">加载中...</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">平均涨跌幅</div>
-          <div id="home-avg-change" class="stat-value">加载中...</div>
-        </article>
-      </section>
+        <section class="card home-market-console-card">
+          <div class="card-header with-actions">
+            <div>
+              <p class="card-kicker">Market Console</p>
+              <h2>市场与最近跟踪</h2>
+            </div>
+            <div class="dashboard-actions home-card-actions">
+              <a class="btn btn-primary" href="/selection">运行选股</a>
+              <a class="btn btn-secondary" href="/tracking">查看复盘</a>
+            </div>
+          </div>
 
-      <section class="content-grid two-columns">
-        <article class="card">
-          <div class="card-header">
-            <h2>快捷入口</h2>
-          </div>
-          <div class="quick-links">
-            <a class="quick-link-card" href="/selection">
-              <strong>运行选股</strong>
-              <span>执行策略、查看本轮输出</span>
-            </a>
-            <a class="quick-link-card" href="/tracking">
-              <strong>跟踪复盘</strong>
-              <span>查看已入选股票后续表现</span>
-            </a>
-            <a class="quick-link-card" href="/strategies">
-              <strong>策略管理</strong>
-              <span>看策略列表、默认策略和描述</span>
-            </a>
-            <a class="quick-link-card" href="/system">
-              <strong>数据状态</strong>
-              <span>确认数据覆盖、字段缺口和同步时间</span>
-            </a>
-          </div>
-        </article>
+          <section class="home-card-market-grid">
+            <article class="home-card-market-item market-strength-item">
+              <span>市场强度</span>
+              <strong id="home-market-strength">-</strong>
+              <div class="market-strength-thermo">
+                <div class="thermo-track"><i id="home-strength-pointer" style="left:0%"></i></div>
+                <div class="thermo-scale"><span>0</span><span>50</span><span>100</span></div>
+              </div>
+              <b id="home-market-state">加载中...</b>
+              <small id="home-market-strength-change">较昨日 -</small>
+            </article>
+            <article class="home-card-market-item market-breadth-item">
+              <span>涨 / 跌 / 平</span>
+              <strong id="home-market-breadth">-</strong>
+              <div class="market-breadth-bar" aria-hidden="true">
+                <i id="home-breadth-up" class="up" style="width:0%"></i>
+                <i id="home-breadth-flat" class="flat" style="width:0%"></i>
+                <i id="home-breadth-down" class="down" style="width:0%"></i>
+              </div>
+              <small id="home-market-active">-</small>
+            </article>
+            <article class="home-card-market-item">
+              <span>沪深涨停 / 跌停</span>
+              <strong id="home-market-limit">-</strong>
+              <small id="home-market-big-move">-</small>
+            </article>
+            <article class="home-card-market-item home-market-time-card">
+              <div class="market-time-clock" aria-hidden="true">
+                <i class="clock-hand hour"></i>
+                <i class="clock-hand minute"></i>
+              </div>
+              <div>
+                <span>行情时间</span>
+                <strong id="home-market-clock">--:--:--</strong>
+                <b id="home-market-session">已收盘</b>
+                <small id="home-market-time">数据更新时间：-</small>
+                <small id="home-market-source">实时快照统计</small>
+              </div>
+            </article>
+          </section>
 
-        <article class="card">
-          <div class="card-header">
-            <h2>最近跟踪预览</h2>
-          </div>
-          <div id="home-tracking-preview" class="preview-list">
-            <div class="empty-state">加载中...</div>
-          </div>
-        </article>
-      </section>
+          <section class="home-card-sector-grid">
+            <article class="sector-card positive-sector-card">
+              <div class="card-header">
+                <p class="card-kicker">Fund Flow</p>
+                <h2>资金强势板块</h2>
+              </div>
+              <div id="home-strong-sectors" class="home-sector-list">
+                <div class="empty-state">加载中...</div>
+              </div>
+            </article>
+            <article class="sector-card negative-sector-card">
+              <div class="card-header">
+                <p class="card-kicker">Weak Flow</p>
+                <h2>资金弱势板块</h2>
+              </div>
+              <div id="home-weak-sectors" class="home-sector-list">
+                <div class="empty-state">加载中...</div>
+              </div>
+            </article>
+          </section>
 
-      <section class="content-grid two-columns">
-        <article class="card">
-          <div class="card-header">
-            <h2>最近一次选股摘要</h2>
-          </div>
-          <div id="home-selection-summary" class="list-stack empty-state">加载中...</div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <h2>数据补充状态</h2>
-          </div>
-          <div id="home-data-status" class="list-stack empty-state">加载中...</div>
-        </article>
+          <section class="home-card-tracking-section">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Tracking</p>
+                <h2>最近跟踪预览</h2>
+              </div>
+              <span id="home-tracking-summary" class="muted">加载中...</span>
+            </div>
+            <div id="home-tracking-preview" class="home-tracking-card-grid">
+              <div class="empty-state">加载中...</div>
+            </div>
+          </section>
+        </section>
       </section>
     </main>
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/home.js"></script>
+  <script src="/static/js/home.js?v=20260508e"></script>
 </body>
 </html>

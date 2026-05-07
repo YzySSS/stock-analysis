@@ -8,27 +8,24 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
 </head>
 <body data-page="selection">
-  <div class="app-shell">
+  <div class="app-shell dashboard-shell">
     <aside class="sidebar">
       <div class="brand">股票分析控制台</div>
-      <div class="global-stock-search">
-        <input data-global-stock-search-input type="text" placeholder="股票代码，如 sh.600000" />
-        <button data-global-stock-search-btn class="btn btn-secondary" type="button">查看</button>
-      </div>
       <nav class="nav">
         <a href="/" data-nav="home">首页</a>
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
         <a href="/strategies" data-nav="strategies">策略管理</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
 
-    <main class="main-content">
-      <header class="page-header">
+    <main class="main-content dashboard-main selection-dashboard">
+      <header class="page-header dashboard-hero compact-hero">
         <div>
           <p class="eyebrow">Selection</p>
           <h1>选股中心</h1>
@@ -39,61 +36,105 @@
         </div>
       </header>
 
-      <section class="content-grid two-columns top-align">
-        <article class="card">
-          <div class="card-header">
+      <section class="selection-command-grid">
+        <article class="card command-card selection-run-panel">
+          <div class="selection-run-title">
+            <span class="run-title-icon">▶</span>
             <h2>运行选股</h2>
           </div>
 
-          <form id="selection-form" class="stack-form">
-            <div class="form-group">
-              <label for="strategy-id">策略</label>
+          <form id="selection-form" class="selection-terminal-form">
+            <div class="terminal-form-row">
+              <label for="strategy-id">策略选择</label>
               <select id="strategy-id"></select>
             </div>
 
-            <div class="form-group">
+            <div class="terminal-form-row instrument-row">
               <label for="instrument-type">股票池类型</label>
-              <select id="instrument-type">
+              <select id="instrument-type" class="visually-hidden-select">
                 <option value="stock">股票</option>
                 <option value="etf">ETF</option>
                 <option value="index">指数</option>
               </select>
+              <div class="instrument-segments" data-instrument-segments>
+                <button class="active" type="button" data-instrument-value="stock">全市场</button>
+                <button type="button" data-instrument-value="etf">ETF</button>
+                <button type="button" data-instrument-value="index">指数</button>
+              </div>
             </div>
 
-            <div class="form-group">
-              <label for="limit">最大入选数量</label>
-              <input id="limit" type="number" value="3" min="1" max="100" />
+            <div class="terminal-form-row limit-row">
+              <label for="limit">最大选股数量</label>
+              <div class="input-with-unit">
+                <input id="limit" type="number" value="3" min="1" max="100" />
+                <span>只</span>
+              </div>
             </div>
 
-            <div class="form-group">
-              <label for="selection-min-score">分数底线</label>
-              <input id="selection-min-score" type="number" value="60" min="0" max="100" step="1" />
+            <div class="terminal-form-row score-row">
+              <div class="score-row-head">
+                <label for="selection-min-score">评分阈值</label>
+                <input id="selection-min-score" type="number" value="60" min="0" max="100" step="1" />
+              </div>
+              <input id="selection-min-score-range" class="score-range" type="range" min="0" max="100" value="60" step="1" />
+              <div class="score-scale"><span>0</span><span>50</span><span>100</span></div>
             </div>
 
-            <div class="actions">
-              <button class="btn btn-primary" type="submit">运行</button>
+            <div class="terminal-form-row time-row">
+              <label for="selection-run-time-display">运行时间</label>
+              <div class="time-display" id="selection-run-time-display">自动使用最新交易日</div>
+            </div>
+
+            <div class="terminal-actions">
+              <button class="btn btn-primary run-main-btn" type="submit"><span>▶</span> 开始运行选股</button>
               <button id="refresh-strategies" class="btn btn-secondary" type="button">刷新策略</button>
             </div>
           </form>
         </article>
 
-        <article class="card">
+        <article class="card strategy-console-card selection-strategy-panel">
           <div class="card-header with-actions">
             <div>
-              <h2>当前策略摘要</h2>
+              <p class="card-kicker">Strategy</p>
+              <h2>策略详情 & 因子状态</h2>
               <p class="muted" id="selection-top-summary">加载中...</p>
             </div>
             <div class="actions">
-              <a class="btn btn-secondary" href="/strategies">去看策略因子分析</a>
+              <a class="btn btn-secondary" href="/strategies">因子分析</a>
             </div>
           </div>
           <div id="strategy-summary" class="list-stack empty-state">加载中...</div>
+          <div id="selection-factor-bars" class="selection-factor-bars empty-state">因子分布加载中...</div>
+        </article>
+
+        <article class="card selection-run-status-card">
+          <div class="card-header">
+            <p class="card-kicker">Latest Run</p>
+            <h2>最近运行状态</h2>
+          </div>
+          <div class="selection-run-status-grid">
+            <div class="selection-success-ring">
+              <strong id="selection-success-rate">-</strong>
+              <span>达标率</span>
+            </div>
+            <div class="selection-run-metrics">
+              <div><span>运行状态</span><b id="selection-run-state">待运行</b></div>
+              <div><span>最新运行时间</span><b id="selection-run-time">-</b></div>
+              <div><span>达标数量</span><b id="selection-qualified-count">-</b></div>
+              <div><span>平均得分</span><b id="selection-avg-score">-</b></div>
+            </div>
+          </div>
+          <div class="selection-history-mini">
+            <div class="muted">本次结果评分分布</div>
+            <svg id="selection-score-sparkline" viewBox="0 0 320 88" preserveAspectRatio="none"></svg>
+          </div>
         </article>
       </section>
 
-      <section class="card">
+      <section class="card selection-results-console">
         <div class="card-header with-actions">
           <div>
+            <p class="card-kicker">Selection Pool</p>
             <h2>选股结果</h2>
             <p class="muted" id="selection-summary-line">加载中...</p>
           </div>
@@ -101,10 +142,12 @@
             <button id="refresh-results" class="btn btn-secondary" type="button">刷新结果</button>
           </div>
         </div>
+        <div id="selection-result-cards" class="selection-result-cards empty-state">运行选股后，这里会以卡片方式展示本次入选标的。</div>
+
         <form id="selection-filter-form" class="inline-form selection-filter-form">
           <div class="form-group">
-            <label for="selection-run-id">run_id / 留空取最新</label>
-            <input id="selection-run-id" type="text" placeholder="如 selection_20260427_122725" />
+            <label for="selection-run-id">历史结果查询（排查用）</label>
+            <input id="selection-run-id" type="text" placeholder="一般不用填；仅排查历史结果时输入 run_id" />
           </div>
           <div class="form-group">
             <label for="selection-search">搜索股票</label>
@@ -127,7 +170,7 @@
             </select>
           </div>
         </form>
-        <div class="table-wrap">
+        <div class="table-wrap selection-detail-table">
           <table>
             <thead>
               <tr>
@@ -167,7 +210,7 @@
     </main>
   </div>
 
-  <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/selection.js?v=20260428d"></script>
+  <script src="/static/js/common.js?v=20260428e"></script>
+  <script src="/static/js/selection.js?v=20260507d"></script>
 </body>
 </html>

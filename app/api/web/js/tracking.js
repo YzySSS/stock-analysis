@@ -4,6 +4,20 @@ function updateTrackingStats(summary = {}, items = []) {
   qs('#tracking-stat-avg').textContent = formatPercent(summary.avg_return_pct);
   qs('#tracking-stat-win-rate').textContent = formatPercent(summary.win_rate_pct);
   qs('#tracking-stat-excess-return').textContent = formatPercent(summary.excess_return_pct);
+
+  ['#tracking-stat-avg', '#tracking-stat-win-rate', '#tracking-stat-excess-return', '#tracking-stat-max-gain', '#tracking-stat-max-drawdown'].forEach((selector) => {
+    qs(selector).classList.remove('up', 'down');
+  });
+
+  const avgReturnClass = getPctClass(summary.avg_return_pct);
+  if (avgReturnClass) {
+    qs('#tracking-stat-avg').classList.add(avgReturnClass);
+  }
+
+  if (summary.win_rate_pct != null && !Number.isNaN(Number(summary.win_rate_pct))) {
+    qs('#tracking-stat-win-rate').classList.add(Number(summary.win_rate_pct) >= 60 ? 'up' : 'down');
+  }
+
   qs('#tracking-stat-excess-return').classList.remove('up', 'down');
   const excessReturnClass = getPctClass(summary.excess_return_pct);
   if (excessReturnClass) {
@@ -11,6 +25,18 @@ function updateTrackingStats(summary = {}, items = []) {
   }
   qs('#tracking-stat-max-gain').textContent = formatPercent(summary.max_gain_pct);
   qs('#tracking-stat-max-drawdown').textContent = formatPercent(summary.max_drawdown_pct);
+  const maxGainClass = getPctClass(summary.max_gain_pct);
+  if (maxGainClass) {
+    qs('#tracking-stat-max-gain').classList.add(maxGainClass);
+  }
+  const maxDrawdownClass = getPctClass(summary.max_drawdown_pct);
+  if (maxDrawdownClass) {
+    qs('#tracking-stat-max-drawdown').classList.add(maxDrawdownClass);
+  }
+}
+
+function statsToggleLabel(includeInStats) {
+  return includeInStats ? '纳入统计' : '不统计';
 }
 
 function getStrategyLabel(item) {
@@ -130,9 +156,12 @@ let lastTrackingState = {
 function renderTrackingTable(items, summary = {}) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
-    body.innerHTML = renderEmptyRow(13, '暂无跟踪数据');
+    renderTrackingCards([]);
+    body.innerHTML = renderEmptyRow(14, '暂无跟踪数据');
     return;
   }
+
+  renderTrackingCards(items, summary);
 
   body.innerHTML = items.map((item) => {
     const pct = item.price_change_pct;
@@ -144,8 +173,9 @@ function renderTrackingTable(items, summary = {}) {
       : pct >= 0
         ? '已验证正收益'
         : '需重点复盘回撤';
+    const includeInStats = item.include_in_stats !== false;
     return `
-      <tr data-tracking-key="${escapeHtml(`${item.code || ''}__${item.selection_date || ''}__${item.strategy_id || ''}`)}">
+      <tr class="${includeInStats ? '' : 'tracking-excluded-row'}" data-tracking-key="${escapeHtml(`${item.code || ''}__${item.selection_date || ''}__${item.strategy_id || ''}`)}">
         <td>
           <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '')}</a>
           <div class="muted">${escapeHtml(item.code || '')}</div>
@@ -153,7 +183,10 @@ function renderTrackingTable(items, summary = {}) {
         <td>${escapeHtml(getStrategyLabel(item))}</td>
         <td>${escapeHtml(item.selection_date || '')}</td>
         <td>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</td>
-        <td>${formatNumber(item.current_price, 2)}</td>
+        <td>
+          ${formatNumber(item.current_price, 2)}
+          <div class="muted">${escapeHtml(item.realtime_quote_time || '无实时')}</div>
+        </td>
         <td class="${getPctClass(pct)}">${formatPercent(pct)}</td>
         <td class="${getPctClass(excessReturn)}">${formatPercent(excessReturn)}</td>
         <td>${item.tracking_days ?? '-'}</td>
@@ -161,8 +194,54 @@ function renderTrackingTable(items, summary = {}) {
         <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
         <td>${escapeHtml(item.review_status || '-')}</td>
         <td>${escapeHtml(reviewNote)}</td>
+        <td>
+          <button class="btn btn-sm ${includeInStats ? 'btn-secondary' : 'btn-warning'}" type="button" data-action="toggle-tracking-stats" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}" data-include-in-stats="${includeInStats ? 'true' : 'false'}">
+            ${escapeHtml(statsToggleLabel(includeInStats))}
+          </button>
+        </td>
         <td><button class="btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}">删除</button></td>
       </tr>
+    `;
+  }).join('');
+}
+
+function renderTrackingCards(items = [], summary = {}) {
+  const container = qs('#tracking-record-cards');
+  if (!container) return;
+  if (!items.length) {
+    container.classList.add('empty-state');
+    container.innerHTML = '暂无跟踪数据';
+    return;
+  }
+  container.classList.remove('empty-state');
+  container.innerHTML = items.slice(0, 8).map((item) => {
+    const pct = item.price_change_pct;
+    const excessReturn = pct != null && summary.benchmark_return_pct != null
+      ? Number(pct) - Number(summary.benchmark_return_pct)
+      : null;
+    const includeInStats = item.include_in_stats !== false;
+    return `
+      <article class="tracking-record-card ${includeInStats ? '' : 'tracking-excluded-row'}">
+        <div class="tracking-record-head">
+          <div>
+            <a href="/stocks/${encodeURIComponent(item.code || '')}">${escapeHtml(item.name || '-')}</a>
+            <span>${escapeHtml(item.code || '-')} · ${escapeHtml(getStrategyLabel(item))}</span>
+          </div>
+          <em class="${getPctClass(pct) || ''}">${formatPercent(pct)}</em>
+        </div>
+        <div class="tracking-record-grid">
+          <span>入选价 <b>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</b></span>
+          <span>实时价 <b>${formatNumber(item.current_price, 2)}</b></span>
+          <span>超额 <b class="${getPctClass(excessReturn) || ''}">${formatPercent(excessReturn)}</b></span>
+          <span>跟踪 <b>${item.tracking_days ?? '-'} 天</b></span>
+          <span>最大浮盈 <b class="up">${formatPercent(item.max_gain_pct)}</b></span>
+          <span>最大回撤 <b class="down">${formatPercent(item.max_drawdown_pct)}</b></span>
+        </div>
+        <div class="tracking-record-foot">
+          <span>${escapeHtml(item.selection_date || '-')} · ${escapeHtml(item.realtime_quote_time || '无实时')}</span>
+          <span class="badge ${includeInStats ? 'status-ok' : 'status-muted'}">${includeInStats ? '纳入统计' : '不统计'}</span>
+        </div>
+      </article>
     `;
   }).join('');
 }
@@ -257,7 +336,43 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
       : strategyId
         ? '当前显示该策略全部历史复盘列表'
         : '当前显示全部策略历史复盘列表';
-  summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条`;
+  const excludedText = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
+  summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}`;
+}
+
+async function toggleTrackingStats(button) {
+  const code = button?.dataset?.code || '';
+  const selectionDate = button?.dataset?.selectionDate || '';
+  const strategyId = button?.dataset?.strategyId || '';
+  const includeInStats = button?.dataset?.includeInStats !== 'false';
+  const instrumentType = lastTrackingState.instrumentType || 'stock';
+  if (!code || !selectionDate || !strategyId) {
+    qs('#tracking-summary-text').textContent = '切换统计状态失败：当前行缺少 code / selection_date / strategy_id';
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    const nextValue = !includeInStats;
+    const query = new URLSearchParams({ code, selection_date: selectionDate, strategy_id: strategyId, instrument_type: instrumentType });
+    await fetchJson(`/api/tracking/item/stats?${query.toString()}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ include_in_stats: nextValue }),
+    });
+    qs('#tracking-summary-text').textContent = nextValue
+      ? `已将 ${code} 重新纳入统计`
+      : `已将 ${code} 标记为不统计`;
+    await loadTrackingData({
+      strategyId: lastTrackingState.strategyId,
+      limit: lastTrackingState.limit,
+      instrumentType,
+      selectionDate: lastTrackingState.selectionDate,
+      offset: lastTrackingState.offset,
+    });
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function deleteTrackingItem(button) {
@@ -300,9 +415,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const nextBtn = qs('#tracking-next-page');
 
   qs('#tracking-results-body').addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-action="delete-tracking-item"]');
-    if (!button) return;
-    await deleteTrackingItem(button);
+    const statsButton = event.target.closest('[data-action="toggle-tracking-stats"]');
+    if (statsButton) {
+      await toggleTrackingStats(statsButton);
+      return;
+    }
+    const deleteButton = event.target.closest('[data-action="delete-tracking-item"]');
+    if (!deleteButton) return;
+    await deleteTrackingItem(deleteButton);
   });
 
   strategySelect?.addEventListener('change', async () => {
