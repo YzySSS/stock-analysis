@@ -7,7 +7,7 @@ from app.stock_selection.selector import StockSelector
 
 
 class StrategyService:
-    RUNTIME_READY_IDS = {"lowvol_reversal"}
+    RUNTIME_READY_IDS = {"lowvol_reversal", "v13_three_factor", "v12_legacy"}
 
     def __init__(self, registry_path: Optional[str] = None):
         self.loader = StrategyLoader(registry_path=registry_path)
@@ -22,7 +22,7 @@ class StrategyService:
         if runtime_ready:
             availability = "runtime_ready"
             availability_label = "可执行"
-            availability_note = "当前已接通 V1 执行链路，可直接运行并保存结果。"
+            availability_note = "当前已接通选股中心执行链路，可直接运行并保存结果。"
         elif executable and status == "experimental":
             availability = "experimental"
             availability_label = "实验中"

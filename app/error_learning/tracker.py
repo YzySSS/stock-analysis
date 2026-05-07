@@ -52,6 +52,7 @@ class SelectionResultTracker:
             sr.strategy_id,
             sr.code,
             sr.score,
+            COALESCE(sr.include_in_stats, 1) AS include_in_stats,
             sr.metadata_json,
             sb.name,
             sb.industry,
@@ -63,7 +64,14 @@ class SelectionResultTracker:
             period_dk.trade_day_count AS trade_day_count,
             COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
             latest_dk.trade_date AS latest_trade_date,
-            latest_dk.close AS current_price
+            latest_dk.close AS daily_current_price,
+            realtime.latest_price AS realtime_price,
+            realtime.pct_chg AS realtime_pct_chg,
+            realtime.quote_time AS realtime_quote_time,
+            realtime.trade_date AS realtime_trade_date,
+            realtime.high_price AS realtime_high_price,
+            realtime.low_price AS realtime_low_price,
+            COALESCE(realtime.latest_price, latest_dk.close) AS current_price
         FROM selection_result sr
         INNER JOIN stock_basic sb ON sr.code = sb.code
         LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date
@@ -82,6 +90,7 @@ class SelectionResultTracker:
                 GROUP BY code
             ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
         ) latest_dk ON sr.code = latest_dk.code
+        LEFT JOIN stock_realtime_snapshot realtime ON sr.code = realtime.code
         LEFT JOIN (
             SELECT
                 sr_inner.id AS selection_result_id,
@@ -131,6 +140,7 @@ class SelectionResultTracker:
                 sr.strategy_id,
                 sr.code,
                 sr.score,
+                COALESCE(sr.include_in_stats, 1) AS include_in_stats,
                 sr.metadata_json,
                 sb.name,
                 sb.industry,
@@ -142,7 +152,14 @@ class SelectionResultTracker:
                 period_dk.trade_day_count AS trade_day_count,
                 COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
                 latest_dk.trade_date AS latest_trade_date,
-                latest_dk.close AS current_price
+                latest_dk.close AS daily_current_price,
+                realtime.latest_price AS realtime_price,
+                realtime.pct_chg AS realtime_pct_chg,
+                realtime.quote_time AS realtime_quote_time,
+                realtime.trade_date AS realtime_trade_date,
+                realtime.high_price AS realtime_high_price,
+                realtime.low_price AS realtime_low_price,
+                COALESCE(realtime.latest_price, latest_dk.close) AS current_price
             FROM selection_result sr
             INNER JOIN (
                 SELECT code, trade_date, strategy_id, MAX(id) AS max_id
@@ -159,6 +176,7 @@ class SelectionResultTracker:
             sql += " LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date "
             sql += " LEFT JOIN daily_kline metadata_selected_dk ON sr.code = metadata_selected_dk.code AND metadata_selected_dk.trade_date = CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d') END "
             sql += " LEFT JOIN ( SELECT d1.code, d1.trade_date, d1.close FROM daily_kline d1 INNER JOIN ( SELECT code, MAX(trade_date) AS max_date FROM daily_kline GROUP BY code ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date ) latest_dk ON sr.code = latest_dk.code "
+            sql += " LEFT JOIN stock_realtime_snapshot realtime ON sr.code = realtime.code "
             sql += " LEFT JOIN ( SELECT sr_inner.id AS selection_result_id, MAX(dk.high) AS max_high, MIN(dk.low) AS min_low, GREATEST(COUNT(DISTINCT dk.trade_date) - 1, 0) AS trade_day_count FROM selection_result sr_inner INNER JOIN daily_kline dk ON dk.code = sr_inner.code AND dk.trade_date BETWEEN sr_inner.trade_date AND (SELECT MAX(trade_date) FROM daily_kline) GROUP BY sr_inner.id ) period_dk ON sr.id = period_dk.selection_result_id "
             sql += " WHERE sb.instrument_type = %s "
             params.append(instrument_type)
@@ -189,7 +207,14 @@ class SelectionResultTracker:
             dk.open AS selected_open_price,
             dk.close AS selected_close_price,
             dk.trade_date AS latest_trade_date,
-            dk.close AS current_price
+            dk.close AS daily_current_price,
+            realtime.latest_price AS realtime_price,
+            realtime.pct_chg AS realtime_pct_chg,
+            realtime.quote_time AS realtime_quote_time,
+            realtime.trade_date AS realtime_trade_date,
+            realtime.high_price AS realtime_high_price,
+            realtime.low_price AS realtime_low_price,
+            COALESCE(realtime.latest_price, dk.close) AS current_price
         FROM stock_basic sb
         LEFT JOIN (
             SELECT d1.code, d1.trade_date, d1.open, d1.close
@@ -200,6 +225,7 @@ class SelectionResultTracker:
                 GROUP BY code
             ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
         ) dk ON sb.code = dk.code
+        LEFT JOIN stock_realtime_snapshot realtime ON sb.code = realtime.code
         WHERE sb.is_delisted = 0
           AND sb.instrument_type = %s
         ORDER BY (dk.trade_date IS NULL), dk.trade_date DESC, sb.code
@@ -244,10 +270,23 @@ class SelectionResultTracker:
             return None
         return max((end - start).days, 0)
 
+    @staticmethod
+    def _combine_period_extreme(period_value: float | None, realtime_value: float | None, prefer_max: bool) -> float | None:
+        values = [value for value in [period_value, realtime_value] if value is not None]
+        if not values:
+            return None
+        return max(values) if prefer_max else min(values)
+
     def _build_record_from_selection_result(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
         selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
+        daily_current_price = self._to_float(row.get("daily_current_price"))
+        realtime_price = self._to_float(row.get("realtime_price"))
+        realtime_pct_chg = self._to_float(row.get("realtime_pct_chg"))
+        realtime_quote_time = str(row["realtime_quote_time"]) if row.get("realtime_quote_time") else None
+        realtime_high_price = self._to_float(row.get("realtime_high_price"))
+        realtime_low_price = self._to_float(row.get("realtime_low_price"))
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
         metric_trade_date = str(row["metric_trade_date"]) if row.get("metric_trade_date") else latest_trade_date
         selection_dt = self._to_date(row.get("selection_date"))
@@ -258,14 +297,15 @@ class SelectionResultTracker:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
         tracking_days = self._calc_tracking_days(selection_dt, latest_dt, row.get("trade_day_count"))
         review_status = "tracking" if latest_dt and selection_dt and latest_dt >= selection_dt else "pending"
-        period_max_high = self._to_float(row.get("period_max_high"))
-        period_min_low = self._to_float(row.get("period_min_low"))
+        period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_high_price, prefer_max=True)
+        period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_low_price, prefer_max=False)
         max_gain_pct = None
         max_drawdown_pct = None
-        if selected_open_price and period_max_high:
-            max_gain_pct = round((period_max_high - selected_open_price) / selected_open_price * 100, 2)
-        if selected_open_price and period_min_low:
-            max_drawdown_pct = round((period_min_low - selected_open_price) / selected_open_price * 100, 2)
+        period_base_price = selected_open_price or selected_close_price
+        if period_base_price and period_max_high:
+            max_gain_pct = round((period_max_high - period_base_price) / period_base_price * 100, 2)
+        if period_base_price and period_min_low:
+            max_drawdown_pct = round((period_min_low - period_base_price) / period_base_price * 100, 2)
 
         metadata = row.get("metadata_json")
         if isinstance(metadata, str):
@@ -280,6 +320,14 @@ class SelectionResultTracker:
             selected_open_price = self._to_float(raw_metrics.get("open"))
         if selected_close_price is None:
             selected_close_price = self._to_float(raw_metrics.get("close"))
+        base_price = selected_open_price or selected_close_price
+        if base_price and current_price:
+            price_change_pct = round((current_price - base_price) / base_price * 100, 2)
+        period_base_price = selected_open_price or selected_close_price
+        if period_base_price and period_max_high:
+            max_gain_pct = round((period_max_high - period_base_price) / period_base_price * 100, 2)
+        if period_base_price and period_min_low:
+            max_drawdown_pct = round((period_min_low - period_base_price) / period_base_price * 100, 2)
         summary = explain.get("summary", {}) or {}
         factor_scores = {
             **raw_metrics,
@@ -308,6 +356,7 @@ class SelectionResultTracker:
             strategy_version=metadata.get("strategy_version"),
             industry=row.get("industry"),
             score=self._to_float(row.get("score")),
+            include_in_stats=bool(row.get("include_in_stats", 1)),
             factor_scores=factor_scores,
             selected_open_price=selected_open_price,
             selected_close_price=selected_close_price,
@@ -320,12 +369,21 @@ class SelectionResultTracker:
             review_status=review_status,
             max_gain_pct=max_gain_pct,
             max_drawdown_pct=max_drawdown_pct,
+            daily_current_price=daily_current_price,
+            realtime_price=realtime_price,
+            realtime_pct_chg=realtime_pct_chg,
+            realtime_quote_time=realtime_quote_time,
+            realtime_price_change_pct=price_change_pct if realtime_price is not None else None,
         )
 
     def _build_record_from_snapshot(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
         selected_close_price = self._to_float(row.get("selected_close_price"))
         current_price = self._to_float(row.get("current_price"))
+        daily_current_price = self._to_float(row.get("daily_current_price"))
+        realtime_price = self._to_float(row.get("realtime_price"))
+        realtime_pct_chg = self._to_float(row.get("realtime_pct_chg"))
+        realtime_quote_time = str(row["realtime_quote_time"]) if row.get("realtime_quote_time") else None
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
         selection_dt = self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
@@ -376,6 +434,11 @@ class SelectionResultTracker:
             review_status=review_status,
             max_gain_pct=max_gain_pct,
             max_drawdown_pct=max_drawdown_pct,
+            daily_current_price=daily_current_price,
+            realtime_price=realtime_price,
+            realtime_pct_chg=realtime_pct_chg,
+            realtime_quote_time=realtime_quote_time,
+            realtime_price_change_pct=price_change_pct if realtime_price is not None else None,
         )
 
     def to_dict_list(self, records: List[SelectionTrackingRecord]) -> List[Dict[str, Any]]:
@@ -390,6 +453,7 @@ class SelectionResultTracker:
                 "selection_date": item.selection_date,
                 "strategy_id": item.strategy_id,
                 "score": item.score,
+                "include_in_stats": item.include_in_stats,
                 "strategy_display_name": item.strategy_display_name,
                 "strategy_version": item.strategy_version,
                 "industry": item.industry,
@@ -398,6 +462,11 @@ class SelectionResultTracker:
                 "selected_open_price": item.selected_open_price,
                 "selected_close_price": item.selected_close_price,
                 "current_price": item.current_price,
+                "daily_current_price": item.daily_current_price,
+                "realtime_price": item.realtime_price,
+                "realtime_pct_chg": item.realtime_pct_chg,
+                "realtime_quote_time": item.realtime_quote_time,
+                "realtime_price_change_pct": item.realtime_price_change_pct,
                 "latest_trade_date": item.latest_trade_date,
                 "price_change_pct": item.price_change_pct,
                 "reason_summary": item.reason_summary or [],

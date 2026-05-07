@@ -25,17 +25,22 @@ class NewsFilter:
         '新华社': 1.0, '人民日报': 1.0, '央视': 1.0, '央视新闻': 1.0,
         '中国证券报': 0.95, '上海证券报': 0.95, '证券时报': 0.95, '证券日报': 0.95,
         '经济观察报': 0.9, '第一财经': 0.9, '财联社': 0.9, '华尔街见闻': 0.9,
+        '南方财经': 0.85, '南方财经网': 0.85, '每日经济新闻': 0.85, '证券时报网': 0.95,
         
         # 主流财经门户 (0.7-0.8)
-        '东方财富': 0.8, '新浪财经': 0.8, '同花顺': 0.8, '雪球': 0.75,
+        '东方财富': 0.8, 'eastmoney.com': 0.8, 'emweb.eastmoney.com': 0.75,
+        '新浪财经': 0.8, 'finance.sina.com.cn': 0.8, 'money.finance.sina.com.cn': 0.75, 'stock.finance.sina.com.cn': 0.75,
+        '同花顺': 0.8, '10jqka.com.cn': 0.75, 'basic.10jqka.com.cn': 0.55, 'm.10jqka.com.cn': 0.55,
+        '雪球': 0.75,
         '搜狐财经': 0.7, '网易财经': 0.7, '腾讯财经': 0.7,
         
         # 行业媒体 (0.6-0.7)
         '36氪': 0.65, '虎嗅': 0.65, '界面新闻': 0.7, '财新网': 0.75,
+        '格隆汇': 0.65, '智通财经': 0.65,
         
         # 自媒体/论坛 (0.3-0.5)
         '微博': 0.4, '微信公众号': 0.4, '知乎': 0.45,
-        '股吧': 0.3, '雪球讨论': 0.5,
+        '股吧': 0.3, 'guba.sina.com.cn': 0.35, '雪球讨论': 0.5,
     }
     
     # 低质量关键词（标题党、无实质内容）
@@ -59,7 +64,7 @@ class NewsFilter:
     # 重复内容检测（相似度阈值）
     SIMILARITY_THRESHOLD = 0.7
     
-    def __init__(self, min_credibility: float = 0.3, max_age_days: int = 7):
+    def __init__(self, min_credibility: float = 0.3, max_age_days: int = 7, min_quality_score: float = 45):
         """
         初始化过滤器
         
@@ -69,6 +74,7 @@ class NewsFilter:
         """
         self.min_credibility = min_credibility
         self.max_age_days = max_age_days
+        self.min_quality_score = min_quality_score
         self.seen_titles = set()  # 用于去重
     
     def get_source_credibility(self, source: str) -> float:
@@ -124,6 +130,16 @@ class NewsFilter:
             return True
         
         return False
+
+    def is_readable_text(self, text: str) -> bool:
+        """过滤明显乱码/编码错误文本。"""
+        if not text:
+            return False
+        compact = re.sub(r'\s+', '', text)
+        if not compact:
+            return False
+        readable = re.findall(r'[A-Za-z0-9\u4e00-\u9fff]', compact)
+        return len(readable) / max(len(compact), 1) >= 0.45
     
     def is_relevant(self, news: Dict, stock_code: str, stock_name: str) -> bool:
         """检查新闻是否与股票相关"""
@@ -255,9 +271,12 @@ class NewsFilter:
             if credibility < self.min_credibility:
                 continue
             
-            # 2. 检查标题质量
+            # 2. 检查明显无效标题。标题党词汇不直接一刀切，交给质量分降权，
+            # 避免误杀“涨停后公告”“刚刚披露年报”等仍有信息量的财经新闻。
             title = news.get('title', '')
-            if self.is_low_quality_title(title):
+            if not title or len(title.strip()) < 10:
+                continue
+            if not self.is_readable_text(title):
                 continue
             
             # 3. 检查相关性（如果提供了股票代码）
@@ -276,6 +295,8 @@ class NewsFilter:
             
             # 6. 计算质量分
             quality_score = self.calculate_quality_score(news)
+            if quality_score < self.min_quality_score:
+                continue
             news['quality_score'] = quality_score
             
             filtered.append(news)
@@ -294,7 +315,8 @@ class NewsFilter:
         return {
             'seen_titles': len(self.seen_titles),
             'min_credibility': self.min_credibility,
-            'max_age_days': self.max_age_days
+            'max_age_days': self.max_age_days,
+            'min_quality_score': self.min_quality_score,
         }
 
 

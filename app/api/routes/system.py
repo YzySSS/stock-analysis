@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import time
 from fastapi import APIRouter
 
 from app.shared.db import mysql_conn, ping_mysql
 
 router = APIRouter(tags=["system"])
+
+SYSTEM_STATUS_CACHE_TTL_SECONDS = 60
+_SYSTEM_STATUS_CACHE: dict | None = None
+_SYSTEM_STATUS_CACHE_AT = 0.0
 
 
 TRACKED_TASKS = [
@@ -13,6 +18,13 @@ TRACKED_TASKS = [
     "daily_kline_backfill",
     "fundamental_sync",
     "valuation_sync",
+    "stock_status_snapshot_refresh",
+    "factor_input_history_backfill",
+    "factor_input_daily_update",
+    "market_context_daily_update",
+    "stock_sentiment_daily_update",
+    "stock_realtime_snapshot_update",
+    "market_fund_flow_update",
 ]
 
 KLINE_LATEST_SAMPLE_LIMIT = 20
@@ -23,7 +35,68 @@ TASK_NAME_LABELS = {
     "fundamental_sync": "基本面补齐",
     "valuation_sync": "估值补齐",
     "stock_status_snapshot_refresh": "状态快照刷新",
+    "factor_input_history_backfill": "历史输入层回填",
+    "factor_input_daily_update": "历史输入层日更",
+    "market_context_daily_update": "市场强度日更",
+    "stock_sentiment_daily_update": "真实舆情日更",
+    "stock_realtime_snapshot_update": "实时行情分钟快照",
+    "market_fund_flow_update": "板块资金流快照",
 }
+
+
+def _basic_data_ranges() -> dict:
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS rows_count,
+                    COUNT(DISTINCT code) AS covered_stock_codes,
+                    COUNT(DISTINCT trade_date) AS covered_trade_days,
+                    MIN(trade_date) AS earliest_trade_date,
+                    MAX(trade_date) AS latest_trade_date,
+                    MAX(updated_at) AS last_updated_at
+                FROM daily_kline
+                """
+            )
+            daily = cursor.fetchone() or {}
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS rows_count,
+                    COUNT(DISTINCT code) AS covered_stock_codes,
+                    COUNT(DISTINCT trade_date) AS covered_trade_days,
+                    MIN(trade_date) AS earliest_trade_date,
+                    MAX(trade_date) AS latest_trade_date,
+                    MAX(updated_at) AS last_updated_at
+                FROM factor_input_daily
+                """
+            )
+            factor = cursor.fetchone() or {}
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS rows_count,
+                    SUM(instrument_type='stock') AS covered_stock_codes,
+                    MAX(updated_at) AS last_updated_at,
+                    MAX(fundamental_updated_at) AS fundamental_last_updated_at,
+                    MAX(valuation_updated_at) AS valuation_last_updated_at
+                FROM stock_basic
+                """
+            )
+            basic = cursor.fetchone() or {}
+
+    def normalize(row: dict) -> dict:
+        return {
+            key: (str(value) if value is not None and key.endswith(("date", "at")) else int(value) if value is not None and key in {"rows_count", "covered_stock_codes", "covered_trade_days"} else value)
+            for key, value in row.items()
+        }
+
+    return {
+        "daily_kline": normalize(daily),
+        "factor_input_daily": normalize(factor),
+        "stock_basic": normalize(basic),
+    }
 
 
 def _scalar(sql: str) -> int | None:
@@ -154,6 +227,95 @@ def _kline_latest_shortfall() -> dict:
             }
 
 
+def _kline_history_completeness() -> dict:
+    """Measure daily kline completeness by trade date.
+
+    Code-level coverage can be 100% while many historical trade dates only contain
+    a partial market slice.  Use current stock_basic listing_date as a pragmatic
+    expected universe for each trade date, then compare actual daily_kline rows.
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT trade_date, COUNT(*) AS actual_count
+                FROM daily_kline
+                GROUP BY trade_date
+                ORDER BY trade_date DESC
+                """
+            )
+            daily_rows = cursor.fetchall() or []
+            cursor.execute(
+                """
+                SELECT listing_date, COUNT(*) AS count
+                FROM stock_basic
+                WHERE instrument_type = 'stock' AND is_delisted = 0
+                GROUP BY listing_date
+                """
+            )
+            listing_rows = cursor.fetchall() or []
+
+    null_listing_count = 0
+    listing_counts: list[tuple[str, int]] = []
+    for row in listing_rows:
+        count = int(row.get("count") or 0)
+        listing_date = row.get("listing_date")
+        if listing_date is None:
+            null_listing_count += count
+        else:
+            listing_counts.append((str(listing_date), count))
+    listing_counts.sort(key=lambda item: item[0])
+
+    expected_by_date: dict[str, int] = {}
+    running_expected = null_listing_count
+    idx = 0
+    asc_trade_dates = sorted(str(row.get("trade_date")) for row in daily_rows if row.get("trade_date"))
+    for trade_date in asc_trade_dates:
+        while idx < len(listing_counts) and listing_counts[idx][0] <= trade_date:
+            running_expected += listing_counts[idx][1]
+            idx += 1
+        expected_by_date[trade_date] = running_expected
+
+    total_days = len(daily_rows)
+    complete_99 = 0
+    complete_95 = 0
+    low_days = []
+    recent_low_days = []
+    min_pct = None
+    for row in daily_rows:
+        trade_date = str(row.get("trade_date")) if row.get("trade_date") else None
+        actual_count = int(row.get("actual_count") or 0)
+        expected_count = int(expected_by_date.get(trade_date or "", 0))
+        pct = round((actual_count / expected_count) * 100, 2) if expected_count else 0
+        min_pct = pct if min_pct is None else min(min_pct, pct)
+        if pct >= 99:
+            complete_99 += 1
+        if pct >= 95:
+            complete_95 += 1
+        item = {
+            "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+            "actual_count": actual_count,
+            "expected_count": expected_count,
+            "completeness_pct": pct,
+            "missing_count": max(expected_count - actual_count, 0),
+        }
+        if pct < 95:
+            low_days.append(item)
+        if pct < 95 and len(recent_low_days) < 20:
+            recent_low_days.append(item)
+
+    return {
+        "total_trade_days": total_days,
+        "complete_days_99_pct": complete_99,
+        "complete_days_95_pct": complete_95,
+        "complete_days_99_ratio_pct": round(complete_99 / total_days * 100, 2) if total_days else None,
+        "complete_days_95_ratio_pct": round(complete_95 / total_days * 100, 2) if total_days else None,
+        "low_completeness_days": len(low_days),
+        "min_completeness_pct": min_pct,
+        "recent_low_days": recent_low_days,
+    }
+
+
 def _fetch_stock_status_snapshot_map(trade_date: str) -> dict[str, dict]:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -199,6 +361,155 @@ def _latest_dates() -> dict:
                 key: str(value) if value is not None else None
                 for key, value in row.items()
             }
+
+
+def _data_baseline_summary() -> dict:
+    """Lightweight coverage cards for /system.
+
+    Keep this bounded to simple aggregate queries and cache the whole endpoint.
+    """
+    latest = _latest_dates()
+    latest_kline_date = latest.get("daily_kline_latest_trade_date")
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total FROM stock_basic WHERE instrument_type='stock'")
+            total_stock = int((cursor.fetchone() or {}).get("total") or 0)
+
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM daily_kline WHERE trade_date = %s",
+                (latest_kline_date,),
+            )
+            kline_count = int((cursor.fetchone() or {}).get("count") or 0) if latest_kline_date else 0
+
+            cursor.execute(
+                """
+                SELECT
+                  SUM(CASE WHEN roe IS NOT NULL OR roa IS NOT NULL OR grossprofit_margin IS NOT NULL OR revenue_yoy IS NOT NULL THEN 1 ELSE 0 END) AS fundamental_count,
+                  SUM(CASE WHEN pe_tushare IS NOT NULL OR pb_tushare IS NOT NULL THEN 1 ELSE 0 END) AS valuation_count
+                FROM stock_basic
+                WHERE instrument_type='stock'
+                """
+            )
+            stock_row = cursor.fetchone() or {}
+            fundamental_count = int(stock_row.get("fundamental_count") or 0)
+            valuation_count = int(stock_row.get("valuation_count") or 0)
+
+            cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM factor_input_daily")
+            factor_date = (cursor.fetchone() or {}).get("latest_trade_date")
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM factor_input_daily WHERE trade_date = %s",
+                (factor_date,),
+            )
+            factor_count = int((cursor.fetchone() or {}).get("count") or 0) if factor_date else 0
+
+            cursor.execute("SELECT COUNT(*) AS total, SUM(CASE WHEN latest_price IS NOT NULL AND latest_price > 0 THEN 1 ELSE 0 END) AS valid FROM stock_realtime_snapshot WHERE code REGEXP '^(sh|sz|bj)\\.'")
+            realtime_row = cursor.fetchone() or {}
+            realtime_total = int(realtime_row.get("total") or 0)
+            realtime_valid = int(realtime_row.get("valid") or 0)
+
+            cursor.execute("SELECT COUNT(*) AS total, SUM(CASE WHEN net_amount IS NOT NULL THEN 1 ELSE 0 END) AS valid FROM market_sector_fund_flow_snapshot")
+            fund_flow_row = cursor.fetchone() or {}
+            fund_flow_total = int(fund_flow_row.get("total") or 0)
+            fund_flow_valid = int(fund_flow_row.get("valid") or 0)
+
+    sentiment = _sentiment_quality_stats()
+    sentiment_effective = int(sentiment.get("effective_news_count") or 0)
+    sentiment_raw = int(sentiment.get("raw_news_count") or 0)
+
+    def pct(done: int, total: int) -> float | None:
+        return round(done / total * 100, 2) if total else None
+
+    return {
+        "items": [
+            {"key": "kline", "label": "日K线", "value": pct(kline_count, total_stock), "done": kline_count, "total": total_stock, "unit": "记录数"},
+            {"key": "fundamental", "label": "基本面", "value": pct(fundamental_count, total_stock), "done": fundamental_count, "total": total_stock, "unit": "记录数"},
+            {"key": "valuation", "label": "估值数据", "value": pct(valuation_count, total_stock), "done": valuation_count, "total": total_stock, "unit": "记录数"},
+            {"key": "factor", "label": "因子输入", "value": pct(factor_count, total_stock), "done": factor_count, "total": total_stock, "unit": "记录数"},
+            {"key": "realtime", "label": "实时快照", "value": pct(realtime_valid, realtime_total), "done": realtime_valid, "total": realtime_total, "unit": "记录数"},
+            {"key": "fundflow", "label": "板块资金流", "value": pct(fund_flow_valid, fund_flow_total), "done": fund_flow_valid, "total": fund_flow_total, "unit": "记录数"},
+            {"key": "sentiment", "label": "情绪质量", "value": sentiment.get("avg_quality"), "done": sentiment_effective, "total": sentiment_raw, "unit": "有效新闻 / 总新闻"},
+        ]
+    }
+
+
+def _sentiment_quality_stats() -> dict:
+    """Lightweight news quality snapshot for the system page.
+
+    Keep this query bounded to stock_sentiment_daily/stock_news aggregates so
+    /api/system/status stays fast and does not scan行情/因子大表。
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM stock_sentiment_daily")
+            latest_row = cursor.fetchone() or {}
+            latest_trade_date = latest_row.get("latest_trade_date")
+            if not latest_trade_date:
+                return {
+                    "latest_trade_date": None,
+                    "stock_count": 0,
+                    "raw_news_count": 0,
+                    "effective_news_count": 0,
+                    "filtered_out_count": 0,
+                    "filtered_out_pct": None,
+                    "avg_credibility": None,
+                    "avg_quality": None,
+                    "quality_levels": [],
+                    "credibility_levels": [],
+                }
+
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS stock_count,
+                    COALESCE(SUM(CASE WHEN raw_news_count > 0 THEN raw_news_count ELSE news_count END), 0) AS raw_news_count,
+                    COALESCE(SUM(news_count), 0) AS effective_news_count,
+                    AVG(credibility_avg) AS avg_credibility,
+                    AVG(quality_avg) AS avg_quality
+                FROM stock_sentiment_daily
+                WHERE trade_date = %s
+                """,
+                (latest_trade_date,),
+            )
+            row = cursor.fetchone() or {}
+            raw_news_count = int(row.get("raw_news_count") or 0)
+            effective_news_count = int(row.get("effective_news_count") or 0)
+            filtered_out_count = max(raw_news_count - effective_news_count, 0)
+
+            cursor.execute(
+                """
+                SELECT quality_level, COUNT(*) AS count
+                FROM stock_news
+                WHERE quality_level IS NOT NULL
+                  AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                GROUP BY quality_level
+                ORDER BY FIELD(quality_level, 'high', 'medium', 'low', 'very_low'), quality_level
+                """
+            )
+            quality_levels = cursor.fetchall() or []
+            cursor.execute(
+                """
+                SELECT credibility_level, COUNT(*) AS count
+                FROM stock_news
+                WHERE credibility_level IS NOT NULL
+                  AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                GROUP BY credibility_level
+                ORDER BY FIELD(credibility_level, 'S', 'A', 'B', 'C', 'D'), credibility_level
+                """
+            )
+            credibility_levels = cursor.fetchall() or []
+
+    return {
+        "latest_trade_date": str(latest_trade_date),
+        "stock_count": int(row.get("stock_count") or 0),
+        "raw_news_count": raw_news_count,
+        "effective_news_count": effective_news_count,
+        "filtered_out_count": filtered_out_count,
+        "filtered_out_pct": round(filtered_out_count / raw_news_count * 100, 2) if raw_news_count else None,
+        "avg_credibility": round(float(row.get("avg_credibility")), 4) if row.get("avg_credibility") is not None else None,
+        "avg_quality": round(float(row.get("avg_quality")), 2) if row.get("avg_quality") is not None else None,
+        "quality_levels": [{"level": item.get("quality_level"), "count": int(item.get("count") or 0)} for item in quality_levels],
+        "credibility_levels": [{"level": item.get("credibility_level"), "count": int(item.get("count") or 0)} for item in credibility_levels],
+    }
 
 
 def _field_missing_stats() -> dict:
@@ -403,27 +714,54 @@ def _latest_task_runs() -> list[dict]:
     return items
 
 
+def _scheduled_tasks() -> list[dict]:
+    return [
+        {"task_name": "daily_kline_increment", "task_label": "日线增量更新", "schedule": "每天 02:00"},
+        {"task_name": "daily_kline_backfill", "task_label": "历史日线补齐", "schedule": "每天 02:15"},
+        {"task_name": "fundamental_sync", "task_label": "基本面补齐", "schedule": "每天 02:40"},
+        {"task_name": "valuation_sync", "task_label": "估值补齐", "schedule": "每天 02:50"},
+        {"task_name": "stock_status_snapshot_refresh", "task_label": "状态快照刷新", "schedule": "每天 03:05"},
+        {"task_name": "factor_input_history_backfill", "task_label": "历史输入层回填", "schedule": "按需 / 后台批次"},
+        {"task_name": "factor_input_daily_update", "task_label": "历史输入层日更", "schedule": "每天 03:20"},
+        {"task_name": "market_context_daily_update", "task_label": "市场强度日更", "schedule": "每天 03:35"},
+        {"task_name": "stock_sentiment_daily_update", "task_label": "真实舆情日更", "schedule": "每天 03:50"},
+        {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内判断盘中时间/失败降级"},
+        {"task_name": "market_fund_flow_update", "task_label": "板块资金流快照", "schedule": "交易日 09:00-15:59 每 3 分钟"},
+    ]
+
+
 @router.get("/system/status")
 def system_status() -> dict:
-    mysql_info = ping_mysql()
-    table_counts = {
-        "stock_basic": _scalar("SELECT COUNT(*) AS count FROM stock_basic"),
-        "daily_kline": _scalar("SELECT COUNT(*) AS count FROM daily_kline"),
-        "selection_result": _scalar("SELECT COUNT(*) AS count FROM selection_result"),
-    }
+    global _SYSTEM_STATUS_CACHE, _SYSTEM_STATUS_CACHE_AT
+    now = time.monotonic()
+    if _SYSTEM_STATUS_CACHE and now - _SYSTEM_STATUS_CACHE_AT < SYSTEM_STATUS_CACHE_TTL_SECONDS:
+        cached = dict(_SYSTEM_STATUS_CACHE)
+        cached["cache"] = {
+            "hit": True,
+            "ttl_seconds": SYSTEM_STATUS_CACHE_TTL_SECONDS,
+            "age_seconds": round(now - _SYSTEM_STATUS_CACHE_AT, 2),
+        }
+        return cached
 
-    return {
+    mysql_info = ping_mysql()
+    payload = {
         "status": "ok",
         "health": {
             "status": "ok",
             "database": mysql_info.get("db"),
             "version": mysql_info.get("version"),
         },
-        "table_counts": table_counts,
-        "coverage": _coverage_stats(),
-        "kline_latest_shortfall": _kline_latest_shortfall(),
         "latest": _latest_dates(),
+        "sentiment_quality": _sentiment_quality_stats(),
+        "data_baseline": _data_baseline_summary(),
+        "scheduled_tasks": _scheduled_tasks(),
         "task_runs": _latest_task_runs(),
-        "field_missing": _field_missing_stats(),
-        "valuation_gap_breakdown": _valuation_gap_breakdown(),
     }
+    _SYSTEM_STATUS_CACHE = dict(payload)
+    _SYSTEM_STATUS_CACHE_AT = now
+    payload["cache"] = {
+        "hit": False,
+        "ttl_seconds": SYSTEM_STATUS_CACHE_TTL_SECONDS,
+        "age_seconds": 0,
+    }
+    return payload

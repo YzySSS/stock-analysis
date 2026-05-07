@@ -11,7 +11,7 @@ PAGES_DIR = WEB_DIR / "pages"
 
 
 def serve_page(filename: str) -> FileResponse:
-    return FileResponse(PAGES_DIR / filename)
+    return FileResponse(PAGES_DIR / filename, headers={"Cache-Control": "no-cache"})
 
 
 @router.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
@@ -39,9 +39,34 @@ def strategies_page() -> FileResponse:
     return serve_page("strategies.html")
 
 
+@router.get("/backtest", include_in_schema=False)
+def backtest_page() -> FileResponse:
+    return serve_page("backtest.html")
+
+
 @router.get("/system", include_in_schema=False)
 def system_page() -> FileResponse:
     return serve_page("system.html")
+
+
+@router.get("/ui-reference/stock-detail", include_in_schema=False)
+def stock_detail_ui_reference_page() -> FileResponse:
+    return serve_page("ui-reference.html")
+
+
+@router.get("/ui-reference/image2", include_in_schema=False)
+def stock_detail_image2_ui_reference_page() -> FileResponse:
+    return serve_page("ui-image2-preview.html")
+
+
+@router.get("/ui-reference/pages", include_in_schema=False)
+def pages_image2_ui_reference_page() -> FileResponse:
+    return serve_page("ui-pages-preview.html")
+
+
+@router.get("/ui-reference/simple", include_in_schema=False)
+def simple_image2_ui_reference_page() -> FileResponse:
+    return serve_page("ui-simple-preview.html")
 
 
 @router.get("/stocks/{code}", include_in_schema=False)

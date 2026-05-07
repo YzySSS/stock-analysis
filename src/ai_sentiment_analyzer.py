@@ -28,7 +28,7 @@ class NewsSearcher:
         self.serpapi_key = os.getenv("SERPAPI_KEY")
         self.minimax_key = os.getenv("MINIMAX_API_KEY")
         
-        # 使用新闻聚合器（AkShare免费 + Coze Web Search）
+        # 使用新闻聚合器（Tavily 主源 + AkShare/DuckDuckGo/RSS fallback）
         self.aggregator = NewsAggregator()
     
     def search_stock_news(self, stock_code: str, stock_name: str, days: int = 3) -> List[Dict]:
@@ -43,7 +43,7 @@ class NewsSearcher:
         Returns:
             新闻列表
         """
-        # 方案1: 使用聚合器（AkShare免费 + Coze Web Search）
+        # 方案1: 使用聚合器（Tavily 主源 + AkShare/DuckDuckGo/RSS fallback）
         news = self.aggregator.get_stock_news(stock_code, stock_name)
         if news:
             return news

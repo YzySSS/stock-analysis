@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # 数据库连接配置
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '10.0.4.8'),
+    'host': os.getenv('DB_HOST', '10.4.4.17'),
     'port': int(os.getenv('DB_PORT', 3306)),
     'user': os.getenv('DB_USER', 'openclaw_user'),
     'password': os.getenv('DB_PASSWORD', 'open@2026'),

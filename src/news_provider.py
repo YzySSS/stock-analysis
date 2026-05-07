@@ -1,204 +1,135 @@
 #!/usr/bin/env python3
 """
 新闻获取模块 - 多源整合
-支持：AkShare、Coze Web Search、Tavily、RSS等
+
+用于后台舆情任务，不依赖 OpenClaw 对话技能。
+优先级：Tavily（结构化 API） -> AkShare（免费财经源） -> DuckDuckGo（免费搜索兜底） -> RSS（市场新闻兜底）
 """
 
-import os
-import sys
-import json
 import logging
-from typing import Dict, List, Optional
+import os
 from datetime import datetime, timedelta
+from html import unescape
+from pathlib import Path
+from typing import Dict, List
+from urllib.parse import quote_plus, urlparse
 
 logger = logging.getLogger(__name__)
 
 
+def source_from_url(url: str, default: str = "") -> str:
+    """从 URL 提取稳定来源名，避免 Tavily/DuckDuckGo 这类聚合源掩盖真实媒体域名。"""
+    try:
+        domain = urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain or default
+    except Exception:
+        return default
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+except Exception:
+    pass
+
+
 class AkShareNewsProvider:
-    """使用AkShare获取财经新闻（免费）"""
-    
+    """使用 AkShare 获取财经新闻（免费）。"""
+
     def get_stock_news(self, stock_code: str) -> List[Dict]:
-        """
-        获取个股新闻
-        
-        Returns:
-            新闻列表 [{title, content, url, datetime}]
-        """
         try:
             import akshare as ak
-            
-            # 获取个股新闻
+
             news_df = ak.stock_news_em(symbol=stock_code[:6])
-            
             results = []
-            for _, row in news_df.head(10).iterrows():
+            for _, row in news_df.head(20).iterrows():
                 results.append({
-                    "title": row.get("title", ""),
-                    "content": row.get("content", "")[:500],  # 截取前500字
-                    "url": row.get("url", ""),
-                    "datetime": str(row.get("datetime", "")),
-                    "source": "东方财富"
+                    "title": row.get("新闻标题") or row.get("title") or "",
+                    "content": str(row.get("新闻内容") or row.get("content") or "")[:1000],
+                    "url": row.get("新闻链接") or row.get("url") or "",
+                    "datetime": str(row.get("发布时间") or row.get("datetime") or ""),
+                    "source": row.get("文章来源") or "东方财富",
+                    "provider": "akshare_stock_news_em",
                 })
-            
             return results
-            
         except Exception as e:
-            logger.error(f"AkShare获取新闻失败: {e}")
+            logger.warning(f"AkShare 获取新闻失败: {e}")
             return []
-    
+
     def get_market_news(self, limit: int = 20) -> List[Dict]:
-        """获取市场热点新闻"""
         try:
             import akshare as ak
-            
-            # 获取财经快讯
+
             news_df = ak.stock_info_global_em()
-            
             results = []
             for _, row in news_df.head(limit).iterrows():
                 results.append({
                     "title": row.get("title", ""),
                     "content": row.get("content", ""),
                     "datetime": str(row.get("datetime", "")),
-                    "source": "东方财富"
+                    "source": "东方财富",
                 })
-            
             return results
-            
         except Exception as e:
-            logger.error(f"获取市场新闻失败: {e}")
-            return []
-
-
-class CozeWebSearchProvider:
-    """使用Coze Web Search SDK获取新闻"""
-    
-    def __init__(self):
-        try:
-            from coze_coding_dev_sdk import SearchClient
-            self.client = SearchClient()
-            self.available = True
-        except Exception as e:
-            logger.warning(f"Coze Web Search 初始化失败: {e}")
-            self.client = None
-            self.available = False
-    
-    def is_available(self) -> bool:
-        """检查是否可用"""
-        return self.available
-    
-    def search_stock_news(self, stock_name: str, stock_code: str = "", days: int = 3) -> List[Dict]:
-        """
-        使用Coze Web Search搜索股票新闻
-        
-        Args:
-            stock_name: 股票名称
-            stock_code: 股票代码
-            days: 最近几天的新闻
-        
-        Returns:
-            新闻列表
-        """
-        if not self.available:
-            return []
-        
-        try:
-            query = f"{stock_name} {stock_code} 股票" if stock_code else f"{stock_name} 股票"
-            
-            # 使用 Coze SDK 进行搜索
-            results = self.client.web_search(query, count=10, need_summary=True)
-            
-            # 解析结果
-            news_list = []
-            for item in results.web_items[:10]:
-                news_list.append({
-                    "title": item.title,
-                    "content": item.content or item.snippet or "",
-                    "url": item.url,
-                    "source": item.site_name or "未知来源",
-                    "datetime": item.publish_time or datetime.now().isoformat()
-                })
-            
-            logger.info(f"✅ Coze搜索获取 {len(news_list)} 条新闻")
-            return news_list
-            
-        except Exception as e:
-            logger.error(f"Coze搜索失败: {e}")
+            logger.warning(f"获取市场新闻失败: {e}")
             return []
 
 
 class RSSNewsProvider:
-    """RSS订阅获取新闻"""
-    
+    """RSS 订阅获取市场新闻。"""
+
     RSS_SOURCES = {
         "财新": "https://www.caixin.com/rss.xml",
         "新浪财经": "https://rss.sina.com.cn/roll/finance/hot_roll.xml",
-        "东方财富": "https://www.eastmoney.com/rss.xml"
+        "东方财富": "https://www.eastmoney.com/rss.xml",
     }
-    
+
     def get_rss_news(self, source: str = "新浪财经", limit: int = 10) -> List[Dict]:
-        """从RSS获取新闻"""
         try:
             import feedparser
-            
+
             url = self.RSS_SOURCES.get(source)
             if not url:
                 return []
-            
             feed = feedparser.parse(url)
-            
             results = []
             for entry in feed.entries[:limit]:
                 results.append({
                     "title": entry.get("title", ""),
-                    "content": entry.get("summary", "")[:500],
+                    "content": str(entry.get("summary", ""))[:500],
                     "url": entry.get("link", ""),
                     "datetime": entry.get("published", ""),
-                    "source": source
+                    "source": source,
                 })
-            
             return results
-            
         except Exception as e:
-            logger.error(f"RSS获取失败: {e}")
+            logger.warning(f"RSS 获取失败: {e}")
             return []
 
 
 class TavilyNewsProvider:
-    """Tavily API新闻搜索（专业方案）"""
-    
-    def __init__(self, api_key: str = None):
+    """Tavily API 新闻搜索（结构化主源）。"""
+
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or os.getenv("TAVILY_API_KEY")
         if not self.api_key:
-            logger.warning("⚠️ 未配置TAVILY_API_KEY，Tavily新闻源不可用")
-    
+            logger.warning("未配置 TAVILY_API_KEY，Tavily 新闻源不可用")
+
     def is_available(self) -> bool:
-        """检查是否可用"""
         return bool(self.api_key)
-    
+
     def search_stock_news(self, stock_name: str, stock_code: str, days: int = 3) -> List[Dict]:
-        """
-        搜索股票相关新闻
-        
-        Args:
-            stock_name: 股票名称
-            stock_code: 股票代码
-            days: 最近几天的新闻
-        
-        Returns:
-            新闻列表
-        """
         if not self.api_key:
             return []
-        
-        query = f"{stock_name} {stock_code} 股票 最新"
+        query = f"{stock_name} {stock_code} 股票 最新 财经 新闻"
         return self._search(query, days)
-    
+
     def _search(self, query: str, days: int = 3) -> List[Dict]:
-        """执行搜索"""
         try:
             import requests
-            
+
             response = requests.post(
                 "https://api.tavily.com/search",
                 json={
@@ -208,142 +139,145 @@ class TavilyNewsProvider:
                     "include_answer": False,
                     "max_results": 10,
                     "include_domains": [
-                        "sina.com.cn", "163.com", "ifeng.com",
-                        "cnstock.com", "cs.com.cn", "stcn.com",
-                        "eastmoney.com", "hexun.com", "jrj.com"
-                    ]
+                        "sina.com.cn", "163.com", "ifeng.com", "cnstock.com", "cs.com.cn",
+                        "stcn.com", "eastmoney.com", "hexun.com", "jrj.com", "10jqka.com.cn",
+                    ],
                 },
-                timeout=30
+                timeout=30,
             )
-            
+            response.raise_for_status()
             data = response.json()
             results = data.get("results", [])
-            
-            # 过滤和格式化
             cutoff_date = datetime.now() - timedelta(days=days)
             filtered = []
-            
-            for r in results:
-                published = r.get("published_date", "")
+            for item in results:
+                published = item.get("published_date", "")
                 pub_date = None
-                
                 if published:
                     try:
-                        pub_date = datetime.fromisoformat(published.replace('Z', '+00:00'))
-                    except:
+                        pub_date = datetime.fromisoformat(published.replace("Z", "+00:00")).replace(tzinfo=None)
+                    except Exception:
                         pass
-                
-                # 如果没有日期或日期在范围内，保留
                 if not pub_date or pub_date >= cutoff_date:
                     filtered.append({
-                        "title": r.get("title", ""),
-                        "content": r.get("content", "")[:800],
-                        "url": r.get("url", ""),
-                        "source": r.get("source", ""),
-                        "datetime": published or datetime.now().isoformat()
+                        "title": item.get("title", ""),
+                        "content": str(item.get("content", ""))[:800],
+                        "url": item.get("url", ""),
+                        "source": item.get("source") or source_from_url(item.get("url", ""), "Tavily"),
+                        "datetime": published or datetime.now().isoformat(),
                     })
-            
             return filtered
-            
         except Exception as e:
-            logger.error(f"Tavily搜索失败: {e}")
+            logger.warning(f"Tavily 搜索失败: {e}")
+            return []
+
+
+class DuckDuckGoNewsProvider:
+    """DuckDuckGo 免费搜索兜底。
+
+    仅作为批量舆情任务的末级 fallback。DuckDuckGo 返回 HTML，结构和限流都不如 Tavily 稳定。
+    """
+
+    def search_stock_news(self, stock_name: str, stock_code: str, days: int = 3) -> List[Dict]:
+        try:
+            import re
+            import requests
+
+            query = quote_plus(f"{stock_name} {stock_code} 股票 财经 新闻 最近")
+            response = requests.get(
+                f"https://html.duckduckgo.com/html/?q={query}",
+                headers={"User-Agent": "Mozilla/5.0 stock-analysis sentiment bot"},
+                timeout=20,
+            )
+            response.raise_for_status()
+            html = response.text
+            if response.status_code == 202 or "anomaly" in html.lower():
+                logger.info("DuckDuckGo 返回反爬/验证页，本次跳过该兜底源")
+                return []
+            blocks = re.findall(r'<a rel="nofollow" class="result__a" href="([^"]+)">(.*?)</a>.*?<a class="result__snippet"[^>]*>(.*?)</a>', html, re.S)
+            results = []
+            for url, title, snippet in blocks[:10]:
+                clean_title = unescape(re.sub(r"<.*?>", "", title)).strip()
+                clean_snippet = unescape(re.sub(r"<.*?>", "", snippet)).strip()
+                if not clean_title:
+                    continue
+                results.append({
+                    "title": clean_title,
+                    "content": clean_snippet,
+                    "url": unescape(url),
+                    "source": "DuckDuckGo",
+                    "datetime": datetime.now().isoformat(),
+                })
+            return results
+        except Exception as e:
+            logger.warning(f"DuckDuckGo 搜索失败: {e}")
             return []
 
 
 class NewsAggregator:
-    """新闻聚合器 - 整合多源（Tavily优先）"""
-    
+    """新闻聚合器 - 后台任务使用。"""
+
     def __init__(self):
         self.tavily = TavilyNewsProvider()
         self.akshare = AkShareNewsProvider()
-        self.coze = CozeWebSearchProvider()
+        self.duckduckgo = DuckDuckGoNewsProvider()
         self.rss = RSSNewsProvider()
-    
-    def get_stock_news(self, 
-                       stock_code: str, 
-                       stock_name: str,
-                       sources: List[str] = None) -> List[Dict]:
+
+    def get_stock_news(self, stock_code: str, stock_name: str, sources: List[str] | None = None) -> List[Dict]:
         """
-        聚合多源新闻（Tavily专业方案优先）
-        
-        优先级：
-        1. Tavily API（专业方案，首选）
-        2. AkShare（免费备选）
-        3. Coze Web Search（补充）
-        
-        Args:
-            stock_code: 股票代码
-            stock_name: 股票名称
-            sources: 指定来源 ['tavily', 'akshare', 'coze', 'rss']，None表示自动选择
-        
-        Returns:
-            合并的新闻列表
+        聚合多源新闻。
+
+        默认优先级：AkShare -> Tavily -> DuckDuckGo -> RSS。
+        sources 可指定子集，例如 ['tavily', 'duckduckgo']。
         """
-        all_news = []
-        
-        # 1. Coze Web Search（首选 - 无需额外配置）
-        if self.coze.is_available():
-            news = self.coze.search_stock_news(stock_name, stock_code)
-            all_news.extend(news)
-            logger.info(f"✅ Coze搜索获取 {len(news)} 条新闻")
-            
-            # Coze质量高，如果获取到足够新闻直接返回
-            if len(news) >= 5:
-                logger.info(f"Coze新闻充足，直接返回")
+        ordered_sources = sources or ["akshare", "tavily", "duckduckgo", "rss"]
+        enabled = set(ordered_sources)
+        all_news: List[Dict] = []
+
+        for source in ordered_sources:
+            if source == "akshare" and "akshare" in enabled:
+                news = self.akshare.get_stock_news(stock_code)
+                all_news.extend(news)
+                logger.info(f"AkShare 获取 {len(news)} 条新闻")
+            elif source == "tavily" and "tavily" in enabled and self.tavily.is_available():
+                news = self.tavily.search_stock_news(stock_name, stock_code, days=3)
+                all_news.extend(news)
+                logger.info(f"Tavily 获取 {len(news)} 条新闻")
+            elif source == "duckduckgo" and "duckduckgo" in enabled and len(all_news) < 5:
+                news = self.duckduckgo.search_stock_news(stock_name, stock_code, days=3)
+                all_news.extend(news)
+                logger.info(f"DuckDuckGo 获取 {len(news)} 条新闻")
+            elif source == "rss" and "rss" in enabled and len(all_news) < 5:
+                news = self.rss.get_rss_news(limit=10)
+                # RSS 是市场新闻，不一定和个股强相关，只作为空结果兜底。
+                all_news.extend(news)
+                logger.info(f"RSS 获取 {len(news)} 条市场新闻")
+
+            if len(all_news) >= 15:
                 return self._deduplicate(all_news)[:15]
-        
-        # 2. Tavily API（备选 - 需要配置API Key）
-        if len(all_news) < 5 and self.tavily.is_available():
-            news = self.tavily.search_stock_news(stock_name, stock_code, days=3)
-            all_news.extend(news)
-            logger.info(f"Tavily获取 {len(news)} 条新闻")
-            
-            if len(news) >= 5:
-                logger.info(f"Tavily新闻充足，直接返回")
-                return self._deduplicate(all_news)[:15]
-        
-        # 3. AkShare（免费备选）
-        if len(all_news) < 5:
-            news = self.akshare.get_stock_news(stock_code)
-            all_news.extend(news)
-            logger.info(f"AkShare获取 {len(news)} 条新闻")
-        
+
         return self._deduplicate(all_news)[:15]
-    
+
     def _deduplicate(self, news_list: List[Dict]) -> List[Dict]:
-        """去重（按标题）"""
         seen = set()
         unique = []
-        for n in news_list:
-            title = n.get("title", "")
+        for item in news_list:
+            title = str(item.get("title", "")).strip()
             if title and title not in seen:
                 seen.add(title)
-                unique.append(n)
+                unique.append(item)
         return unique
 
 
 if __name__ == "__main__":
     print("🧪 新闻获取模块测试")
-    print("="*60)
-    
     aggregator = NewsAggregator()
-    
-    # 测试AkShare
-    print("\n1. 测试 AkShare 获取新闻...")
-    news = aggregator.akshare.get_stock_news("000001")
-    print(f"   获取 {len(news)} 条新闻")
-    if news:
-        print(f"   示例: {news[0]['title'][:50]}...")
-    
-    # 测试Coze
-    print("\n2. 测试 Coze Web Search...")
-    news = aggregator.coze.search_stock_news("平安银行")
-    print(f"   获取 {len(news)} 条新闻")
-    if news:
-        print(f"   示例: {news[0]['title'][:50]}...")
-    
-    print("\n" + "="*60)
-    print("✅ 测试完成")
-    print("\n推荐用法:")
-    print("  from news_provider import NewsAggregator")
-    print("  news = NewsAggregator().get_stock_news('000001.SZ', '平安银行')")
+    for label, fn in [
+        ("Tavily", lambda: aggregator.tavily.search_stock_news("平安银行", "000001")),
+        ("AkShare", lambda: aggregator.akshare.get_stock_news("000001")),
+        ("DuckDuckGo", lambda: aggregator.duckduckgo.search_stock_news("平安银行", "000001")),
+    ]:
+        news = fn()
+        print(f"{label}: {len(news)} 条")
+        if news:
+            print(f"  示例: {news[0].get('title', '')[:60]}")

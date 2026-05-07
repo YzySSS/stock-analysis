@@ -104,6 +104,7 @@ CORE_TABLE_DDL = [
         code VARCHAR(16) NOT NULL,
         score DECIMAL(20,8) DEFAULT NULL,
         rank_no INT DEFAULT NULL,
+        include_in_stats TINYINT(1) NOT NULL DEFAULT 1,
         metadata_json JSON DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_selection_result (run_id, code),

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.shared.db import mysql_conn
 from app.shared.strategy_loader import StrategyLoader
+from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 
 
 class StockSelector:
@@ -44,6 +45,7 @@ class StockSelector:
         profit_yoy = float(row["profit_yoy"]) if row.get("profit_yoy") is not None else None
         eps = float(row["eps"]) if row.get("eps") is not None else None
         close = float(row["close"]) if row.get("close") is not None else None
+        amount = float(row["amount"]) if row.get("amount") is not None else None
         has_trade_data = row.get("trade_date") is not None
 
         value_score = 0.20
@@ -167,6 +169,7 @@ class StockSelector:
             "instrument_type": row.get("instrument_type"),
             "trade_date": str(row["trade_date"]) if row.get("trade_date") else None,
             "close": close,
+            "amount": amount,
             "pe_tushare": pe,
             "pb_tushare": pb,
             "roe": roe,
@@ -176,6 +179,10 @@ class StockSelector:
             "revenue_yoy": revenue_yoy,
             "profit_yoy": profit_yoy,
             "eps": eps,
+            "sentiment_score": float(row["sentiment_score"]) if row.get("sentiment_score") is not None else None,
+            "news_count": int(row.get("news_count") or 0),
+            "market_strength": float(row["market_strength"]) if row.get("market_strength") is not None else None,
+            "market_state": row.get("market_state"),
             "fundamental_context": fundamental_context,
             "value_score": self._round_score(value_score),
             "quality_score": self._round_score(quality_score),
@@ -195,6 +202,7 @@ class StockSelector:
         candidate_limit: Optional[int] = None,
         instrument_type: str = "stock",
     ) -> Dict[str, Any]:
+        ensure_market_sentiment_schema()
         sql = """
         SELECT
             sb.code,
@@ -210,10 +218,15 @@ class StockSelector:
             sb.profit_yoy,
             sb.eps,
             dk.close,
-            dk.trade_date
+            dk.amount,
+            dk.trade_date,
+            ssd.sentiment_score,
+            ssd.news_count,
+            mcd.market_strength,
+            mcd.market_state
         FROM stock_basic sb
         LEFT JOIN (
-            SELECT d1.code, d1.trade_date, d1.close
+            SELECT d1.code, d1.trade_date, d1.close, d1.amount
             FROM daily_kline d1
             INNER JOIN (
                 SELECT code, MAX(trade_date) AS max_date
@@ -221,6 +234,8 @@ class StockSelector:
                 GROUP BY code
             ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
         ) dk ON sb.code = dk.code
+        LEFT JOIN stock_sentiment_daily ssd ON sb.code = ssd.code AND dk.trade_date = ssd.trade_date
+        LEFT JOIN market_context_daily mcd ON dk.trade_date = mcd.trade_date AND mcd.index_code = '000300.SH'
         WHERE sb.is_delisted = 0
           AND sb.instrument_type = %s
         ORDER BY (dk.trade_date IS NULL), dk.trade_date DESC, sb.code
@@ -253,6 +268,7 @@ class StockSelector:
             "missing_fields": item.get("missing_fields", []),
             "raw_metrics": {
                 "close": item.get("close"),
+                "amount": item.get("amount"),
                 "pe_tushare": item.get("pe_tushare"),
                 "pb_tushare": item.get("pb_tushare"),
                 "roe": item.get("roe"),
@@ -262,6 +278,10 @@ class StockSelector:
                 "revenue_yoy": item.get("revenue_yoy"),
                 "profit_yoy": item.get("profit_yoy"),
                 "eps": item.get("eps"),
+                "sentiment_score": item.get("sentiment_score"),
+                "news_count": item.get("news_count"),
+                "market_strength": item.get("market_strength"),
+                "market_state": item.get("market_state"),
                 "trade_date": item.get("trade_date"),
             },
             "fundamental_context": item.get("fundamental_context", {}),
@@ -281,24 +301,22 @@ class StockSelector:
 
     def build_factor_analysis(self, instrument_type: str = "stock", limit: int = 200) -> Dict[str, Dict[str, Any]]:
         data_bundle = self.load_candidates_from_mysql(candidate_limit=limit, instrument_type=instrument_type)
-        candidates = data_bundle.get("candidates", [])
-        stats = {
-            "turnover": self._factor_coverage(candidates, "turnover_score"),
-            "lowvol": self._factor_coverage(candidates, "lowvol_score"),
-            "reversal": self._factor_coverage(candidates, "reversal_score"),
-        }
-        ci_mapping = {
-            "turnover": "turnover_score",
-            "lowvol": "lowvol_score",
-            "reversal": "reversal_score",
-        }
-        for key, field in ci_mapping.items():
-            values = [float(item.get(field)) for item in candidates if item.get(field) is not None]
+        context = self.strategy.prepare_context(data_bundle)
+        factor_rows = self.strategy.compute_factors(context)
+        factor_keys = sorted({key for item in factor_rows for key in (item.get("factors") or {}).keys()})
+        stats: Dict[str, Dict[str, Any]] = {}
+        for key in factor_keys:
+            total = len(factor_rows)
+            values = [float((item.get("factors") or {}).get(key)) for item in factor_rows if (item.get("factors") or {}).get(key) is not None]
+            present = len(values)
+            coverage = round((present / total) * 100, 2) if total else None
             avg = round(sum(values) / len(values), 4) if values else None
-            if avg is not None:
-                stats[key]["ci"] = round(avg - 0.5, 4)
-            else:
-                stats[key]["ci"] = None
+            stats[key] = {
+                "sample_size": total,
+                "coverage": coverage,
+                "missing_rate": round(100 - coverage, 2) if coverage is not None else None,
+                "ci": round((avg or 0) / 100, 4) if avg is not None else None,
+            }
         return stats
 
     def run(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:

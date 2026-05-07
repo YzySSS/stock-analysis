@@ -29,3 +29,9 @@ class SelectionTrackingRecord:
     review_status: Optional[str] = None
     max_gain_pct: Optional[float] = None
     max_drawdown_pct: Optional[float] = None
+    daily_current_price: Optional[float] = None
+    realtime_price: Optional[float] = None
+    realtime_pct_chg: Optional[float] = None
+    realtime_quote_time: Optional[str] = None
+    realtime_price_change_pct: Optional[float] = None
+    include_in_stats: bool = True

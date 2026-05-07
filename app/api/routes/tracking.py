@@ -3,12 +3,17 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from app.shared.db import mysql_conn
 
 from app.error_learning.tracker import SelectionResultTracker
 
 router = APIRouter(tags=["tracking"])
+
+
+class TrackingStatsToggleRequest(BaseModel):
+    include_in_stats: bool
 
 
 def _build_tracking_summary(items: list[dict]) -> dict:
@@ -56,6 +61,10 @@ def _build_tracking_summary(items: list[dict]) -> dict:
             "price_change_pct": worst_item.get("price_change_pct"),
         } if worst_item else None,
     }
+
+
+def _stats_items(items: list[dict]) -> list[dict]:
+    return [item for item in items if item.get("include_in_stats", True)]
 
 
 def _list_tracking_runs(
@@ -217,13 +226,20 @@ def _tracking_payload(
     )
     summary_items = tracker.to_dict_list(summary_records)
 
+    stats_items = _stats_items(summary_items)
+    page_stats_items = _stats_items(items)
+
     return {
         "run_id": resolved_run_id,
         "strategy_id": strategy_id,
         "selection_date": selection_date,
-        "summary": _build_tracking_summary(items),
-        "filtered_summary": _build_tracking_summary(summary_items),
-        "strategy_summaries": _build_strategy_summaries(summary_items),
+        "summary": _build_tracking_summary(page_stats_items),
+        "filtered_summary": {
+            **_build_tracking_summary(stats_items),
+            "total_count": len(summary_items),
+            "excluded_count": len(summary_items) - len(stats_items),
+        },
+        "strategy_summaries": _build_strategy_summaries(stats_items),
         "items": items,
         "pagination": {
             "total": total,
@@ -233,6 +249,31 @@ def _tracking_payload(
         },
         "available_runs": _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id),
     }
+
+
+def _set_tracking_include_in_stats(
+    *,
+    code: str,
+    selection_date: str,
+    strategy_id: str,
+    instrument_type: str,
+    include_in_stats: bool,
+) -> int:
+    with mysql_conn(dict_cursor=False) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE selection_result sr
+                INNER JOIN stock_basic sb ON sr.code = sb.code
+                SET sr.include_in_stats = %s
+                WHERE sr.code = %s
+                  AND sr.trade_date = %s
+                  AND sr.strategy_id = %s
+                  AND sb.instrument_type = %s
+                """,
+                (1 if include_in_stats else 0, code, selection_date, strategy_id, instrument_type),
+            )
+            return int(cursor.rowcount or 0)
 
 
 @router.get("/tracking/latest")
@@ -316,6 +357,33 @@ def delete_tracking_item(
         "strategy_id": strategy_id,
         "instrument_type": instrument_type,
         "deleted_count": matched_count,
+    }
+
+
+@router.patch("/tracking/item/stats")
+def update_tracking_item_stats(
+    payload: TrackingStatsToggleRequest,
+    code: str = Query(...),
+    selection_date: str = Query(...),
+    strategy_id: str = Query(...),
+    instrument_type: str = Query(default="stock"),
+) -> dict:
+    matched_count = _set_tracking_include_in_stats(
+        code=code,
+        selection_date=selection_date,
+        strategy_id=strategy_id,
+        instrument_type=instrument_type,
+        include_in_stats=payload.include_in_stats,
+    )
+    if matched_count <= 0:
+        raise HTTPException(status_code=404, detail="未找到可更新的复盘记录")
+    return {
+        "code": code,
+        "selection_date": selection_date,
+        "strategy_id": strategy_id,
+        "instrument_type": instrument_type,
+        "include_in_stats": payload.include_in_stats,
+        "updated_count": matched_count,
     }
 
 

@@ -11,3 +11,5 @@
 当前已加入：
 
 - `strategy_loader.py`：从注册表动态加载默认策略或指定策略
+- `settings.py`：统一读取 MySQL / SQLite 配置
+- `db.py`：统一提供 MySQL / SQLite 连接入口

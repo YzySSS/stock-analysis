@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Optional
 
-from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
+from app.backtest.service import BacktestRequest, BacktestService
 from app.shared.db import mysql_conn
 
 router = APIRouter(tags=["backtest"])
@@ -18,25 +20,113 @@ class BacktestRunRequest(BaseModel):
     instrument_type: str = "stock"
     use_adjusted_price: bool = False
     save: bool = True
+    max_picks: Optional[int] = Field(default=None, ge=1, le=50)
+    score_threshold: Optional[float] = Field(default=None, ge=0, le=100)
 
 
 @router.post("/backtest/run")
 def run_backtest(payload: BacktestRunRequest) -> dict:
+    try:
+        request = BacktestRequest(**payload.model_dump(exclude={"save"}))
+        if not payload.save:
+            return BacktestService().run(request, save=False)
+        service = BacktestService()
+        run = service.submit(request)
+        return normalize_run_row(run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/backtest/runs/{run_id}/cancel")
+def cancel_backtest_run(run_id: str) -> dict:
+    try:
+        return normalize_run_row(BacktestService().request_cancel(run_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def normalize_run_row(row: dict) -> dict:
+    summary = row.get("summary_json")
+    if isinstance(summary, str):
+        summary = json.loads(summary)
+    request = row.get("request_json")
+    if isinstance(request, str):
+        request = json.loads(request)
     return {
-        "status": "pending",
-        "message": "V2 backtest engine not implemented yet",
-        "request": payload.model_dump(),
+        "run_id": row.get("run_id"),
+        "strategy_id": row.get("strategy_id"),
+        "start_date": str(row.get("start_date")) if row.get("start_date") else None,
+        "end_date": str(row.get("end_date")) if row.get("end_date") else None,
+        "return_mode": row.get("return_mode"),
+        "status": row.get("status"),
+        "worker_id": row.get("worker_id"),
+        "locked_at": str(row.get("locked_at")) if row.get("locked_at") else None,
+        "worker_heartbeat_at": str(row.get("worker_heartbeat_at")) if row.get("worker_heartbeat_at") else None,
+        "cancel_requested": bool(row.get("cancel_requested")),
+        "is_system_test": bool(row.get("is_system_test")),
+        "sample_days": int(row.get("sample_days") or 0),
+        "total_picks": int(row.get("total_picks") or 0),
+        "total_trades": int(row.get("total_trades") or 0),
+        "progress_total_days": int(row.get("progress_total_days") or 0),
+        "progress_done_days": int(row.get("progress_done_days") or 0),
+        "progress_pct": float(row.get("progress_pct") or 0),
+        "current_trade_date": str(row.get("current_trade_date")) if row.get("current_trade_date") else None,
+        "estimated_seconds_left": int(row.get("estimated_seconds_left")) if row.get("estimated_seconds_left") is not None else None,
+        "total_return_pct": float(row.get("total_return_pct")) if row.get("total_return_pct") is not None else None,
+        "avg_return_pct": float(row.get("avg_return_pct")) if row.get("avg_return_pct") is not None else None,
+        "max_drawdown_pct": float(row.get("max_drawdown_pct")) if row.get("max_drawdown_pct") is not None else None,
+        "win_rate_pct": float(row.get("win_rate_pct")) if row.get("win_rate_pct") is not None else None,
+        "summary": summary,
+        "request": request,
+        "started_at": str(row.get("started_at")) if row.get("started_at") else None,
+        "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
+        "error_message": row.get("error_message"),
     }
 
 
 @router.get("/backtest/results")
 def get_backtest_results(run_id: Optional[str] = Query(default=None)) -> dict:
+    if not run_id:
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT run_id FROM backtest_run WHERE COALESCE(is_system_test, 0) = 0 ORDER BY id DESC LIMIT 1")
+                latest = cursor.fetchone() or {}
+                run_id = latest.get("run_id")
+    if not run_id:
+        return {"run_id": None, "summary": None, "curve": []}
+
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM backtest_run WHERE run_id = %s", (run_id,))
+            run = cursor.fetchone()
+            if not run:
+                raise HTTPException(status_code=404, detail="backtest run not found")
+
+            cursor.execute(
+                """
+                SELECT trade_date, pick_count, avg_return_1d_pct, avg_return_3d_pct,
+                       win_rate_1d_pct, win_rate_3d_pct,
+                       benchmark_return_1d_pct, benchmark_return_3d_pct
+                FROM backtest_summary_daily
+                WHERE run_id = %s
+                ORDER BY trade_date
+                """,
+                (run_id,),
+            )
+            curve = cursor.fetchall() or []
+
+    summary_json = run.get("summary_json")
+    summary = json.loads(summary_json) if isinstance(summary_json, str) else summary_json
+    normalized = normalize_run_row({**run, "summary_json": summary})
     return {
-        "run_id": run_id,
-        "status": "pending",
-        "message": "V2 backtest result service not implemented yet",
-        "summary": None,
-        "curve": [],
+        **normalized,
+        "curve": [
+            {
+                **row,
+                "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+            }
+            for row in curve
+        ],
     }
 
 
@@ -48,25 +138,61 @@ def get_backtest_trades(
     code: Optional[str] = Query(default=None),
     return_mode: str = Query(default="1d"),
 ) -> dict:
+    conditions = ["run_id = %s"]
+    params: list[object] = [run_id]
+    if trade_date:
+        conditions.append("trade_date = %s")
+        params.append(trade_date)
+    if code:
+        conditions.append("code = %s")
+        params.append(code)
+    params.append(limit)
+    sql = f"""
+    SELECT run_id, strategy_id, trade_date, code, entry_date, entry_price,
+           exit_date_1d, exit_price_1d, return_1d_pct,
+           exit_date_3d, exit_price_3d, return_3d_pct,
+           max_gain_pct, max_drawdown_pct
+    FROM backtest_trade
+    WHERE {' AND '.join(conditions)}
+    ORDER BY trade_date DESC, return_{'1d' if return_mode == '1d' else '3d'}_pct DESC
+    LIMIT %s
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall() or []
     return {
         "run_id": run_id,
         "limit": limit,
         "trade_date": trade_date,
         "code": code,
         "return_mode": return_mode,
-        "items": [],
-        "message": "V2 backtest trade service not implemented yet",
+        "items": [
+            {
+                **row,
+                "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+                "entry_date": str(row.get("entry_date")) if row.get("entry_date") else None,
+                "exit_date_1d": str(row.get("exit_date_1d")) if row.get("exit_date_1d") else None,
+                "exit_date_3d": str(row.get("exit_date_3d")) if row.get("exit_date_3d") else None,
+            }
+            for row in rows
+        ],
     }
 
 
 @router.get("/backtest/runs")
-def get_backtest_runs(limit: int = Query(default=20, ge=1, le=100)) -> dict:
+def get_backtest_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+    include_system_tests: bool = Query(default=False),
+) -> dict:
+    where_sql = "" if include_system_tests else "WHERE COALESCE(is_system_test, 0) = 0"
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
-                SELECT run_id, strategy_id, start_date, end_date, return_mode, status, started_at, finished_at
+                f"""
+                SELECT *
                 FROM backtest_run
+                {where_sql}
                 ORDER BY id DESC
                 LIMIT %s
                 """,
@@ -75,13 +201,7 @@ def get_backtest_runs(limit: int = Query(default=20, ge=1, le=100)) -> dict:
             rows = cursor.fetchall() or []
     return {
         "items": [
-            {
-                **row,
-                "start_date": str(row.get("start_date")) if row.get("start_date") else None,
-                "end_date": str(row.get("end_date")) if row.get("end_date") else None,
-                "started_at": str(row.get("started_at")) if row.get("started_at") else None,
-                "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
-            }
+            normalize_run_row(row)
             for row in rows
         ]
     }

@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 import tushare as ts
 
 from app.shared.db import mysql_conn
+from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.task_log import TaskRunLogger
 
 
@@ -17,6 +18,11 @@ class FactorInputDailyRecord:
     trade_date: str
     pe_tushare: float | None = None
     pb_tushare: float | None = None
+    turnover_rate: float | None = None
+    turnover_rate_f: float | None = None
+    volume_ratio: float | None = None
+    total_mv: float | None = None
+    circ_mv: float | None = None
     roe: float | None = None
     roa: float | None = None
     grossprofit_margin: float | None = None
@@ -24,7 +30,12 @@ class FactorInputDailyRecord:
     revenue_yoy: float | None = None
     profit_yoy: float | None = None
     fundamental_period: str | None = None
-    source: str = "tushare_stock_basic_snapshot"
+    fundamental_publish_date: str | None = None
+    valuation_source: str = "tushare_daily_basic"
+    fundamental_source: str = "stock_basic_snapshot"
+    valuation_updated_at: str | None = None
+    fundamental_updated_at: str | None = None
+    completeness_score: float | None = None
 
 
 class FactorInputHistorySync:
@@ -36,31 +47,7 @@ class FactorInputHistorySync:
         self.task_logger = TaskRunLogger()
 
     def ensure_table(self) -> None:
-        sql = """
-        CREATE TABLE IF NOT EXISTS factor_input_daily (
-            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            code VARCHAR(16) NOT NULL,
-            trade_date DATE NOT NULL,
-            pe_tushare DECIMAL(12,4) DEFAULT NULL,
-            pb_tushare DECIMAL(12,4) DEFAULT NULL,
-            roe DECIMAL(12,4) DEFAULT NULL,
-            roa DECIMAL(12,4) DEFAULT NULL,
-            grossprofit_margin DECIMAL(12,4) DEFAULT NULL,
-            netprofit_margin DECIMAL(12,4) DEFAULT NULL,
-            revenue_yoy DECIMAL(12,4) DEFAULT NULL,
-            profit_yoy DECIMAL(12,4) DEFAULT NULL,
-            fundamental_period VARCHAR(16) DEFAULT NULL,
-            source VARCHAR(32) DEFAULT 'tushare_stock_basic_snapshot',
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uniq_factor_input_daily (code, trade_date),
-            KEY idx_factor_input_trade_date (trade_date),
-            KEY idx_factor_input_code (code)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        """
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql)
+        ensure_v2_schema()
 
     @staticmethod
     def _daterange(start_date: str, end_date: str) -> List[str]:
@@ -103,21 +90,31 @@ class FactorInputHistorySync:
 
     def fetch_daily_basic_map(self, trade_date: str) -> Dict[str, Dict[str, float | None]]:
         ts_trade_date = trade_date.replace("-", "")
-        df = self.pro.daily_basic(trade_date=ts_trade_date, fields="ts_code,pe,pb")
+        df = self.pro.daily_basic(
+            trade_date=ts_trade_date,
+            fields="ts_code,pe,pb,turnover_rate,turnover_rate_f,volume_ratio,total_mv,circ_mv",
+        )
         result: Dict[str, Dict[str, float | None]] = {}
         for _, row in df.iterrows():
             code = str(row["ts_code"]).split(".")[0]
-            pe = row["pe"]
-            pb = row["pb"]
+            def val(field: str) -> float | None:
+                value = row.get(field)
+                return float(value) if value == value else None
+
             result[code] = {
-                "pe_tushare": float(pe) if pe == pe else None,
-                "pb_tushare": float(pb) if pb == pb else None,
+                "pe_tushare": val("pe"),
+                "pb_tushare": val("pb"),
+                "turnover_rate": val("turnover_rate"),
+                "turnover_rate_f": val("turnover_rate_f"),
+                "volume_ratio": val("volume_ratio"),
+                "total_mv": val("total_mv"),
+                "circ_mv": val("circ_mv"),
             }
         return result
 
     def fetch_stock_basic_snapshot(self, codes: Sequence[str] | None = None) -> Dict[str, Dict[str, object]]:
         sql = """
-        SELECT code, roe, roa, grossprofit_margin, netprofit_margin, revenue_yoy, profit_yoy, fundamental_period
+        SELECT code, roe, roa, grossprofit_margin, netprofit_margin, revenue_yoy, profit_yoy, fundamental_period, fundamental_updated_at
         FROM stock_basic
         WHERE instrument_type = 'stock'
         """
@@ -139,6 +136,7 @@ class FactorInputHistorySync:
                 "revenue_yoy": float(row["revenue_yoy"]) if row.get("revenue_yoy") is not None else None,
                 "profit_yoy": float(row["profit_yoy"]) if row.get("profit_yoy") is not None else None,
                 "fundamental_period": row.get("fundamental_period"),
+                "fundamental_updated_at": str(row.get("fundamental_updated_at")) if row.get("fundamental_updated_at") else None,
             }
             for row in rows
         }
@@ -149,13 +147,20 @@ class FactorInputHistorySync:
             return 0
         sql = """
         INSERT INTO factor_input_daily (
-            code, trade_date, pe_tushare, pb_tushare, roe, roa,
+            code, trade_date, pe_tushare, pb_tushare, turnover_rate, turnover_rate_f,
+            volume_ratio, total_mv, circ_mv, roe, roa,
             grossprofit_margin, netprofit_margin, revenue_yoy, profit_yoy,
-            fundamental_period, source
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            fundamental_period, fundamental_publish_date, valuation_source, fundamental_source,
+            valuation_updated_at, fundamental_updated_at, completeness_score
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             pe_tushare = VALUES(pe_tushare),
             pb_tushare = VALUES(pb_tushare),
+            turnover_rate = VALUES(turnover_rate),
+            turnover_rate_f = VALUES(turnover_rate_f),
+            volume_ratio = VALUES(volume_ratio),
+            total_mv = VALUES(total_mv),
+            circ_mv = VALUES(circ_mv),
             roe = VALUES(roe),
             roa = VALUES(roa),
             grossprofit_margin = VALUES(grossprofit_margin),
@@ -163,13 +168,20 @@ class FactorInputHistorySync:
             revenue_yoy = VALUES(revenue_yoy),
             profit_yoy = VALUES(profit_yoy),
             fundamental_period = VALUES(fundamental_period),
-            source = VALUES(source)
+            fundamental_publish_date = VALUES(fundamental_publish_date),
+            valuation_source = VALUES(valuation_source),
+            fundamental_source = VALUES(fundamental_source),
+            valuation_updated_at = VALUES(valuation_updated_at),
+            fundamental_updated_at = VALUES(fundamental_updated_at),
+            completeness_score = VALUES(completeness_score)
         """
         data = [
             (
-                r.code, r.trade_date, r.pe_tushare, r.pb_tushare, r.roe, r.roa,
+                r.code, r.trade_date, r.pe_tushare, r.pb_tushare, r.turnover_rate, r.turnover_rate_f,
+                r.volume_ratio, r.total_mv, r.circ_mv, r.roe, r.roa,
                 r.grossprofit_margin, r.netprofit_margin, r.revenue_yoy, r.profit_yoy,
-                r.fundamental_period, r.source,
+                r.fundamental_period, r.fundamental_publish_date, r.valuation_source, r.fundamental_source,
+                r.valuation_updated_at, r.fundamental_updated_at, r.completeness_score,
             )
             for r in rows
         ]
@@ -202,12 +214,22 @@ class FactorInputHistorySync:
                 normalized_code = code.split(".")[-1]
                 valuation = valuation_map.get(normalized_code, {})
                 fundamental = fundamental_map.get(code, {})
+                filled_fields = [
+                    valuation.get("pe_tushare"), valuation.get("pb_tushare"), valuation.get("turnover_rate"),
+                    valuation.get("volume_ratio"), fundamental.get("roe"), fundamental.get("revenue_yoy"),
+                ]
+                completeness_score = round(len([x for x in filled_fields if x is not None]) / len(filled_fields), 4)
                 records.append(
                     FactorInputDailyRecord(
                         code=code,
                         trade_date=trade_date,
                         pe_tushare=valuation.get("pe_tushare"),
                         pb_tushare=valuation.get("pb_tushare"),
+                        turnover_rate=valuation.get("turnover_rate"),
+                        turnover_rate_f=valuation.get("turnover_rate_f"),
+                        volume_ratio=valuation.get("volume_ratio"),
+                        total_mv=valuation.get("total_mv"),
+                        circ_mv=valuation.get("circ_mv"),
                         roe=fundamental.get("roe"),
                         roa=fundamental.get("roa"),
                         grossprofit_margin=fundamental.get("grossprofit_margin"),
@@ -215,6 +237,9 @@ class FactorInputHistorySync:
                         revenue_yoy=fundamental.get("revenue_yoy"),
                         profit_yoy=fundamental.get("profit_yoy"),
                         fundamental_period=fundamental.get("fundamental_period"),
+                        valuation_updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        fundamental_updated_at=fundamental.get("fundamental_updated_at"),
+                        completeness_score=completeness_score,
                     )
                 )
             total_rows += self.save_records(records)

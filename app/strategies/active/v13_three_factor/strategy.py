@@ -74,6 +74,50 @@ class V13ThreeFactorStrategy:
     def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or self.default_config()
 
+    def prepare_context(self, data_bundle: Dict[str, Any]) -> Dict[str, Any]:
+        return data_bundle
+
+    def compute_factors(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for item in data_bundle.get("candidates", []):
+            score = self.score_stock(str(item.get("code")), item)
+            rows.append(
+                {
+                    **item,
+                    "factors": score.factor_scores,
+                    "v13_notes": score.notes,
+                }
+            )
+        return rows
+
+    def score(self, stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        scored: List[Dict[str, Any]] = []
+        for item in stocks:
+            factors = item.get("factors", {})
+            weights = self.config.get("weights", self.default_config()["weights"])
+            total_score = (
+                float(factors.get("turnover", 0) or 0) * float(weights.get("turnover", 0) or 0)
+                + float(factors.get("lowvol", 0) or 0) * float(weights.get("lowvol", 0) or 0)
+                + float(factors.get("reversal", 0) or 0) * float(weights.get("reversal", 0) or 0)
+            )
+            scored.append({**item, "score": round(total_score, 4)})
+        return sorted(scored, key=lambda row: row.get("score", 0), reverse=True)
+
+    def select(self, scored_stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        threshold = float(self.config.get("score_threshold", 0))
+        max_picks = int(self.config.get("max_picks", self.config.get("max_positions", 5)))
+        selected = [item for item in scored_stocks if float(item.get("score", 0) or 0) >= threshold]
+        return selected[:max_picks]
+
+    def explain(self, stock: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "code": stock.get("code"),
+            "score": stock.get("score"),
+            "factors": stock.get("factors", {}),
+            "strategy": self.strategy_id,
+            "notes": stock.get("v13_notes", []),
+        }
+
     @classmethod
     def default_config(cls) -> Dict[str, Any]:
         return {

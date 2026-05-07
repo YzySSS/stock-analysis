@@ -49,7 +49,7 @@ class SentimentFactorCalculator:
     评分范围：-10 ~ +10
     
     特性：
-    1. 多源新闻获取（AkShare + Coze）
+    1. 多源新闻获取（Tavily + AkShare + DuckDuckGo/RSS fallback）
     2. AI情感分析（DeepSeek/MiniMax）
     3. 新闻来源可信度评估
     4. 本地缓存机制（SQLite）

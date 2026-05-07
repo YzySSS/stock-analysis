@@ -25,10 +25,11 @@ strategies:
 
   - id: v12_legacy
     display_name: V12 多因子策略
+    entrypoint: app.strategies.active.v12_legacy_strategy.V12LegacyStrategy
     config_path: app/strategies/registry/configs/v12_legacy.yaml
     version: 1.1-fixed
     status: legacy
     mode: legacy
-    executable: false
+    executable: true
     tags: [trend, momentum, quality, sentiment, value, v12]
-    description: 历史版本多因子策略，当前仅纳入页面展示，尚未迁入现有执行链路
+    description: 历史版本多因子策略，当前以轻量兼容版本接入选股中心执行链路
