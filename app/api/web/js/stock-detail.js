@@ -34,7 +34,8 @@ function renderOverviewConsole(overview) {
   qs('#stock-overview-high').textContent = formatNumber(quote.high_price, 2);
   qs('#stock-overview-low').textContent = formatNumber(quote.low_price, 2);
   qs('#stock-overview-amount').textContent = formatMoneyCN(quote.amount);
-  qs('#stock-overview-trend').textContent = `趋势 ${technical.trend_label || '-'}`;
+  const trendLabelEl = qs('#stock-overview-trend');
+  if (trendLabelEl) trendLabelEl.textContent = `趋势 ${technical.trend_label || '-'}`;
   qs('#stock-overview-amount-rank').textContent = formatRank(rankings.amount_rank, rankings.amount_percentile);
   qs('#stock-overview-pct-rank').textContent = formatRank(rankings.pct_chg_rank, rankings.pct_chg_percentile);
   qs('#stock-overview-mv-rank').textContent = formatRank(rankings.total_mv_rank, rankings.total_mv_percentile);
@@ -51,9 +52,7 @@ function renderOverviewConsole(overview) {
   });
 }
 
-function renderFactorScorePills(factorScores) {
-  const container = qs('#stock-factor-score-pills');
-  if (!container) return;
+function factorLabel(key) {
   const labelMap = {
     trend: '趋势',
     momentum: '动量',
@@ -68,14 +67,47 @@ function renderFactorScorePills(factorScores) {
     reversal_score: '反转',
     reversal: '反转',
   };
+  return labelMap[key] || String(key || '')
+    .replace(/_score$/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getDisplayFactorEntries(factorScores) {
   const preferredOrder = [
     'trend', 'momentum', 'quality', 'sentiment', 'value', 'liquidity',
     'turnover_score', 'turnover', 'lowvol_score', 'lowvol', 'reversal_score', 'reversal',
   ];
-  const entries = preferredOrder
-    .filter((key) => Object.prototype.hasOwnProperty.call(factorScores || {}, key))
-    .map((key) => ({ key, label: labelMap[key] || key, value: Number(factorScores[key]) }))
+  const rawMetricKeys = new Set([
+    'open', 'high', 'low', 'close', 'volume', 'amount', 'trade_date',
+    'pe_tushare', 'pb_tushare', 'roe', 'roa', 'eps',
+    'grossprofit_margin', 'netprofit_margin', 'revenue_yoy', 'profit_yoy',
+    'completeness_score', 'data_quality_score', 'value_score', 'quality_score', 'stability_score',
+    'fundamental_missing_fields',
+  ]);
+  const scores = factorScores || {};
+  const orderedKeys = preferredOrder.filter((key) => Object.prototype.hasOwnProperty.call(scores, key));
+  const extraKeys = Object.keys(scores)
+    .filter((key) => !preferredOrder.includes(key) && !rawMetricKeys.has(key))
+    .sort();
+  return [...orderedKeys, ...extraKeys]
+    .map((key) => ({ key, label: factorLabel(key), value: Number(scores[key]) }))
     .filter((item) => !Number.isNaN(item.value) && item.value >= 0 && item.value <= 100);
+}
+
+function renderFactorScorePills(factorScores, latestSelection = {}) {
+  const container = qs('#stock-factor-score-pills');
+  if (!container) return;
+  const strategyName = latestSelection.strategy_display_name || latestSelection.strategy_id || '未关联策略';
+  const strategyVersion = latestSelection.strategy_version ? ` · ${latestSelection.strategy_version}` : '';
+  const scoreLabel = qs('#stock-strategy-score-label');
+  const scoreSubtitle = qs('#stock-strategy-score-subtitle');
+  const caption = qs('#stock-strategy-factor-caption');
+  if (scoreLabel) scoreLabel.textContent = strategyName;
+  if (scoreSubtitle) scoreSubtitle.textContent = latestSelection.strategy_id ? `${latestSelection.strategy_id}${strategyVersion}` : '策略 -';
+  if (caption) caption.textContent = `因子得分 · ${strategyName}`;
+
+  const entries = getDisplayFactorEntries(factorScores);
 
   if (!entries.length) {
     container.innerHTML = '<span class="muted">暂无因子得分</span>';
@@ -574,7 +606,7 @@ async function loadStockDetail() {
     qs('#stock-stat-score').textContent = formatNumber(latestSelection.score, 4);
     qs('#stock-stat-date').textContent = escapeHtml(realtime.quote_time || data.latest_kline?.trade_date || '-');
     renderOverviewConsole(overview);
-    renderFactorScorePills(factorScores);
+    renderFactorScorePills(factorScores, latestSelection);
 
     qs('#stock-detail-basic').innerHTML = `
       <div><strong>股票代码</strong></div>
@@ -636,8 +668,8 @@ async function loadStockDetail() {
       <div>${escapeHtml(latestSelection.rank_no ?? '-')}</div>
       <div><strong>最近交易日</strong></div>
       <div>${escapeHtml(latestSelection.trade_date || '-')}</div>
-      <div><strong>最近 run_id</strong></div>
-      <div>${escapeHtml(latestSelection.run_id || '-')}</div>
+      <div><strong>策略版本</strong></div>
+      <div>${escapeHtml(latestSelection.strategy_version || '-')}</div>
       <div><strong>记录创建时间</strong></div>
       <div>${escapeHtml(latestSelection.created_at || '-')}</div>
     `;
@@ -659,9 +691,9 @@ async function loadStockDetail() {
 
     qs('#stock-detail-tracking-summary').innerHTML = `
       <div><strong>最近复盘入口</strong></div>
-      <div>${latestSelection.run_id ? `run_id ${escapeHtml(latestSelection.run_id)}` : '暂无 run_id'}</div>
+      <div>${latestSelection.run_id ? escapeHtml(latestSelection.strategy_display_name || latestSelection.strategy_id || '最近入选记录') : '暂无可关联复盘'}</div>
       <div><strong>建议动作</strong></div>
-      <div>${latestSelection.run_id ? '可直接跳转到跟踪复盘页查看整轮表现' : '当前暂无可关联复盘 run_id'}</div>
+      <div>${latestSelection.run_id ? '可直接跳转到跟踪复盘页查看整轮表现' : '当前暂无可关联复盘记录'}</div>
       <div><strong>当前价格</strong></div>
       <div>${formatNumber(realtime.latest_price ?? data.latest_kline?.close, 2)}</div>
       <div><strong>实时涨跌幅</strong></div>
