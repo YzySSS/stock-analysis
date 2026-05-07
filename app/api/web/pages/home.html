@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260508f" />
 </head>
 <body data-page="home">
   <div class="app-shell dashboard-shell">
@@ -71,15 +71,16 @@
             </article>
             <article class="home-card-market-item home-market-time-card">
               <div class="market-time-clock" aria-hidden="true">
-                <i class="clock-hand hour"></i>
-                <i class="clock-hand minute"></i>
+                <i id="home-clock-hour" class="clock-hand hour"></i>
+                <i id="home-clock-minute" class="clock-hand minute"></i>
               </div>
-              <div>
+              <div class="market-time-info">
                 <span>行情时间</span>
                 <strong id="home-market-clock">--:--:--</strong>
-                <b id="home-market-session">已收盘</b>
-                <small id="home-market-time">数据更新时间：-</small>
-                <small id="home-market-source">实时快照统计</small>
+                <b id="home-market-session">交易状态</b>
+                <small id="home-market-calendar">---- -- -- · 星期-</small>
+                <small id="home-market-countdown">距离早盘 --:--:--</small>
+                <small id="home-market-source">数据更新时间：-</small>
               </div>
             </article>
           </section>
@@ -123,6 +124,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/home.js?v=20260508e"></script>
+  <script src="/static/js/home.js?v=20260508f"></script>
 </body>
 </html>

@@ -6112,31 +6112,78 @@ body[data-page="home"] .home-card-market-item {
 }
 
 body[data-page="home"] .home-card-market-item.home-market-time-card {
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 78px minmax(0, 1fr);
   align-items: center;
-  gap: 14px;
+  gap: 16px;
+}
+
+body[data-page="home"] .home-market-time-card .market-time-info {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+body[data-page="home"] .home-market-time-card .market-time-info > span {
+  color: #cbd5e1 !important;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 body[data-page="home"] .home-market-time-card strong {
-  margin: 5px 0 2px;
-  font-size: 20px;
+  margin: 0;
+  font-size: 22px;
   color: #7dd3fc !important;
   letter-spacing: 0;
+  line-height: 1.05;
 }
 
 body[data-page="home"] .home-market-time-card b {
   display: block;
+  width: fit-content;
+  padding: 1px 7px;
+  border-radius: 999px;
   color: #38bdf8 !important;
+  background: rgba(14, 165, 233, 0.12);
+  font-size: 12px;
+}
+
+body[data-page="home"] .home-market-time-card b.trading {
+  color: #38bdf8 !important;
+  background: rgba(14, 165, 233, 0.14);
+}
+
+body[data-page="home"] .home-market-time-card b.paused {
+  color: #fbbf24 !important;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+body[data-page="home"] .home-market-time-card b.closed {
+  color: #94a3b8 !important;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+body[data-page="home"] #home-market-calendar,
+body[data-page="home"] #home-market-countdown,
+body[data-page="home"] #home-market-source {
+  display: block;
+  color: #8fa3bd;
+  line-height: 1.35;
+}
+
+body[data-page="home"] #home-market-countdown {
+  color: #7dd3fc;
+  font-weight: 850;
 }
 
 body[data-page="home"] .home-market-time-card small + small {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 body[data-page="home"] .market-time-clock {
   position: relative;
-  width: 68px;
-  height: 68px;
+  width: 70px;
+  height: 70px;
   border-radius: 999px;
   border: 1px solid rgba(56, 189, 248, 0.38);
   background:
@@ -6178,13 +6225,11 @@ body[data-page="home"] .clock-hand {
 
 body[data-page="home"] .clock-hand.hour {
   height: 19px;
-  transform: translateX(-50%) rotate(30deg);
 }
 
 body[data-page="home"] .clock-hand.minute {
   height: 27px;
   background: #ef4444;
-  transform: translateX(-50%) rotate(350deg);
 }
 
 @media (max-width: 1500px) {
