@@ -6112,44 +6112,45 @@ body[data-page="home"] .home-card-market-item {
 }
 
 body[data-page="home"] .home-card-market-item.home-market-time-card {
-  grid-template-columns: 74px minmax(90px, 118px);
-  justify-content: center;
-  align-items: center;
-  gap: 13px;
-  padding: 12px 10px;
-}
-
-body[data-page="home"] .home-market-time-card .market-time-info {
   display: grid;
-  align-content: center;
-  gap: 2px;
-  min-width: 0;
-}
-
-body[data-page="home"] .home-market-time-card .market-time-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr auto;
   gap: 8px;
-  margin-bottom: 3px;
+  align-content: center;
+  min-height: 128px;
+  padding: 10px 12px 9px;
 }
 
-body[data-page="home"] .home-market-time-card .market-time-head span {
-  color: #cbd5e1 !important;
+body[data-page="home"] .market-time-title {
+  color: #cbd5e1;
   font-size: 12px;
   font-weight: 900;
-  white-space: nowrap;
+  line-height: 1;
 }
 
-body[data-page="home"] .home-market-time-card .market-time-head em {
+body[data-page="home"] .market-time-title em {
   color: #6b7f99;
   font-size: 10px;
   font-style: normal;
 }
 
+body[data-page="home"] .home-market-time-card .market-time-body {
+  display: grid;
+  grid-template-columns: 66px minmax(80px, 1fr);
+  align-items: center;
+  gap: 13px;
+}
+
+body[data-page="home"] .home-market-time-card .market-time-info {
+  display: grid;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+}
+
 body[data-page="home"] .home-market-time-card strong {
-  margin: 0;
-  font-size: 19px;
+  margin: 1px 0 0;
+  font-size: 18px;
   color: #7dd3fc !important;
   letter-spacing: 0;
   line-height: 1.05;
@@ -6183,18 +6184,20 @@ body[data-page="home"] .home-market-time-card b.closed {
 }
 
 body[data-page="home"] #home-market-date,
-body[data-page="home"] #home-market-weekday,
-body[data-page="home"] #home-market-countdown,
-body[data-page="home"] #home-market-source {
+body[data-page="home"] #home-market-weekday {
   display: block;
   color: #8fa3bd;
-  line-height: 1.25;
+  font-size: 11px;
+  line-height: 1.22;
 }
 
 body[data-page="home"] #home-market-countdown {
+  display: block;
   color: #7dd3fc;
   font-weight: 850;
-  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1;
+  margin-top: 0;
   white-space: nowrap;
 }
 
@@ -6204,8 +6207,8 @@ body[data-page="home"] .home-market-time-card small + small {
 
 body[data-page="home"] .market-time-clock {
   position: relative;
-  width: 64px;
-  height: 64px;
+  width: 62px;
+  height: 62px;
   border-radius: 999px;
   border: 1px solid rgba(56, 189, 248, 0.38);
   background:
