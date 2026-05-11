@@ -76,9 +76,13 @@ class StrategyLoader:
         config = self.load_config(strategy_id)
         strategy_config = {
             **config.get("selection", {}),
+            "sentiment_prefetch": config.get("sentiment_prefetch", {}),
+            "sentiment_rank": config.get("sentiment_rank", {}),
             "weights": {
                 k: v.get("weight", 0)
                 for k, v in config.get("factors", {}).items()
             },
+            "hard_filters": config.get("hard_filters", {}),
+            "market_weight_adjustments": config.get("market_weight_adjustments", {}),
         }
         return cls(config=strategy_config)

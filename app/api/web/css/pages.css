@@ -136,11 +136,12 @@ a.preview-main {
 
 .mini-chart .chart-focus text {
   fill: #cbd5e1;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   paint-order: stroke;
   stroke: rgba(15, 23, 42, 0.78);
-  stroke-width: 3px;
+  stroke-width: 2px;
   stroke-linejoin: round;
 }
 
@@ -288,6 +289,48 @@ a.preview-main {
 .chart-tabs button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.kline-control-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.kline-date-range {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kline-date-range label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8fa3bd;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.kline-date-range input {
+  color-scheme: dark;
+  width: 126px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #dbeafe;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+}
+
+.kline-date-range input:focus {
+  border-color: rgba(56, 189, 248, 0.75);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
 }
 
 .enhanced-chart-wrap {
@@ -527,9 +570,12 @@ body[data-page="stock-detail"] .card-header h2 {
 }
 
 .mini-chart .chart-focus text {
-  fill: #e2e8f0;
-  font-weight: 750;
-  stroke: rgba(7, 17, 31, 0.9);
+  fill: #dbeafe;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  stroke: rgba(7, 17, 31, 0.86);
+  stroke-width: 2px;
 }
 
 body[data-page="stock-detail"] .detail-grid {
@@ -616,6 +662,7 @@ body:not([data-page="stock-detail"]) .global-stock-search input,
 body:not([data-page="stock-detail"]) .form-group input,
 body:not([data-page="stock-detail"]) .form-group select,
 body:not([data-page="stock-detail"]) .tracking-filter-field select,
+body:not([data-page="stock-detail"]) .tracking-filter-field input[type="date"],
 body:not([data-page="stock-detail"]) .inline-search-actions input {
   background: #0b1626;
   border-color: #21344f;
@@ -912,6 +959,7 @@ body .global-stock-search input,
 body .form-group input,
 body .form-group select,
 body .tracking-filter-field select,
+body .tracking-filter-field input[type="date"],
 body .inline-search-actions input,
 body .global-stock-search input {
   background: rgba(8, 18, 32, 0.92);
@@ -1487,6 +1535,74 @@ body[data-page="system"] .stat-grid.compact-stats {
   background: rgba(8, 18, 32, 0.46);
 }
 
+.tracking-date-field {
+  min-width: 150px;
+}
+
+.date-input-shell {
+  position: relative;
+  display: block;
+  width: 150px;
+  min-height: 42px;
+  border: 1px solid #1d3554;
+  border-radius: 7px;
+  background: #071529;
+}
+
+.selection-datetime-shell {
+  width: 100%;
+}
+
+.date-input-shell:focus-within {
+  outline: 1px solid rgba(56, 189, 248, 0.7);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+}
+
+.date-input-display {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #7f95b2;
+  font-size: 13px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.date-input-shell.has-value .date-input-display {
+  color: #dce9f8;
+}
+
+body[data-page="tracking"] .date-input-shell input[type="date"],
+body[data-page="selection"] .date-input-shell input[type="datetime-local"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: transparent !important;
+  color-scheme: dark;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.date-input-shell::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  opacity: 0.78;
+  background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%2397abc5' stroke-linecap='round' stroke-linejoin='round' d='M4.5 2.5v2m7-2v2m-9 1.5h11m-10-3h9a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z'/%3E%3C/svg%3E");
+}
+
 @media (max-width: 1480px) {
   .tracking-console-card .tracking-preview-grid,
   .sector-card .preview-list {
@@ -1770,9 +1886,13 @@ body[data-page="system"] .stat-grid.compact-stats {
 .stock-secondary-row,
 .stock-factor-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 18px;
   align-items: stretch;
+}
+
+.stock-secondary-row {
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
 }
 
 .stock-terminal-sidebar {
@@ -2089,6 +2209,17 @@ body[data-page="system"] .stat-grid.compact-stats {
   stroke-dasharray: 4 6;
 }
 
+.intraday-axis-label {
+  fill: #9fb4cf;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.intraday-time-label {
+  font-size: 10.5px;
+}
+
 .intraday-terminal-chart::before {
   content: "09:30-15:00 全交易时段";
   position: absolute;
@@ -2193,14 +2324,15 @@ body[data-page="system"] .stat-grid.compact-stats {
 
 /* Move factor breakdown to the right side of strategy score */
 .stock-overview-console {
-  grid-template-columns: minmax(500px, 1.22fr) minmax(430px, 0.86fr) minmax(420px, 0.92fr);
+  grid-template-columns: minmax(500px, 1.22fr) minmax(470px, 0.92fr) minmax(420px, 0.86fr);
 }
 
 .overview-score-panel {
-  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-columns: 154px minmax(0, 1fr);
   grid-template-rows: auto;
   align-items: center;
-  min-width: 430px;
+  min-width: 470px;
+  overflow: hidden;
 }
 
 .strategy-factor-caption {
@@ -2221,14 +2353,16 @@ body[data-page="system"] .stat-grid.compact-stats {
   grid-column: 2;
   align-self: stretch;
   align-content: center;
-  grid-template-columns: 1fr;
-  max-height: 194px;
-  overflow: auto;
-  padding-right: 2px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
 }
 
 .factor-score-pill {
-  padding: 7px 9px 6px;
+  min-width: 0;
+  padding: 8px 10px 7px;
 }
 
 @media (max-width: 1480px) {
@@ -2279,7 +2413,7 @@ body[data-page="system"] .stat-grid.compact-stats {
 }
 
 .quote-sub-grid {
-  grid-template-columns: 0.95fr 0.85fr 0.85fr 0.85fr 0.95fr 1.34fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2288,6 +2422,15 @@ body[data-page="system"] .stat-grid.compact-stats {
   padding: 8px 10px;
   font-size: 13px;
   white-space: nowrap;
+}
+
+.quote-sub-grid span:nth-child(6) {
+  grid-column: 1 / -1;
+}
+
+.quote-sub-grid span:nth-child(6) b {
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .quote-sub-grid b {
@@ -2314,7 +2457,18 @@ body[data-page="system"] .stat-grid.compact-stats {
 }
 
 .factor-score-pill {
-  padding: 6px 9px 5px;
+  padding: 8px 10px 7px;
+}
+
+.factor-score-row {
+  margin-bottom: 5px;
+}
+
+.factor-score-row span,
+.factor-score-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1180px) {
@@ -2486,16 +2640,13 @@ body[data-page="selection"] .strategy-console-card {
   }
 }
 
-/* Tracking review card console */
+/* Tracking review card console: desktop uses table, mobile uses cards */
 .tracking-record-cards {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 13px;
-  margin: 0 0 18px;
+  display: none;
 }
 
 .tracking-record-cards.empty-state {
-  display: block;
+  display: none;
   padding: 18px;
   border: 1px dashed rgba(56, 189, 248, 0.22);
   border-radius: 16px;
@@ -2567,15 +2718,25 @@ body[data-page="selection"] .strategy-console-card {
   max-height: 440px !important;
 }
 
-@media (max-width: 1480px) {
-  .tracking-record-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+body[data-page="tracking"] .tracking-detail-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #071529;
+  box-shadow: 0 1px 0 var(--table-line), 0 10px 18px rgba(2, 8, 23, 0.38);
+}
+
+body[data-page="tracking"] .tracking-detail-table thead th:first-child {
+  border-top-left-radius: 12px;
+}
+
+body[data-page="tracking"] .tracking-detail-table thead th:last-child {
+  border-top-right-radius: 12px;
 }
 
 @media (max-width: 820px) {
-  .tracking-record-cards {
-    grid-template-columns: 1fr;
+  .tracking-detail-table {
+    max-height: none !important;
   }
 }
 
@@ -3220,9 +3381,65 @@ body[data-page="system"] .hidden-diagnostics-grid {
   padding: 0 12px;
 }
 
+body[data-page="backtest"] .backtest-terminal-form input[type="date"] {
+  color-scheme: dark;
+}
+
+body[data-page="backtest"] .backtest-terminal-form input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.96;
+  filter: invert(1) brightness(1.8);
+  cursor: pointer;
+}
+
 .backtest-run-button {
   min-height: 46px;
   box-shadow: 0 14px 32px rgba(14, 165, 233, .32);
+}
+
+.backtest-advanced-settings {
+  grid-column: 1 / -1;
+  border-top: 1px solid rgba(56, 189, 248, 0.18);
+  padding-top: 10px;
+}
+
+.backtest-advanced-settings summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #9fb4cf;
+  font-size: 12px;
+  font-weight: 850;
+  user-select: none;
+}
+
+.backtest-advanced-settings summary:hover {
+  color: #dbeafe;
+}
+
+.backtest-advanced-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 420px));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.backtest-adjusted-toggle {
+  align-items: flex-start;
+  border: 1px solid rgba(56, 189, 248, 0.20);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(4, 14, 28, 0.48);
+}
+
+.backtest-adjusted-toggle b,
+.backtest-adjusted-toggle small {
+  display: block;
+}
+
+.backtest-adjusted-toggle small {
+  margin-top: 3px;
+  color: #9fb4cf;
+  line-height: 1.45;
 }
 
 .backtest-terminal-foot {
@@ -6383,4 +6600,304 @@ body[data-page="home"] .market-strength-thermo.hot + b + #home-market-strength-c
 
 body[data-page="home"] .market-strength-thermo.cool + b + #home-market-strength-change {
   color: #4ade80;
+}
+
+/* Backtest chart polish: professional axes, grid and focused line rendering */
+body[data-page="backtest"] #backtest-equity-chart .chart-grid line {
+  stroke: rgba(148, 163, 184, 0.14);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+body[data-page="backtest"] #backtest-equity-chart .chart-grid line.vertical {
+  stroke: rgba(148, 163, 184, 0.08);
+}
+
+body[data-page="backtest"] #backtest-equity-chart .zero-line {
+  stroke: rgba(226, 232, 240, 0.45);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 5;
+  vector-effect: non-scaling-stroke;
+}
+
+body[data-page="backtest"] #backtest-equity-chart .chart-axis-labels text {
+  fill: #7f95b2;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+body[data-page="backtest"] #backtest-equity-chart .equity-line {
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+body[data-page="backtest"] #backtest-equity-chart .equity-line.glow {
+  opacity: 0.28;
+  stroke-width: 7;
+  filter: url(#backtestLineGlow);
+}
+
+body[data-page="backtest"] #backtest-equity-chart .chart-point {
+  opacity: 0.9;
+  stroke: rgba(2, 8, 23, 0.88);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+body[data-page="backtest"] #backtest-equity-chart .chart-point.latest {
+  stroke: #f8fafc;
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.55));
+}
+
+body[data-page="backtest"] #backtest-equity-chart .chart-focus-info.strong {
+  fill: #ffffff;
+  font-size: 13px;
+}
+
+/* Backtest chart compact height + trades pagination */
+body[data-page="backtest"] .backtest-equity-card {
+  min-height: 460px;
+}
+
+body[data-page="backtest"] .backtest-equity-chart-wrap {
+  min-height: 340px;
+}
+
+body[data-page="backtest"] .backtest-equity-chart-wrap svg {
+  height: 340px;
+}
+
+body[data-page="backtest"] .backtest-trades-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid rgba(56, 189, 248, 0.12);
+}
+
+body[data-page="backtest"] .backtest-trades-pagination .actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Backtest chart fill: stretch plot to consume the full chart panel */
+body[data-page="backtest"] .backtest-equity-card {
+  min-height: 640px;
+}
+
+body[data-page="backtest"] .backtest-equity-chart-wrap {
+  flex: 1 1 auto;
+  min-height: 560px;
+}
+
+body[data-page="backtest"] .backtest-equity-chart-wrap svg {
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+}
+
+body[data-page="backtest"] .backtest-trades-pagination .trades-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #9fb4cf;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+body[data-page="backtest"] .backtest-trades-pagination select {
+  height: 30px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 8px;
+  background: rgba(4, 14, 28, 0.9);
+  color: #dbeafe;
+  padding: 0 8px;
+}
+
+/* Backtest chart height: 60% of the tall fill version */
+body[data-page="backtest"] .backtest-equity-card {
+  min-height: 440px;
+}
+
+body[data-page="backtest"] .backtest-equity-chart-wrap {
+  min-height: 336px;
+}
+
+body[data-page="backtest"] .backtest-equity-chart-wrap svg {
+  min-height: 336px;
+}
+
+/* Backtest recent runs: fixed 20-item scroll list, no more button */
+body[data-page="backtest"] .backtest-recent-runs-panel {
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Backtest themed inner scrollbars */
+body[data-page="backtest"] .table-wrapper,
+body[data-page="backtest"] .compact-table-wrapper,
+body[data-page="backtest"] .backtest-recent-runs-panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.55) rgba(8, 18, 32, 0.88);
+}
+
+body[data-page="backtest"] .table-wrapper::-webkit-scrollbar,
+body[data-page="backtest"] .compact-table-wrapper::-webkit-scrollbar,
+body[data-page="backtest"] .backtest-recent-runs-panel::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+body[data-page="backtest"] .table-wrapper::-webkit-scrollbar-track,
+body[data-page="backtest"] .compact-table-wrapper::-webkit-scrollbar-track,
+body[data-page="backtest"] .backtest-recent-runs-panel::-webkit-scrollbar-track {
+  background: rgba(8, 18, 32, 0.92);
+  border-left: 1px solid rgba(56, 189, 248, 0.12);
+  border-radius: 999px;
+}
+
+body[data-page="backtest"] .table-wrapper::-webkit-scrollbar-thumb,
+body[data-page="backtest"] .compact-table-wrapper::-webkit-scrollbar-thumb,
+body[data-page="backtest"] .backtest-recent-runs-panel::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.85), rgba(14, 116, 144, 0.82));
+  border: 2px solid rgba(8, 18, 32, 0.92);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.28);
+}
+
+body[data-page="backtest"] .table-wrapper::-webkit-scrollbar-thumb:hover,
+body[data-page="backtest"] .compact-table-wrapper::-webkit-scrollbar-thumb:hover,
+body[data-page="backtest"] .backtest-recent-runs-panel::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(125, 211, 252, 0.95), rgba(34, 211, 238, 0.86));
+}
+
+body[data-page="backtest"] .table-wrapper::-webkit-scrollbar-corner,
+body[data-page="backtest"] .compact-table-wrapper::-webkit-scrollbar-corner,
+body[data-page="backtest"] .backtest-recent-runs-panel::-webkit-scrollbar-corner {
+  background: rgba(8, 18, 32, 0.92);
+}
+
+/* Backtest trade score details */
+body[data-page="backtest"] .backtest-score-help {
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  color: #bae6fd;
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(14, 116, 144, 0.24);
+  font-size: 11px;
+  font-weight: 900;
+  vertical-align: middle;
+}
+
+/* Backtest recent runs: show about five rows while keeping 20 loaded */
+body[data-page="backtest"] .backtest-recent-runs-panel {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Backtest chart baseline: highlight neutral line in amber */
+body[data-page="backtest"] #backtest-equity-chart .zero-line {
+  stroke: rgba(250, 204, 21, 0.92);
+  stroke-width: 1.6;
+  stroke-dasharray: 7 5;
+  filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.35));
+}
+
+/* Backtest queue semantics: only the first active card is running, others wait */
+body[data-page="backtest"] .backtest-run-card.waiting {
+  border-color: rgba(251, 191, 36, 0.42);
+  background:
+    radial-gradient(circle at 20% 0%, rgba(251, 191, 36, 0.12), transparent 36%),
+    linear-gradient(180deg, rgba(30, 32, 35, 0.96), rgba(9, 20, 34, 0.96));
+}
+
+body[data-page="backtest"] .backtest-run-card.waiting .backtest-progress-percent {
+  color: #fbbf24;
+}
+
+body[data-page="backtest"] .backtest-run-card.waiting .backtest-progress-track i {
+  background: repeating-linear-gradient(135deg, #fbbf24 0 8px, #b7791f 8px 16px);
+}
+
+body[data-page="backtest"] .run-dot.waiting {
+  background: #fbbf24;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.55);
+}
+
+/* Global dark theme polish: scrollbars and native form controls */
+html,
+body,
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.58) rgba(8, 18, 32, 0.88);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(8, 18, 32, 0.92);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.86), rgba(14, 116, 144, 0.82));
+  border: 2px solid rgba(8, 18, 32, 0.92);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.26);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(125, 211, 252, 0.96), rgba(34, 211, 238, 0.88));
+}
+
+*::-webkit-scrollbar-corner {
+  background: rgba(8, 18, 32, 0.92);
+}
+
+input[type="number"] {
+  color-scheme: dark;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.95;
+  filter: invert(72%) sepia(41%) saturate(797%) hue-rotate(151deg) brightness(102%) contrast(95%);
+  background: rgba(8, 18, 32, 0.92);
+  border-left: 1px solid rgba(56, 189, 248, 0.20);
+  cursor: pointer;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+select {
+  color-scheme: dark;
+}
+
+body[data-page="backtest"] .backtest-terminal-form .backtest-adjusted-toggle input[type="checkbox"] {
+  width: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin-top: 2px;
+  flex: 0 0 16px;
+}
+
+body[data-page="backtest"] .backtest-advanced-grid .terminal-form-field {
+  align-self: stretch;
+  border: 1px solid rgba(56, 189, 248, 0.20);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(4, 14, 28, 0.48);
 }

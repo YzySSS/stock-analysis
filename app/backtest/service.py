@@ -21,6 +21,9 @@ class BacktestRequest:
     return_mode: str = "1d"
     instrument_type: str = "stock"
     use_adjusted_price: bool = False
+    commission_bps: float = 0.0
+    slippage_bps: float = 0.0
+    apply_execution_constraints: bool = False
     max_picks: Optional[int] = None
     score_threshold: Optional[float] = None
 
@@ -41,14 +44,18 @@ def _to_json(value: Any) -> str:
 
 
 class BacktestService:
-    """V2 最小回测服务。
+    """V2 回测服务。
 
-    第一版只支持 lowvol_reversal，使用 factor_input_daily 的历史输入快照，
+    使用 factor_input_daily + daily_kline 的历史输入快照构造候选池，
     收益口径沿用 P0 文档：
     - 1d：当日开盘买入，下一交易日开盘卖出
     - 3d：当日开盘买入，第三个后续交易日收盘卖出
+
+    注意：V12 选股依赖 Tavily 舆情精排；为避免历史回测消耗大量 Tavily 次数，
+    当前暂不开放 V12 回测。
     """
 
+    SUPPORTED_STRATEGIES = {"lowvol_reversal", "v13_three_factor"}
     MAX_BACKTEST_DAYS = 260
     STALE_RUNNING_SECONDS = 30 * 60
 
@@ -67,7 +74,7 @@ class BacktestService:
         if len(trade_dates) > self.MAX_BACKTEST_DAYS:
             raise ValueError(f"V2-P0 单次最多回测 {self.MAX_BACKTEST_DAYS} 个交易日，当前 {len(trade_dates)} 个")
 
-        run_id = f"backtest_{request.strategy_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        run_id = f"backtest_{request.strategy_id}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         self._create_run(run_id, request, selector, datetime.now(), status="queued", progress_total_days=len(trade_dates))
         return self.get_run(run_id)
 
@@ -183,12 +190,17 @@ class BacktestService:
         return row
 
     def _validate_request(self, request: BacktestRequest) -> None:
-        if request.strategy_id != "lowvol_reversal":
-            raise ValueError("V2-P0 暂只支持 lowvol_reversal")
+        if request.strategy_id not in self.SUPPORTED_STRATEGIES:
+            supported = " / ".join(sorted(self.SUPPORTED_STRATEGIES))
+            raise ValueError(f"回测中心当前支持 {supported}")
         if request.return_mode not in {"1d", "3d"}:
             raise ValueError("return_mode 仅支持 1d / 3d")
-        if request.use_adjusted_price:
-            raise ValueError("V2-P0 暂未接入复权价格，use_adjusted_price 请保持 false")
+        if request.commission_bps < 0 or request.commission_bps > 100:
+            raise ValueError("commission_bps 需在 0~100 之间")
+        if request.slippage_bps < 0 or request.slippage_bps > 100:
+            raise ValueError("slippage_bps 需在 0~100 之间")
+        # V2.1 supports adjusted return calculation when adj_factor_daily has
+        # coverage for the requested date range.
 
     def run(self, request: BacktestRequest, save: bool = True) -> Dict[str, Any]:
         self._validate_request(request)
@@ -200,7 +212,7 @@ class BacktestService:
                 "score_threshold": request.score_threshold,
             },
         )
-        run_id = f"backtest_{request.strategy_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        run_id = f"backtest_{request.strategy_id}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         started_at = datetime.now()
 
         if save:
@@ -221,7 +233,7 @@ class BacktestService:
                 candidates = self._load_candidates(selector, trade_date, request.instrument_type)
                 selected = selector.run({"candidates": candidates})
                 picks = [self._build_pick(row, trade_date) for row in selected]
-                trades = self._build_trades(run_id, request.strategy_id, trade_date, picks)
+                trades = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
                 summary = self._build_daily_summary(run_id, request.strategy_id, trade_date, trades)
                 all_picks.extend(picks)
                 all_trades.extend(trades)
@@ -279,7 +291,7 @@ class BacktestService:
             candidates = self._load_candidates(selector, trade_date, request.instrument_type)
             selected = selector.run({"candidates": candidates})
             picks = [self._build_pick(row, trade_date) for row in selected]
-            trades = self._build_trades(run_id, request.strategy_id, trade_date, picks)
+            trades = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
             summary = self._build_daily_summary(run_id, request.strategy_id, trade_date, trades)
             self._save_results(run_id, request.strategy_id, picks, trades, [summary])
             all_picks.extend(picks)
@@ -305,12 +317,26 @@ class BacktestService:
                 cursor.execute(sql, (start_date, end_date))
                 return [str(row["trade_date"]) for row in cursor.fetchall()]
 
-    def _load_candidates(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
+    def _has_lowvol_feature_cache(self, trade_date: str) -> bool:
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM lowvol_reversal_feature_daily
+                    WHERE trade_date = %s
+                    """,
+                    (trade_date,),
+                )
+                return int((cursor.fetchone() or {}).get("count") or 0) > 0
+
+    def _load_candidates_from_feature_cache(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
         sql = """
         SELECT
             sb.code,
             sb.name,
             sb.instrument_type,
+            sb.is_st,
             f.pe_tushare,
             f.pb_tushare,
             f.roe,
@@ -320,12 +346,55 @@ class BacktestService:
             f.revenue_yoy,
             f.profit_yoy,
             sb.eps,
+            f.turnover_rate,
+            f.volume_ratio,
+            f.total_mv,
+            f.completeness_score,
             dk.open,
             dk.close,
-            dk.trade_date
+            dk.amount,
+            dk.trade_date,
+            lf.ma20,
+            lf.ma60,
+            lf.close_5d,
+            lf.close_20d,
+            lf.prev_close_1d,
+            lf.max_close_20,
+            lf.min_close_20,
+            lf.avg_amount_20,
+            lf.kline_count_20,
+            lf.kline_count_60,
+            lf.std_return_20,
+            lf.pct_chg_1d,
+            lf.turnover_rate_5d_avg,
+            mf.net_mf_amount,
+            mf.net_mf_vol,
+            mf.buy_lg_amount,
+            mf.sell_lg_amount,
+            mf.buy_elg_amount,
+            mf.sell_elg_amount,
+            chip.his_low AS chip_his_low,
+            chip.his_high AS chip_his_high,
+            chip.cost_5pct AS chip_cost_5pct,
+            chip.cost_15pct AS chip_cost_15pct,
+            chip.cost_50pct AS chip_cost_50pct,
+            chip.cost_85pct AS chip_cost_85pct,
+            chip.cost_95pct AS chip_cost_95pct,
+            chip.weight_avg AS chip_weight_avg,
+            chip.winner_rate AS chip_winner_rate,
+            DATEDIFF(f.trade_date, sb.listing_date) AS listed_days,
+            ssd.sentiment_score,
+            ssd.news_count,
+            mcd.market_strength,
+            mcd.market_state
         FROM factor_input_daily f
         INNER JOIN stock_basic sb ON sb.code = f.code
         INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
+        INNER JOIN lowvol_reversal_feature_daily lf ON lf.code = f.code AND lf.trade_date = f.trade_date
+        LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
+        LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
+        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code AND ssd.trade_date = f.trade_date
+        LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
           AND sb.instrument_type = %s
           AND sb.is_delisted = 0
@@ -336,6 +405,138 @@ class BacktestService:
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, (trade_date, instrument_type))
+                rows = cursor.fetchall()
+        candidates: List[Dict[str, Any]] = []
+        for row in rows:
+            item = selector._build_candidate(row)
+            item["open"] = _to_float(row.get("open"))
+            item["close"] = _to_float(row.get("close"))
+            candidates.append(item)
+        return candidates
+
+    def _load_candidates(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
+        try:
+            if self._has_lowvol_feature_cache(trade_date):
+                return self._load_candidates_from_feature_cache(selector, trade_date, instrument_type)
+        except Exception:
+            # Cache table is optional; fall back to point-in-time window SQL.
+            pass
+        sql = """
+        SELECT
+            sb.code,
+            sb.name,
+            sb.instrument_type,
+            sb.is_st,
+            f.pe_tushare,
+            f.pb_tushare,
+            f.roe,
+            f.roa,
+            f.grossprofit_margin,
+            f.netprofit_margin,
+            f.revenue_yoy,
+            f.profit_yoy,
+            sb.eps,
+            f.turnover_rate,
+            f.volume_ratio,
+            f.total_mv,
+            f.completeness_score,
+            dk.open,
+            dk.close,
+            dk.amount,
+            dk.trade_date,
+            ma.ma20,
+            ma.ma60,
+            ma.close_5d,
+            ma.close_20d,
+            ma.prev_close_1d,
+            ma.max_close_20,
+            ma.min_close_20,
+            ma.avg_amount_20,
+            ma.kline_count_20,
+            ma.kline_count_60,
+            ma.std_return_20,
+            ma.pct_chg_1d,
+            tma.turnover_rate_5d_avg,
+            mf.net_mf_amount,
+            mf.net_mf_vol,
+            mf.buy_lg_amount,
+            mf.sell_lg_amount,
+            mf.buy_elg_amount,
+            mf.sell_elg_amount,
+            chip.his_low AS chip_his_low,
+            chip.his_high AS chip_his_high,
+            chip.cost_5pct AS chip_cost_5pct,
+            chip.cost_15pct AS chip_cost_15pct,
+            chip.cost_50pct AS chip_cost_50pct,
+            chip.cost_85pct AS chip_cost_85pct,
+            chip.cost_95pct AS chip_cost_95pct,
+            chip.weight_avg AS chip_weight_avg,
+            chip.winner_rate AS chip_winner_rate,
+            DATEDIFF(f.trade_date, sb.listing_date) AS listed_days,
+            ssd.sentiment_score,
+            ssd.news_count,
+            mcd.market_strength,
+            mcd.market_state
+        FROM factor_input_daily f
+        INNER JOIN stock_basic sb ON sb.code = f.code
+        INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
+        LEFT JOIN (
+            SELECT
+                code,
+                AVG(CASE WHEN rn <= 20 THEN close END) AS ma20,
+                AVG(CASE WHEN rn <= 60 THEN close END) AS ma60,
+                MAX(CASE WHEN rn = 6 THEN close END) AS close_5d,
+                MAX(CASE WHEN rn = 20 THEN close END) AS close_20d,
+                MAX(CASE WHEN rn = 2 THEN close END) AS prev_close_1d,
+                MAX(CASE WHEN rn <= 20 THEN close END) AS max_close_20,
+                MIN(CASE WHEN rn <= 20 THEN close END) AS min_close_20,
+                AVG(CASE WHEN rn <= 20 THEN amount END) AS avg_amount_20,
+                SUM(CASE WHEN rn <= 20 THEN 1 ELSE 0 END) AS kline_count_20,
+                COUNT(*) AS kline_count_60,
+                STDDEV_SAMP(CASE WHEN rn <= 20 AND prev_close IS NOT NULL AND prev_close > 0 THEN close / prev_close - 1 END) AS std_return_20,
+                MAX(CASE WHEN rn = 1 AND prev_close IS NOT NULL AND prev_close > 0 THEN (close - prev_close) / prev_close * 100 END) AS pct_chg_1d
+            FROM (
+                SELECT
+                    code,
+                    trade_date,
+                    close,
+                    amount,
+                    LAG(close) OVER (PARTITION BY code ORDER BY trade_date) AS prev_close,
+                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
+                FROM daily_kline
+                WHERE trade_date <= %s
+            ) ranked
+            WHERE rn <= 60
+            GROUP BY code
+        ) ma ON sb.code = ma.code
+        LEFT JOIN (
+            SELECT code, AVG(turnover_rate) AS turnover_rate_5d_avg
+            FROM (
+                SELECT
+                    code,
+                    turnover_rate,
+                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
+                FROM factor_input_daily
+                WHERE trade_date <= %s
+                  AND turnover_rate IS NOT NULL
+            ) ranked_turnover
+            WHERE rn <= 5
+            GROUP BY code
+        ) tma ON sb.code = tma.code
+        LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
+        LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
+        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code AND ssd.trade_date = f.trade_date
+        LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
+        WHERE f.trade_date = %s
+          AND sb.instrument_type = %s
+          AND sb.is_delisted = 0
+          AND dk.open IS NOT NULL
+          AND dk.open > 0
+        ORDER BY sb.code
+        """
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (trade_date, trade_date, trade_date, instrument_type))
                 rows = cursor.fetchall()
         candidates: List[Dict[str, Any]] = []
         for row in rows:
@@ -360,11 +561,12 @@ class BacktestService:
             "explain_json": item.get("explain", {}),
         }
 
-    def _build_trades(self, run_id: str, strategy_id: str, trade_date: str, picks: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _build_trades(self, run_id: str, strategy_id: str, trade_date: str, picks: Sequence[Dict[str, Any]], request: BacktestRequest) -> List[Dict[str, Any]]:
         if not picks:
             return []
         codes = [p["code"] for p in picks if p.get("code")]
-        future = self._fetch_future_bars(codes, trade_date, lookahead=4)
+        lookahead = 4 if request.return_mode == "3d" else 2
+        future = self._fetch_future_bars(codes, trade_date, lookahead=lookahead)
         trades: List[Dict[str, Any]] = []
         for pick in picks:
             code = pick["code"]
@@ -372,13 +574,29 @@ class BacktestService:
             entry_price = _to_float(pick.get("entry_price"))
             if entry_price is None or entry_price <= 0:
                 continue
-            one_day_bar = bars[1] if len(bars) > 1 else None
-            three_day_bar = bars[3] if len(bars) > 3 else None
+            entry_bar = bars[0] if bars else None
+            if request.apply_execution_constraints and self._is_limit_blocked(entry_bar, "buy"):
+                continue
+            one_day_bar = bars[1] if request.return_mode == "1d" and len(bars) > 1 else None
+            three_day_bar = bars[3] if request.return_mode == "3d" and len(bars) > 3 else None
             exit_price_1d = _to_float(one_day_bar.get("open")) if one_day_bar else None
             exit_price_3d = _to_float(three_day_bar.get("close")) if three_day_bar else None
-            price_path = bars[:4]
-            high_values = [_to_float(b.get("high")) for b in price_path]
-            low_values = [_to_float(b.get("low")) for b in price_path]
+            entry_factor = _to_float(entry_bar.get("adj_factor")) if entry_bar else None
+            one_day_factor = _to_float(one_day_bar.get("adj_factor")) if one_day_bar else None
+            three_day_factor = _to_float(three_day_bar.get("adj_factor")) if three_day_bar else None
+            if request.apply_execution_constraints and self._is_limit_blocked(one_day_bar, "sell"):
+                exit_price_1d = None
+                one_day_factor = None
+            if request.apply_execution_constraints and self._is_limit_blocked(three_day_bar, "sell"):
+                exit_price_3d = None
+                three_day_factor = None
+            price_path = bars[:lookahead]
+            if request.use_adjusted_price and entry_factor:
+                high_values = [self._adjusted_compare_price(_to_float(b.get("high")), _to_float(b.get("adj_factor")), entry_factor) for b in price_path]
+                low_values = [self._adjusted_compare_price(_to_float(b.get("low")), _to_float(b.get("adj_factor")), entry_factor) for b in price_path]
+            else:
+                high_values = [_to_float(b.get("high")) for b in price_path]
+                low_values = [_to_float(b.get("low")) for b in price_path]
             high_values = [v for v in high_values if v is not None]
             low_values = [v for v in low_values if v is not None]
             trades.append(
@@ -391,10 +609,10 @@ class BacktestService:
                     "entry_price": entry_price,
                     "exit_date_1d": str(one_day_bar.get("trade_date")) if one_day_bar else None,
                     "exit_price_1d": exit_price_1d,
-                    "return_1d_pct": self._pct_return(entry_price, exit_price_1d),
+                    "return_1d_pct": self._pct_return(entry_price, exit_price_1d, entry_factor, one_day_factor, request) if request.return_mode == "1d" else None,
                     "exit_date_3d": str(three_day_bar.get("trade_date")) if three_day_bar else None,
                     "exit_price_3d": exit_price_3d,
-                    "return_3d_pct": self._pct_return(entry_price, exit_price_3d),
+                    "return_3d_pct": self._pct_return(entry_price, exit_price_3d, entry_factor, three_day_factor, request) if request.return_mode == "3d" else None,
                     "max_gain_pct": self._pct_return(entry_price, max(high_values) if high_values else None),
                     "max_drawdown_pct": self._pct_return(entry_price, min(low_values) if low_values else None),
                 }
@@ -406,10 +624,19 @@ class BacktestService:
             return {}
         placeholders = ",".join(["%s"] * len(codes))
         sql = f"""
-        SELECT code, trade_date, open, high, low, close
-        FROM daily_kline
-        WHERE code IN ({placeholders}) AND trade_date >= %s
-        ORDER BY code, trade_date
+        SELECT dk.code, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
+               prev.close AS prev_close,
+               af.adj_factor
+        FROM daily_kline dk
+        LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
+        LEFT JOIN daily_kline prev ON prev.code = dk.code
+          AND prev.trade_date = (
+            SELECT MAX(p.trade_date)
+            FROM daily_kline p
+            WHERE p.code = dk.code AND p.trade_date < dk.trade_date
+          )
+        WHERE dk.code IN ({placeholders}) AND dk.trade_date >= %s
+        ORDER BY dk.code, dk.trade_date
         """
         params = list(codes) + [trade_date]
         grouped: Dict[str, List[Dict[str, Any]]] = {code: [] for code in codes}
@@ -423,10 +650,54 @@ class BacktestService:
         return grouped
 
     @staticmethod
-    def _pct_return(entry: float | None, exit_price: float | None) -> float | None:
+    def _adjusted_compare_price(price: float | None, factor: float | None, entry_factor: float | None) -> float | None:
+        if price is None or factor is None or entry_factor is None or entry_factor <= 0:
+            return None
+        return price * factor / entry_factor
+
+    @staticmethod
+    def _is_limit_blocked(bar: Dict[str, Any] | None, side: str) -> bool:
+        if not bar:
+            return True
+        open_price = _to_float(bar.get("open"))
+        prev_close = _to_float(bar.get("prev_close"))
+        if open_price is None or open_price <= 0:
+            return True
+        if prev_close is None or prev_close <= 0:
+            return False
+        pct = (open_price - prev_close) / prev_close * 100
+        if side == "buy":
+            return pct >= 9.8
+        if side == "sell":
+            return pct <= -9.8
+        return False
+
+    @staticmethod
+    def _pct_return(
+        entry: float | None,
+        exit_price: float | None,
+        entry_factor: float | None = None,
+        exit_factor: float | None = None,
+        request: BacktestRequest | None = None,
+    ) -> float | None:
         if entry is None or exit_price is None or entry <= 0:
             return None
-        return round(((exit_price - entry) / entry) * 100, 4)
+        use_adjusted_price = bool(request.use_adjusted_price) if request else False
+        commission_rate = max(_to_float(getattr(request, "commission_bps", 0)) or 0, 0) / 10000 if request else 0.0
+        slippage_rate = max(_to_float(getattr(request, "slippage_bps", 0)) or 0, 0) / 10000 if request else 0.0
+        if use_adjusted_price:
+            if entry_factor is None or exit_factor is None or entry_factor <= 0:
+                return None
+            entry_value = entry * entry_factor
+            exit_value = exit_price * exit_factor
+        else:
+            entry_value = entry
+            exit_value = exit_price
+        effective_entry = entry_value * (1 + commission_rate + slippage_rate)
+        effective_exit = exit_value * (1 - commission_rate - slippage_rate)
+        if effective_entry <= 0:
+            return None
+        return round(((effective_exit - effective_entry) / effective_entry) * 100, 4)
 
     def _build_daily_summary(self, run_id: str, strategy_id: str, trade_date: str, trades: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         returns_1d = [t["return_1d_pct"] for t in trades if t.get("return_1d_pct") is not None]

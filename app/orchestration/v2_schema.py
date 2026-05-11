@@ -39,6 +39,76 @@ BACKTEST_RUN_COLUMNS: dict[str, str] = {
     "is_system_test": "ALTER TABLE backtest_run ADD COLUMN is_system_test TINYINT(1) NOT NULL DEFAULT 0 AFTER cancel_requested",
 }
 
+V21_TABLE_DDL: dict[str, str] = {
+    "adj_factor_daily": """
+    CREATE TABLE IF NOT EXISTS adj_factor_daily (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(16) NOT NULL,
+        trade_date DATE NOT NULL,
+        adj_factor DECIMAL(20,8) NOT NULL,
+        source VARCHAR(32) NOT NULL DEFAULT 'tushare_adj_factor',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_adj_factor_daily (code, trade_date),
+        KEY idx_adj_factor_trade_date (trade_date),
+        KEY idx_adj_factor_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    "stock_moneyflow_daily": """
+    CREATE TABLE IF NOT EXISTS stock_moneyflow_daily (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(16) NOT NULL,
+        trade_date DATE NOT NULL,
+        buy_sm_vol BIGINT DEFAULT NULL,
+        buy_sm_amount DECIMAL(20,4) DEFAULT NULL,
+        sell_sm_vol BIGINT DEFAULT NULL,
+        sell_sm_amount DECIMAL(20,4) DEFAULT NULL,
+        buy_md_vol BIGINT DEFAULT NULL,
+        buy_md_amount DECIMAL(20,4) DEFAULT NULL,
+        sell_md_vol BIGINT DEFAULT NULL,
+        sell_md_amount DECIMAL(20,4) DEFAULT NULL,
+        buy_lg_vol BIGINT DEFAULT NULL,
+        buy_lg_amount DECIMAL(20,4) DEFAULT NULL,
+        sell_lg_vol BIGINT DEFAULT NULL,
+        sell_lg_amount DECIMAL(20,4) DEFAULT NULL,
+        buy_elg_vol BIGINT DEFAULT NULL,
+        buy_elg_amount DECIMAL(20,4) DEFAULT NULL,
+        sell_elg_vol BIGINT DEFAULT NULL,
+        sell_elg_amount DECIMAL(20,4) DEFAULT NULL,
+        net_mf_vol BIGINT DEFAULT NULL,
+        net_mf_amount DECIMAL(20,4) DEFAULT NULL,
+        source VARCHAR(32) NOT NULL DEFAULT 'tushare_moneyflow',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_stock_moneyflow_daily (code, trade_date),
+        KEY idx_moneyflow_trade_date (trade_date),
+        KEY idx_moneyflow_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    "stock_chip_daily": """
+    CREATE TABLE IF NOT EXISTS stock_chip_daily (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(16) NOT NULL,
+        trade_date DATE NOT NULL,
+        his_low DECIMAL(12,4) DEFAULT NULL,
+        his_high DECIMAL(12,4) DEFAULT NULL,
+        cost_5pct DECIMAL(12,4) DEFAULT NULL,
+        cost_15pct DECIMAL(12,4) DEFAULT NULL,
+        cost_50pct DECIMAL(12,4) DEFAULT NULL,
+        cost_85pct DECIMAL(12,4) DEFAULT NULL,
+        cost_95pct DECIMAL(12,4) DEFAULT NULL,
+        weight_avg DECIMAL(12,4) DEFAULT NULL,
+        winner_rate DECIMAL(12,4) DEFAULT NULL,
+        source VARCHAR(32) NOT NULL DEFAULT 'tushare_cyq_perf',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_stock_chip_daily (code, trade_date),
+        KEY idx_chip_trade_date (trade_date),
+        KEY idx_chip_code (code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+}
+
 
 def _existing_columns(table: str) -> set[str]:
     with mysql_conn() as conn:
@@ -57,6 +127,11 @@ def _existing_indexes(table: str) -> set[str]:
 def ensure_v2_schema() -> dict:
     init_mysql_schema()
     applied: list[str] = []
+    with mysql_conn(dict_cursor=False) as conn:
+        with conn.cursor() as cursor:
+            for table_name, ddl in V21_TABLE_DDL.items():
+                cursor.execute(ddl)
+                applied.append(table_name)
     columns = _existing_columns("factor_input_daily")
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:

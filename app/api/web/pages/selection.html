@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260510n" />
 </head>
 <body data-page="selection">
   <div class="app-shell dashboard-shell">
@@ -81,8 +81,11 @@
             </div>
 
             <div class="terminal-form-row time-row">
-              <label for="selection-run-time-display">运行时间</label>
-              <div class="time-display" id="selection-run-time-display">自动使用最新交易日</div>
+              <label for="selection-run-time-input">运行时间</label>
+              <span class="date-input-shell selection-datetime-shell" id="selection-run-time-shell">
+                <span id="selection-run-time-display" class="date-input-display">自动使用最新交易日</span>
+                <input id="selection-run-time-input" type="datetime-local" aria-label="运行时间" />
+              </span>
             </div>
 
             <div class="terminal-actions">
@@ -211,6 +214,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260428e"></script>
-  <script src="/static/js/selection.js?v=20260507d"></script>
+  <script src="/static/js/selection.js?v=20260510a"></script>
 </body>
 </html>

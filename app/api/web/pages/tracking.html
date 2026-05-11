@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260511e" />
 </head>
 <body data-page="tracking">
   <div class="app-shell dashboard-shell">
@@ -69,9 +69,8 @@
           <div class="card-header">
             <p class="card-kicker">Overview</p>
             <h2>复盘概览</h2>
-          <p id="tracking-summary-text" class="muted">正在加载...</p>
-        </div>
-        <div id="tracking-review-summary" class="list-stack empty-state">加载中...</div>
+          </div>
+          <div id="tracking-review-summary" class="list-stack empty-state">加载中...</div>
         </article>
 
         <article class="card review-notes-card">
@@ -85,8 +84,11 @@
 
       <section class="card tracking-table-console">
         <div class="card-header">
-          <p class="card-kicker">Records</p>
-          <h2>个股复盘列表</h2>
+          <div>
+            <p class="card-kicker">Records</p>
+            <h2>个股复盘列表</h2>
+            <p id="tracking-summary-text" class="muted">正在加载...</p>
+          </div>
           <div class="toolbar tracking-filters">
             <label class="tracking-filter-field">
               <span class="muted">策略</span>
@@ -94,12 +96,14 @@
                 <option value="">全部策略</option>
               </select>
             </label>
-            <label class="tracking-filter-field">
+            <label class="tracking-filter-field tracking-date-field">
               <span class="muted">选股日期</span>
-              <select id="tracking-selection-date">
-                <option value="">全部日期</option>
-              </select>
+              <span class="date-input-shell" id="tracking-selection-date-shell">
+                <span id="tracking-selection-date-display" class="date-input-display">全部日期</span>
+                <input id="tracking-selection-date" type="date" aria-label="选股日期筛选" />
+              </span>
             </label>
+
             <label class="tracking-filter-field tracking-page-size-field">
               <span class="muted">每页</span>
               <select id="tracking-page-size">
@@ -112,7 +116,6 @@
             <button id="refresh-tracking-page" class="btn btn-secondary" type="button">刷新</button>
           </div>
         </div>
-        <div id="tracking-record-cards" class="tracking-record-cards empty-state">加载中...</div>
         <div class="table-wrap tracking-detail-table">
           <table>
             <thead>
@@ -150,6 +153,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/tracking.js?v=20260507d"></script>
+  <script src="/static/js/tracking.js?v=20260511a"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260508e" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260511g" />
 </head>
 <body data-page="stock-detail">
   <div class="app-shell stock-detail-shell stock-terminal-shell">
@@ -78,7 +78,6 @@
               </div>
               <div class="chart-tabs" aria-label="分时图选项">
                 <button class="active" type="button">分时</button>
-                <button type="button" disabled>五日</button>
               </div>
             </div>
             <div class="chart-wrap terminal-chart-wrap intraday-terminal-chart">
@@ -91,12 +90,18 @@
               <div class="card-header with-actions stock-terminal-card-head">
                 <div>
                   <p class="card-kicker">Candlestick</p>
-                  <h2>日K走势</h2>
+                  <h2 id="stock-kline-title">日K走势</h2>
                 </div>
-                <div class="chart-tabs" aria-label="K线周期">
-                  <button class="active" type="button">日K</button>
-                  <button type="button" disabled>周K</button>
-                  <button type="button" disabled>月K</button>
+                <div class="kline-control-stack">
+                  <div class="chart-tabs" aria-label="K线周期">
+                    <button class="active" type="button" data-kline-period="day">日K</button>
+                    <button type="button" data-kline-period="week">周K</button>
+                    <button type="button" data-kline-period="month">月K</button>
+                  </div>
+                  <div class="kline-date-range" aria-label="K线时间范围">
+                    <label>开始 <input id="kline-start-date" type="date" /></label>
+                    <label>结束 <input id="kline-end-date" type="date" /></label>
+                  </div>
                 </div>
               </div>
               <div class="chart-wrap terminal-chart-wrap kline-terminal-chart">
@@ -137,6 +142,22 @@
                 <h2>基本面</h2>
               </div>
               <div id="stock-detail-fundamentals" class="detail-grid muted">加载中...</div>
+            </article>
+
+            <article class="card compact-info-card chip-card">
+              <div class="card-header">
+                <p class="card-kicker">Chip</p>
+                <h2>筹码成本</h2>
+              </div>
+              <div id="stock-detail-chip" class="detail-grid muted">加载中...</div>
+            </article>
+
+            <article class="card compact-info-card moneyflow-card">
+              <div class="card-header">
+                <p class="card-kicker">Money Flow</p>
+                <h2>资金流</h2>
+              </div>
+              <div id="stock-detail-moneyflow" class="detail-grid muted">加载中...</div>
             </article>
           </section>
         </section>
@@ -182,6 +203,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/stock-detail.js?v=20260508b"></script>
+  <script src="/static/js/stock-detail.js?v=20260511g"></script>
 </body>
 </html>

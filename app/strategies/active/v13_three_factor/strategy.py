@@ -1,4 +1,4 @@
-"""V13 三因子策略模板。
+"""三因子策略模板。
 
 这是新模块化架构下的第一个可插拔策略骨架。
 当前阶段先定义统一接口和配置读取方式，后续再把旧仓库里的
@@ -58,8 +58,20 @@ def _stddev(values: List[float]) -> float:
     return sqrt(variance)
 
 
+def _to_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if number == number else default
+
+
+def _clamp_score(value: float) -> float:
+    return round(max(0.0, min(value, 100.0)), 2)
+
+
 class V13ThreeFactorStrategy:
-    """V13 三因子策略。
+    """三因子策略。
 
     核心因子：
     - turnover
@@ -68,24 +80,71 @@ class V13ThreeFactorStrategy:
     """
 
     strategy_id = "v13_three_factor"
-    strategy_name = "V13 三因子策略"
+    strategy_name = "三因子策略"
     version = "0.1.0"
 
     def __init__(self, config: Dict[str, Any] | None = None):
         self.config = config or self.default_config()
 
     def prepare_context(self, data_bundle: Dict[str, Any]) -> Dict[str, Any]:
-        return data_bundle
+        filters = self.config.get("hard_filters", {}) or {}
+        min_price = _to_float(filters.get("min_price"), 5) or 5
+        max_price = _to_float(filters.get("max_price"), 150) or 150
+        min_avg_amount_20 = _to_float(filters.get("min_avg_amount_20"), 50_000_000) or 50_000_000
+        min_history_days = int(filters.get("min_history_days") or 20)
+        require_factor_input = bool(filters.get("require_factor_input", True))
+
+        candidates = []
+        for item in data_bundle.get("candidates", []):
+            close = _to_float(item.get("close"), None)
+            avg_amount_20 = _to_float(item.get("avg_amount_20"), None)
+            kline_count_20 = int(item.get("kline_count_20") or 0)
+            if item.get("is_st"):
+                continue
+            if close is None or close < min_price or close > max_price:
+                continue
+            if kline_count_20 < min_history_days:
+                continue
+            if avg_amount_20 is None or avg_amount_20 < min_avg_amount_20:
+                continue
+            if require_factor_input and item.get("turnover_rate") is None:
+                continue
+            candidates.append(item)
+
+        return {
+            **data_bundle,
+            "candidates": candidates,
+            "v13_filter_summary": {
+                "before": len(data_bundle.get("candidates", [])),
+                "after": len(candidates),
+                "removed": len(data_bundle.get("candidates", [])) - len(candidates),
+                "hard_filters": filters,
+            },
+        }
 
     def compute_factors(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         for item in data_bundle.get("candidates", []):
             score = self.score_stock(str(item.get("code")), item)
+            reasons = [
+                f"换手 {score.factor_scores.get('turnover', 0):.2f}：温和活跃优先",
+                f"低波 {score.factor_scores.get('lowvol', 0):.2f}：20日区间宽度越窄越稳",
+                f"反转 {score.factor_scores.get('reversal', 0):.2f}：偏好温和回撤后的修复",
+            ]
+            risks = []
+            volume_ratio = _to_float(item.get("volume_ratio"), None)
+            turnover_rate = _to_float(item.get("turnover_rate"), None)
+            if volume_ratio is not None and volume_ratio > 3:
+                risks.append("量比偏高，短线可能过热")
+            if turnover_rate is not None and turnover_rate < 0.5:
+                risks.append("换手偏低，流动性需继续观察")
             rows.append(
                 {
                     **item,
                     "factors": score.factor_scores,
                     "v13_notes": score.notes,
+                    "candidate_reasons": (item.get("candidate_reasons") or []) + reasons,
+                    "candidate_risks": (item.get("candidate_risks") or []) + risks,
                 }
             )
         return rows
@@ -126,6 +185,13 @@ class V13ThreeFactorStrategy:
                 "lowvol": 0.35,
                 "reversal": 0.30,
             },
+            "hard_filters": {
+                "min_price": 5,
+                "max_price": 150,
+                "min_avg_amount_20": 50_000_000,
+                "min_history_days": 20,
+                "require_factor_input": True,
+            },
             "holding_period": 3,
             "score_threshold": 60,
             "max_positions": 5,
@@ -144,7 +210,36 @@ class V13ThreeFactorStrategy:
         如果上游已经给出 *_score，则优先直接使用。
         """
 
-        if all(key in feature_row for key in ["turnover_score", "lowvol_score", "reversal_score"]):
+        turnover_rate = _to_float(feature_row.get("turnover_rate"), None)
+        volume_ratio = _to_float(feature_row.get("volume_ratio"), None)
+        close = _to_float(feature_row.get("close"), None)
+        close_20d = _to_float(feature_row.get("close_20d"), None)
+        ma20 = _to_float(feature_row.get("ma20"), None)
+        max_close_20 = _to_float(feature_row.get("max_close_20"), None)
+        min_close_20 = _to_float(feature_row.get("min_close_20"), None)
+
+        if turnover_rate is not None and close is not None and close_20d and ma20 and max_close_20 and min_close_20:
+            # 换手：偏好 0.8%~3% 的温和活跃区间，避免极低流动性和过热换手。
+            turnover_score = _clamp_score(100 - abs(turnover_rate - 1.8) * 18)
+            if volume_ratio is not None:
+                if 0.8 <= volume_ratio <= 1.8:
+                    turnover_score = _clamp_score(turnover_score + 5)
+                elif volume_ratio > 3:
+                    turnover_score = _clamp_score(turnover_score - min((volume_ratio - 3) * 8, 20))
+
+            # 低波：用 20 日收盘价区间宽度近似波动，区间越窄越稳。
+            range_20 = (max_close_20 - min_close_20) / ma20 if ma20 else 0
+            lowvol_score = _clamp_score(100 - range_20 * 180)
+
+            # 反转：偏好温和回撤后的修复，明显上涨或深跌都降分。
+            ret_20d = (close - close_20d) / close_20d if close_20d else 0
+            if ret_20d < -0.25:
+                reversal_score = _clamp_score(35 + (ret_20d + 0.25) * 120)
+            elif ret_20d < 0:
+                reversal_score = _clamp_score(55 + min(abs(ret_20d) * 220, 35))
+            else:
+                reversal_score = _clamp_score(55 - ret_20d * 180)
+        elif all(key in feature_row for key in ["turnover_score", "lowvol_score", "reversal_score"]):
             turnover_score = float(feature_row.get("turnover_score", 0))
             lowvol_score = float(feature_row.get("lowvol_score", 0))
             reversal_score = float(feature_row.get("reversal_score", 0))
@@ -192,6 +287,7 @@ class V13ThreeFactorStrategy:
                 "lowvol": round(lowvol_score, 2),
                 "reversal": round(reversal_score, 2),
             },
+            notes=["使用 factor_input_daily + 20日行情窗口计算"] if turnover_rate is not None else [],
         )
 
     def run(self, payload: StrategyInput) -> StrategyOutput:

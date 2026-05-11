@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.data_ingestion.intraday_bar_sync import cached_bars, get_or_fetch_intraday_bars
 from app.shared.db import mysql_conn
 
 router = APIRouter(tags=["stocks"])
@@ -305,10 +306,22 @@ def stock_overview(code: str) -> dict:
     }
 
 
+@router.get("/stocks/{code}/intraday-bars")
+def stock_intraday_bars(
+    code: str,
+    trade_date: str | None = Query(default=None),
+    refresh: bool = Query(default=False),
+) -> dict:
+    try:
+        return get_or_fetch_intraday_bars(code=code, trade_date=trade_date, refresh=refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"分钟线补全失败: {type(exc).__name__}: {str(exc)[:180]}") from exc
+
+
 @router.get("/stocks/{code}")
 def stock_detail(
     code: str,
-    history_limit: int = Query(default=20, ge=5, le=120),
+    history_limit: int = Query(default=600, ge=5, le=1000),
     news_limit: int = Query(default=12, ge=0, le=50),
     intraday_limit: int = Query(default=240, ge=0, le=400),
 ) -> dict:
@@ -455,6 +468,53 @@ def stock_detail(
             )
             realtime_snapshot = cursor.fetchone()
 
+            cursor.execute(
+                """
+                SELECT
+                    trade_date,
+                    his_low,
+                    his_high,
+                    cost_5pct,
+                    cost_15pct,
+                    cost_50pct,
+                    cost_85pct,
+                    cost_95pct,
+                    weight_avg,
+                    winner_rate,
+                    updated_at
+                FROM stock_chip_daily
+                WHERE code = %s
+                ORDER BY trade_date DESC
+                LIMIT 1
+                """,
+                (code,),
+            )
+            chip_row = cursor.fetchone()
+
+            cursor.execute(
+                """
+                SELECT
+                    trade_date,
+                    buy_sm_amount,
+                    sell_sm_amount,
+                    buy_md_amount,
+                    sell_md_amount,
+                    buy_lg_amount,
+                    sell_lg_amount,
+                    buy_elg_amount,
+                    sell_elg_amount,
+                    net_mf_amount,
+                    net_mf_vol,
+                    updated_at
+                FROM stock_moneyflow_daily
+                WHERE code = %s
+                ORDER BY trade_date DESC
+                LIMIT 1
+                """,
+                (code,),
+            )
+            moneyflow_row = cursor.fetchone()
+
             intraday_rows = []
             if intraday_limit > 0:
                 intraday_trade_date = realtime_snapshot.get("trade_date") if realtime_snapshot else None
@@ -487,6 +547,8 @@ def stock_detail(
                 metadata = {}
         metadata = metadata or {}
 
+        explain_raw_metrics = ((metadata.get("explain") or {}).get("raw_metrics") or {})
+        saved_raw_metrics = metadata.get("raw_metrics") or {}
         item = {
             "run_id": row.get("run_id"),
             "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
@@ -496,9 +558,12 @@ def stock_detail(
             "score": _to_float(row.get("score")),
             "rank_no": row.get("rank_no"),
             "created_at": str(row.get("created_at")) if row.get("created_at") else None,
-            "factor_scores": {
-                **(metadata.get("raw_metrics") or {}),
-                **(metadata.get("factors") or {}),
+            "sentiment_source": (metadata.get("explain") or {}).get("sentiment_source"),
+            "news_count": explain_raw_metrics.get("news_count"),
+            "factor_scores": metadata.get("factors") or {},
+            "raw_metrics": {
+                **explain_raw_metrics,
+                **saved_raw_metrics,
             },
         }
         selection_history.append(item)
@@ -560,6 +625,102 @@ def stock_detail(
             "updated_at": str(realtime_snapshot.get("updated_at")) if realtime_snapshot.get("updated_at") else None,
         }
 
+    chip = None
+    if chip_row:
+        latest_reference_price = (realtime or {}).get("latest_price") or latest_close
+        weight_avg = _to_float(chip_row.get("weight_avg"))
+        cost_50pct = _to_float(chip_row.get("cost_50pct"))
+        cost_15pct = _to_float(chip_row.get("cost_15pct"))
+        cost_85pct = _to_float(chip_row.get("cost_85pct"))
+        winner_rate = _to_float(chip_row.get("winner_rate"))
+        price_vs_weight_avg_pct = (
+            (latest_reference_price - weight_avg) / weight_avg * 100
+            if latest_reference_price is not None and weight_avg
+            else None
+        )
+        cost_band_width_pct = (
+            (cost_85pct - cost_15pct) / cost_50pct * 100
+            if cost_85pct is not None and cost_15pct is not None and cost_50pct
+            else None
+        )
+        chip_label = "中性"
+        if winner_rate is not None:
+            if winner_rate >= 70:
+                chip_label = "获利盘偏高"
+            elif winner_rate <= 35:
+                chip_label = "套牢盘偏多"
+            elif price_vs_weight_avg_pct is not None and price_vs_weight_avg_pct > 5:
+                chip_label = "价格高于平均成本"
+            elif price_vs_weight_avg_pct is not None and price_vs_weight_avg_pct < -5:
+                chip_label = "价格低于平均成本"
+        chip = {
+            "trade_date": str(chip_row.get("trade_date")) if chip_row.get("trade_date") else None,
+            "his_low": _to_float(chip_row.get("his_low")),
+            "his_high": _to_float(chip_row.get("his_high")),
+            "cost_5pct": _to_float(chip_row.get("cost_5pct")),
+            "cost_15pct": cost_15pct,
+            "cost_50pct": cost_50pct,
+            "cost_85pct": cost_85pct,
+            "cost_95pct": _to_float(chip_row.get("cost_95pct")),
+            "weight_avg": weight_avg,
+            "winner_rate": winner_rate,
+            "price_vs_weight_avg_pct": _round(price_vs_weight_avg_pct, 2),
+            "cost_band_width_pct": _round(cost_band_width_pct, 2),
+            "label": chip_label,
+            "updated_at": str(chip_row.get("updated_at")) if chip_row.get("updated_at") else None,
+        }
+
+    moneyflow = None
+    if moneyflow_row:
+        net_mf_amount = _to_float(moneyflow_row.get("net_mf_amount"))
+        buy_lg_amount = _to_float(moneyflow_row.get("buy_lg_amount"))
+        sell_lg_amount = _to_float(moneyflow_row.get("sell_lg_amount"))
+        buy_elg_amount = _to_float(moneyflow_row.get("buy_elg_amount"))
+        sell_elg_amount = _to_float(moneyflow_row.get("sell_elg_amount"))
+        buy_sm_amount = _to_float(moneyflow_row.get("buy_sm_amount"))
+        sell_sm_amount = _to_float(moneyflow_row.get("sell_sm_amount"))
+        buy_md_amount = _to_float(moneyflow_row.get("buy_md_amount"))
+        sell_md_amount = _to_float(moneyflow_row.get("sell_md_amount"))
+        large_net_amount = (
+            (buy_lg_amount or 0) + (buy_elg_amount or 0) - (sell_lg_amount or 0) - (sell_elg_amount or 0)
+            if any(v is not None for v in (buy_lg_amount, buy_elg_amount, sell_lg_amount, sell_elg_amount))
+            else None
+        )
+        retail_net_amount = (
+            (buy_sm_amount or 0) + (buy_md_amount or 0) - (sell_sm_amount or 0) - (sell_md_amount or 0)
+            if any(v is not None for v in (buy_sm_amount, buy_md_amount, sell_sm_amount, sell_md_amount))
+            else None
+        )
+        amount_base_yuan = (_to_float((realtime or {}).get("amount")) or (_to_float(latest_kline.get("amount")) if latest_kline else None))
+        amount_base_wan = amount_base_yuan / 10000 if amount_base_yuan else None
+        net_flow_intensity_pct = (net_mf_amount / amount_base_wan * 100 if net_mf_amount is not None and amount_base_wan else None)
+        large_flow_ratio_pct = (large_net_amount / amount_base_wan * 100 if large_net_amount is not None and amount_base_wan else None)
+        moneyflow_label = "资金分歧"
+        if net_mf_amount is not None:
+            if net_mf_amount > 0 and (large_net_amount or 0) > 0:
+                moneyflow_label = "主力净流入"
+            elif net_mf_amount < 0 and (large_net_amount or 0) < 0:
+                moneyflow_label = "主力净流出"
+            elif net_mf_amount > 0:
+                moneyflow_label = "整体净流入"
+            elif net_mf_amount < 0:
+                moneyflow_label = "整体净流出"
+        moneyflow = {
+            "trade_date": str(moneyflow_row.get("trade_date")) if moneyflow_row.get("trade_date") else None,
+            "net_mf_amount": net_mf_amount,
+            "net_mf_vol": _to_float(moneyflow_row.get("net_mf_vol")),
+            "buy_lg_amount": buy_lg_amount,
+            "sell_lg_amount": sell_lg_amount,
+            "buy_elg_amount": buy_elg_amount,
+            "sell_elg_amount": sell_elg_amount,
+            "large_net_amount": _round(large_net_amount, 2),
+            "retail_net_amount": _round(retail_net_amount, 2),
+            "net_flow_intensity_pct": _round(net_flow_intensity_pct, 2),
+            "large_flow_ratio_pct": _round(large_flow_ratio_pct, 2),
+            "label": moneyflow_label,
+            "updated_at": str(moneyflow_row.get("updated_at")) if moneyflow_row.get("updated_at") else None,
+        }
+
     intraday = [
         {
             "quote_minute": str(row.get("quote_minute")) if row.get("quote_minute") else None,
@@ -570,6 +731,11 @@ def stock_detail(
         }
         for row in reversed(intraday_rows)
     ]
+
+    full_intraday_trade_date = (
+        realtime.get("trade_date") if realtime else None
+    ) or (str(latest_kline.get("trade_date")) if latest_kline and latest_kline.get("trade_date") else None)
+    full_intraday_items = cached_bars(str(basic.get("code")), full_intraday_trade_date) if full_intraday_trade_date else []
 
     return {
         "code": basic.get("code"),
@@ -612,6 +778,14 @@ def stock_detail(
         "price_history": price_history,
         "realtime": realtime,
         "realtime_intraday": intraday,
+        "intraday_bars": {
+            "trade_date": full_intraday_trade_date,
+            "source_status": "cached" if full_intraday_items else "empty",
+            "count": len(full_intraday_items),
+            "items": full_intraday_items,
+        },
+        "chip": chip,
+        "moneyflow": moneyflow,
         "latest_selection": latest_selection,
         "selection_history": selection_history,
         "recent_news": recent_news,

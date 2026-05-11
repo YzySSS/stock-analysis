@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from datetime import date, timedelta
+from datetime import date
 
 from app.data_ingestion.daily_kline_sync import DailyKlineSync
 from app.shared.task_log import TaskRunLogger
@@ -20,18 +20,18 @@ def build_run_id() -> str:
 def main() -> None:
     logger = TaskRunLogger()
     run_id = build_run_id()
-    yesterday = date.today() - timedelta(days=1)
-    trade_date = yesterday.isoformat()
+    sync = DailyKlineSync()
+    trade_date = sync.latest_open_trade_date()
     metadata = {
         "mode": "incremental_daily",
         "trade_date": trade_date,
         "start_date": trade_date,
         "end_date": trade_date,
         "limit": None,
+        "source": "tushare_daily",
     }
     logger.start(task_name="daily_kline_increment", run_id=run_id, metadata=metadata)
     try:
-        sync = DailyKlineSync()
         result = sync.run(
             start_date=trade_date,
             end_date=trade_date,

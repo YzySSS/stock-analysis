@@ -300,7 +300,7 @@ V1 目标不是做成券商 App，而是做成一套清晰、可信、便于研�
   "name": "平安银行",
   "industry": "银行",
   "strategy_id": "lowvol_reversal",
-  "strategy_display_name": "低波动反转策略",
+  "strategy_display_name": "低波反转策略 v2.1",
   "strategy_version": "v1",
   "selection": {
     "run_id": "selection_20260427_120000",
@@ -377,7 +377,7 @@ V1 目标不是做成券商 App，而是做成一套清晰、可信、便于研�
 ```json
 {
   "id": "v13_three_factor",
-  "display_name": "V13 三因子策略",
+  "display_name": "三因子策略",
   "version": "0.1.0",
   "status": "active",
   "mode": "current|legacy",
@@ -418,7 +418,7 @@ V1 目标不是做成券商 App，而是做成一套清晰、可信、便于研�
   "run_id": "selection_20260427_120000",
   "strategy": {
     "id": "lowvol_reversal",
-    "display_name": "低波动反转策略",
+    "display_name": "低波反转策略 v2.1",
     "version": "v1"
   },
   "summary": {

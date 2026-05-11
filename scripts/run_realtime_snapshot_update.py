@@ -250,7 +250,13 @@ def save_rows(rows: list[RealtimeRow], retention_days: int) -> dict:
         pre_close=VALUES(pre_close), open_price=VALUES(open_price), high_price=VALUES(high_price), low_price=VALUES(low_price),
         volume=VALUES(volume), amount=VALUES(amount), source=VALUES(source)
     """
-    cutoff = (date.today() - timedelta(days=max(retention_days - 1, 0))).isoformat()
+    today_text = date.today().isoformat()
+    latest_trade_date = max((r.trade_date for r in rows if r.trade_date), default=today_text)
+    calendar_cutoff = (date.today() - timedelta(days=max(retention_days - 1, 0))).isoformat()
+    if retention_days <= 1 and latest_trade_date <= today_text:
+        cutoff = max(calendar_cutoff, latest_trade_date)
+    else:
+        cutoff = calendar_cutoff
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.executemany(snapshot_sql, values)
@@ -259,7 +265,13 @@ def save_rows(rows: list[RealtimeRow], retention_days: int) -> dict:
             intraday_rows = cursor.rowcount
             cursor.execute("DELETE FROM stock_realtime_intraday WHERE trade_date < %s", (cutoff,))
             deleted_old_rows = cursor.rowcount
-    return {"snapshot_rows": snapshot_rows, "intraday_rows": intraday_rows, "deleted_old_rows": deleted_old_rows}
+    return {
+        "snapshot_rows": snapshot_rows,
+        "intraday_rows": intraday_rows,
+        "deleted_old_rows": deleted_old_rows,
+        "retention_cutoff": cutoff,
+        "latest_trade_date": latest_trade_date,
+    }
 
 
 def mark_success(state: dict, now: datetime) -> dict:

@@ -1,6 +1,6 @@
 strategy:
   id: v13_three_factor
-  name: V13 三因子策略
+  name: 三因子策略
   version: 0.1.0
   status: active
 
@@ -25,7 +25,6 @@ factors:
 data_sources:
   primary:
     - tushare
-    - baostock
     - akshare
   database:
     engine: mysql

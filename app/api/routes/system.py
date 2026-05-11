@@ -453,12 +453,27 @@ def _data_baseline_summary() -> dict:
             fund_flow_total = int(fund_flow_row.get("total") or 0)
             fund_flow_valid = int(fund_flow_row.get("valid") or 0)
 
+            cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM adj_factor_daily")
+            adj_date = (cursor.fetchone() or {}).get("latest_trade_date")
+            cursor.execute("SELECT COUNT(*) AS count FROM adj_factor_daily WHERE trade_date = %s", (adj_date,))
+            adj_count = int((cursor.fetchone() or {}).get("count") or 0) if adj_date else 0
+
+            cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM stock_moneyflow_daily")
+            moneyflow_date = (cursor.fetchone() or {}).get("latest_trade_date")
+            cursor.execute("SELECT COUNT(*) AS count FROM stock_moneyflow_daily WHERE trade_date = %s", (moneyflow_date,))
+            moneyflow_count = int((cursor.fetchone() or {}).get("count") or 0) if moneyflow_date else 0
+
+            cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM stock_chip_daily")
+            chip_date = (cursor.fetchone() or {}).get("latest_trade_date")
+            cursor.execute("SELECT COUNT(*) AS count FROM stock_chip_daily WHERE trade_date = %s", (chip_date,))
+            chip_count = int((cursor.fetchone() or {}).get("count") or 0) if chip_date else 0
+
     sentiment = _sentiment_quality_stats()
     sentiment_effective = int(sentiment.get("effective_news_count") or 0)
     sentiment_raw = int(sentiment.get("raw_news_count") or 0)
 
     def pct(done: int, total: int) -> float | None:
-        return round(done / total * 100, 2) if total else None
+        return round(min(done / total * 100, 100), 2) if total else None
 
     return {
         "items": [
@@ -467,6 +482,9 @@ def _data_baseline_summary() -> dict:
             {"key": "valuation", "label": "估值数据", "value": pct(valuation_count, total_stock), "done": valuation_count, "total": total_stock, "unit": "记录数"},
             {"key": "factor", "label": "因子输入", "value": pct(factor_count, total_stock), "done": factor_count, "total": total_stock, "unit": "记录数"},
             {"key": "realtime", "label": "实时快照", "value": pct(realtime_valid, realtime_total), "done": realtime_valid, "total": realtime_total, "unit": "记录数"},
+            {"key": "adjfactor", "label": "复权因子", "value": pct(adj_count, total_stock), "done": adj_count, "total": total_stock, "unit": f"{adj_date or '-'} 记录数"},
+            {"key": "moneyflow", "label": "个股资金流", "value": pct(moneyflow_count, total_stock), "done": moneyflow_count, "total": total_stock, "unit": f"{moneyflow_date or '-'} 记录数"},
+            {"key": "chip", "label": "筹码数据", "value": pct(chip_count, total_stock), "done": chip_count, "total": total_stock, "unit": f"{chip_date or '-'} 记录数"},
             {"key": "fundflow", "label": "板块资金流", "value": pct(fund_flow_valid, fund_flow_total), "done": fund_flow_valid, "total": fund_flow_total, "unit": "记录数"},
             {"key": "sentiment", "label": "情绪质量", "value": sentiment.get("avg_quality"), "done": sentiment_effective, "total": sentiment_raw, "unit": "有效新闻 / 总新闻"},
         ]

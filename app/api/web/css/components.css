@@ -135,16 +135,32 @@
   min-width: 88px;
 }
 
-.tracking-filter-field select {
+.tracking-date-field {
+  min-width: 180px;
+}
+
+.tracking-clear-date-btn {
+  min-height: 42px;
+  align-self: flex-end;
+}
+
+.tracking-filter-field select,
+.tracking-filter-field input[type="date"] {
   background: var(--panel-soft);
   border: 1px solid var(--panel-border);
   color: var(--text);
   border-radius: 10px;
   padding: 10px 12px;
-  appearance: none;
+  min-height: 42px;
 }
 
-.tracking-filter-field select:focus {
+.tracking-filter-field input[type="date"] {
+  min-width: 180px;
+  color-scheme: dark;
+}
+
+.tracking-filter-field select:focus,
+.tracking-filter-field input[type="date"]:focus {
   outline: 1px solid var(--primary);
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
@@ -178,6 +194,25 @@
 
 .small-field {
   max-width: 160px;
+}
+
+.inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.inline-checkbox input,
+.backtest-terminal-form .inline-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  accent-color: var(--primary);
 }
 
 .table-wrap {

@@ -24,7 +24,7 @@ def _score_0_100(value: Any, default: float = 50.0) -> float:
 
 
 class V12LegacyStrategy(BaseSelectionStrategy):
-    """V12 多因子策略的新架构可执行版。
+    """多因子策略的新架构可执行版。
 
     目标不是照搬旧脚本，而是按 V12 白皮书语义在当前 MySQL 主链路上重建：
     trend / momentum / quality / sentiment / value / liquidity 六因子，支持市场强度
@@ -34,16 +34,76 @@ class V12LegacyStrategy(BaseSelectionStrategy):
     strategy_id = "v12_legacy"
 
     def prepare_context(self, data_bundle: Dict[str, Any]) -> Dict[str, Any]:
-        return data_bundle
+        candidates = data_bundle.get("candidates", [])
+        filtered = [item for item in candidates if self._passes_hard_filters(item)]
+        return {
+            **data_bundle,
+            "candidates": filtered,
+            "v12_filter_summary": {
+                "before": len(candidates),
+                "after": len(filtered),
+                "removed": len(candidates) - len(filtered),
+                "hard_filters": self.config.get("hard_filters", {}),
+            },
+        }
+
+    def _passes_hard_filters(self, item: Dict[str, Any]) -> bool:
+        filters = self.config.get("hard_filters", {}) or {}
+        name = str(item.get("name") or "")
+        close = _to_float(item.get("close"), None)
+        amount = _to_float(item.get("amount"), None)
+        ma20 = _to_float(item.get("ma20"), None)
+        kline_count_20 = int(item.get("kline_count_20") or 0)
+
+        if filters.get("exclude_st", True) and "ST" in name.upper():
+            return False
+
+        min_price = _to_float(filters.get("min_price"), None)
+        max_price = _to_float(filters.get("max_price"), None)
+        if close is None or close <= 0:
+            return False
+        if min_price is not None and close < min_price:
+            return False
+        if max_price is not None and close > max_price:
+            return False
+
+        min_amount = _to_float(filters.get("min_amount"), None)
+        if min_amount is not None and (amount is None or amount < min_amount):
+            return False
+
+        min_history_days = int(filters.get("min_history_days") or 0)
+        if min_history_days and kline_count_20 < min(min_history_days, 20):
+            return False
+
+        ma20_floor_ratio = _to_float(filters.get("ma20_floor_ratio"), None)
+        if ma20_floor_ratio is not None and (ma20 is None or close < ma20 * ma20_floor_ratio):
+            return False
+
+        return True
+
+    def _base_weights(self) -> Dict[str, float]:
+        configured = self.config.get("weights", {}) or {}
+        fallback = {"trend": 0.20, "momentum": 0.15, "quality": 0.20, "sentiment": 0.15, "value": 0.20, "liquidity": 0.10}
+        weights = {key: float(configured.get(key, fallback[key]) or 0) for key in fallback}
+        total = sum(weights.values()) or 1.0
+        return {key: round(value / total, 6) for key, value in weights.items()}
+
+    @staticmethod
+    def _renormalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
+        total = sum(weights.values()) or 1.0
+        return {key: round(max(0.0, value) / total, 6) for key, value in weights.items()}
 
     def _market_adjusted_weights(self, item: Dict[str, Any]) -> Dict[str, float]:
-        base = {"trend": 0.20, "momentum": 0.15, "quality": 0.20, "sentiment": 0.15, "value": 0.20, "liquidity": 0.10}
+        base = self._base_weights()
+        adjustments = self.config.get("market_weight_adjustments", {}) or {}
         state = item.get("market_state") or "neutral"
         strength = _to_float(item.get("market_strength"), 50) or 50
         if state == "bull" or strength >= 60:
-            return {"trend": 0.22, "momentum": 0.17, "quality": 0.21, "sentiment": 0.16, "value": 0.18, "liquidity": 0.06}
+            bull = adjustments.get("bull") or {"trend": 0.02, "momentum": 0.02, "quality": 0.01, "sentiment": 0.01, "value": -0.02, "liquidity": -0.04}
+            return self._renormalize_weights({key: base.get(key, 0) + float(bull.get(key, 0) or 0) for key in base})
         if state == "bear" or strength <= 40:
-            return {"trend": 0.18, "momentum": 0.13, "quality": 0.19, "sentiment": 0.14, "value": 0.22, "liquidity": 0.14}
+            bear = adjustments.get("bear") or {"trend": -0.02, "momentum": -0.02, "quality": -0.01, "sentiment": -0.01, "value": 0.02, "liquidity": 0.04}
+            return self._renormalize_weights({key: base.get(key, 0) + float(bear.get(key, 0) or 0) for key in base})
         return base
 
     def compute_factors(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:

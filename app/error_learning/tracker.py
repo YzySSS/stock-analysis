@@ -288,15 +288,24 @@ class SelectionResultTracker:
         realtime_high_price = self._to_float(row.get("realtime_high_price"))
         realtime_low_price = self._to_float(row.get("realtime_low_price"))
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
+        realtime_trade_date = str(row["realtime_trade_date"]) if row.get("realtime_trade_date") else None
         metric_trade_date = str(row["metric_trade_date"]) if row.get("metric_trade_date") else latest_trade_date
         selection_dt = self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
+        realtime_dt = self._to_date(row.get("realtime_trade_date"))
+        tracking_end_dt = max([dt for dt in [latest_dt, realtime_dt] if dt], default=None)
+        trade_day_count = row.get("trade_day_count")
+        if realtime_dt and selection_dt and realtime_dt > selection_dt and (not latest_dt or realtime_dt > latest_dt):
+            try:
+                trade_day_count = max(int(trade_day_count or 0) + 1, 1)
+            except (TypeError, ValueError):
+                trade_day_count = 1
         base_price = selected_open_price or selected_close_price
         price_change_pct = None
         if base_price and current_price:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
-        tracking_days = self._calc_tracking_days(selection_dt, latest_dt, row.get("trade_day_count"))
-        review_status = "tracking" if latest_dt and selection_dt and latest_dt >= selection_dt else "pending"
+        tracking_days = self._calc_tracking_days(selection_dt, tracking_end_dt, trade_day_count)
+        review_status = "tracking" if tracking_end_dt and selection_dt and tracking_end_dt >= selection_dt else "pending"
         period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_high_price, prefer_max=True)
         period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_low_price, prefer_max=False)
         max_gain_pct = None

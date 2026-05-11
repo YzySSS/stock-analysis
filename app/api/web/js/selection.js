@@ -30,7 +30,7 @@ function fillIndustryOptions(items = []) {
 
 function strategyBadgeClass(strategy) {
   if (strategy?.availability === 'runtime_ready') return 'status-ok';
-  if (strategy?.availability === 'experimental') return 'status-warn';
+  if (strategy?.availability === 'experimental' || strategy?.availability === 'research') return 'status-warn';
   return 'status-muted';
 }
 
@@ -162,12 +162,26 @@ function syncScoreInputs(source) {
   rangeInput.value = String(value);
 }
 
-function updateRunTimeDisplay() {
-  const target = qs('#selection-run-time-display');
-  if (!target) return;
-  const now = new Date();
+function formatLocalDateTimeValue(date = new Date()) {
   const pad = (value) => String(value).padStart(2, '0');
-  target.textContent = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function syncRunTimeDisplay() {
+  const input = qs('#selection-run-time-input');
+  const shell = qs('#selection-run-time-shell');
+  const target = qs('#selection-run-time-display');
+  if (!input || !shell || !target) return;
+  const hasValue = Boolean(input.value);
+  shell.classList.toggle('has-value', hasValue);
+  target.textContent = hasValue ? input.value.replace('T', ' ').replaceAll('-', '/') : '自动使用最新交易日';
+}
+
+function updateRunTimeDisplay() {
+  const input = qs('#selection-run-time-input');
+  if (!input) return;
+  input.value = formatLocalDateTimeValue(new Date());
+  syncRunTimeDisplay();
 }
 
 function renderSelectionPlaceholder(message = '请先设置条件并点击“运行”，再查看本次选股结果') {
@@ -296,6 +310,7 @@ function normalizeRunResponse(result) {
       stability_score: item.stability_score ?? explain.summary?.stability_score ?? null,
       data_quality_score: item.data_quality_score ?? explain.summary?.data_quality_score ?? null,
       completeness_score: item.completeness_score ?? explain.summary?.completeness_score ?? null,
+      run_diagnostics: item.run_diagnostics || result.diagnostics || null,
     };
   });
 
@@ -303,6 +318,8 @@ function normalizeRunResponse(result) {
     run_id: result.run_id || null,
     requested_strategy_id: result.strategy?.id || result.strategy_id || null,
     strategy: result.strategy || null,
+    diagnostics: result.diagnostics || items[0]?.run_diagnostics || null,
+    sentiment_prefetch: result.sentiment_prefetch || null,
     summary: {
       selected_trade_date: items[0]?.selection_date || null,
       run_created_at: null,
@@ -342,7 +359,18 @@ function renderSelectionResults(data) {
   items = [...items].sort((a, b) => compareSelectionItems(sortBy, a, b));
 
   summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
-  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分`;
+  const diagnostics = data.diagnostics || {};
+  const v13Filter = diagnostics.v13_filter_summary || null;
+  const v12Filter = diagnostics.v12_filter_summary || null;
+  const filterSummary = v13Filter
+    ? ` · V13硬过滤：${v13Filter.before ?? '-'} → ${v13Filter.after ?? '-'}，剔除 ${v13Filter.removed ?? '-'}`
+    : v12Filter
+      ? ` · V12硬过滤：${v12Filter.before ?? '-'} → ${v12Filter.after ?? '-'}，剔除 ${v12Filter.removed ?? '-'}`
+      : '';
+  const sentimentSummary = data.sentiment_prefetch
+    ? ` · 舆情精排：Tavily ${data.sentiment_prefetch.tavily_runs ?? 0}/${data.sentiment_prefetch.requested ?? '-'}`
+    : '';
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分${filterSummary}${sentimentSummary}`;
 
   renderSelectionRunStatus(data, items);
 
@@ -616,6 +644,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   qs('#selection-search').addEventListener('input', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
   qs('#selection-sort').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
   qs('#selection-industry').addEventListener('change', () => lastSelectionResponse ? renderSelectionResults(lastSelectionResponse) : null);
+  qs('#selection-run-time-input')?.addEventListener('change', syncRunTimeDisplay);
   qs('#selection-filter-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     await loadSelectionResults();

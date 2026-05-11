@@ -1,9 +1,15 @@
 let currentStrategyId = null;
 let strategiesCache = [];
 
+
+function strategyDisplayNameById(strategyId) {
+  const item = strategiesCache.find((strategy) => strategy.id === strategyId);
+  return item?.display_name || strategyId || '-';
+}
+
 function strategyStatusClass(item = {}) {
   if (item.availability === 'runtime_ready' || item.runtime_ready) return 'status-ok';
-  if (item.availability === 'experimental') return 'status-warn';
+  if (item.availability === 'experimental' || item.availability === 'research') return 'status-warn';
   return 'status-muted';
 }
 
@@ -12,7 +18,7 @@ function renderStrategyCards(data) {
   const items = data.strategies || [];
   strategiesCache = items;
 
-  qs('#strategies-default').textContent = data.default_strategy || '-';
+  qs('#strategies-default').textContent = strategyDisplayNameById(data.default_strategy) || '-';
   qs('#strategies-count').textContent = String(data.summary?.count ?? items.length ?? 0);
   qs('#strategies-current-count').textContent = String(data.summary?.runtime_ready_count ?? data.summary?.current_count ?? 0);
   qs('#strategies-legacy-count').textContent = String((data.summary?.experimental_count ?? 0) + (data.summary?.display_only_count ?? data.summary?.legacy_count ?? 0));
@@ -28,7 +34,7 @@ function renderStrategyCards(data) {
     return `
       <article class="strategy-hero-card ${item.id === currentStrategyId ? 'selected' : ''}" data-strategy-card="${escapeHtml(item.id)}" data-strategy-pick="${escapeHtml(item.id)}">
         <div class="strategy-hero-status-row">
-          <span class="strategy-id-chip">${escapeHtml(item.id)}</span>
+          <span class="strategy-id-chip">${escapeHtml(item.display_name || item.id)}</span>
           ${item.is_default ? '<span class="badge status-ok">默认</span>' : `<span class="badge ${availabilityClass}">${escapeHtml(item.availability_label || '-')}</span>`}
         </div>
         <h3>${escapeHtml(item.display_name || item.id)}</h3>
@@ -69,7 +75,7 @@ function renderStrategyDetail(strategy = null) {
     ? '当前仅纳入页面展示，尚未接入现有执行链路。'
     : '当前已接入现有策略执行 / 因子统计链路。');
 
-  if (name) name.textContent = strategy.id || strategy.display_name || '-';
+  if (name) name.textContent = strategy.display_name || strategy.id || '-';
   if (status) {
     status.className = `badge ${strategy.runtime_ready ? 'status-ok' : 'status-warn'}`;
     status.textContent = strategy.availability_label || '-';

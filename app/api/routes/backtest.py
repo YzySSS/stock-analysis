@@ -19,6 +19,9 @@ class BacktestRunRequest(BaseModel):
     return_mode: str = "1d"
     instrument_type: str = "stock"
     use_adjusted_price: bool = False
+    commission_bps: float = Field(default=0, ge=0, le=100)
+    slippage_bps: float = Field(default=0, ge=0, le=100)
+    apply_execution_constraints: bool = False
     save: bool = True
     max_picks: Optional[int] = Field(default=None, ge=1, le=50)
     score_threshold: Optional[float] = Field(default=None, ge=0, le=100)
@@ -45,6 +48,29 @@ def cancel_backtest_run(run_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str | None) -> str:
+    """Build a run display name from the historical version stored on the run.
+
+    Important: this must not read the current strategy registry version to label
+    old runs. A backtest run should always display the strategy version that was
+    recorded when the run was created, even after later strategy iterations.
+    """
+    base_names = {
+        "lowvol_reversal": "低波反转策略",
+        "v13_three_factor": "三因子策略",
+        "v12_legacy": "多因子策略",
+    }
+    base = base_names.get(strategy_id or "", strategy_id or "-")
+    if not strategy_version:
+        return base
+    version_label = str(strategy_version).split("-", 1)[0].strip()
+    if not version_label or version_label == "v1":
+        return base
+    if version_label[0].isdigit():
+        version_label = f"v{version_label}"
+    return f"{base} {version_label}"
+
+
 def normalize_run_row(row: dict) -> dict:
     summary = row.get("summary_json")
     if isinstance(summary, str):
@@ -52,9 +78,13 @@ def normalize_run_row(row: dict) -> dict:
     request = row.get("request_json")
     if isinstance(request, str):
         request = json.loads(request)
+    strategy_id = row.get("strategy_id")
+    strategy_version = row.get("strategy_version")
     return {
         "run_id": row.get("run_id"),
-        "strategy_id": row.get("strategy_id"),
+        "strategy_id": strategy_id,
+        "strategy_version": strategy_version,
+        "strategy_display_name": strategy_display_name_for_run(strategy_id, strategy_version),
         "start_date": str(row.get("start_date")) if row.get("start_date") else None,
         "end_date": str(row.get("end_date")) if row.get("end_date") else None,
         "return_mode": row.get("return_mode"),
@@ -133,43 +163,61 @@ def get_backtest_results(run_id: Optional[str] = Query(default=None)) -> dict:
 @router.get("/backtest/trades")
 def get_backtest_trades(
     run_id: str = Query(...),
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=10, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
     trade_date: Optional[str] = Query(default=None),
     code: Optional[str] = Query(default=None),
     return_mode: str = Query(default="1d"),
 ) -> dict:
     conditions = ["run_id = %s"]
-    params: list[object] = [run_id]
+    base_params: list[object] = [run_id]
     if trade_date:
         conditions.append("trade_date = %s")
-        params.append(trade_date)
+        base_params.append(trade_date)
     if code:
         conditions.append("code = %s")
-        params.append(code)
-    params.append(limit)
+        base_params.append(code)
+    offset = (page - 1) * limit
+    prefixed_conditions = [f"t.{condition}" if condition.startswith(("run_id", "trade_date", "code")) else condition for condition in conditions]
+    where_sql = " AND ".join(prefixed_conditions)
     sql = f"""
-    SELECT run_id, strategy_id, trade_date, code, entry_date, entry_price,
-           exit_date_1d, exit_price_1d, return_1d_pct,
-           exit_date_3d, exit_price_3d, return_3d_pct,
-           max_gain_pct, max_drawdown_pct
-    FROM backtest_trade
-    WHERE {' AND '.join(conditions)}
-    ORDER BY trade_date DESC, return_{'1d' if return_mode == '1d' else '3d'}_pct DESC
-    LIMIT %s
+    SELECT t.run_id, t.strategy_id, t.trade_date, t.code, sb.name,
+           p.score AS entry_score, p.factor_json,
+           t.entry_date, t.entry_price,
+           t.exit_date_1d, t.exit_price_1d, t.return_1d_pct,
+           t.exit_date_3d, t.exit_price_3d, t.return_3d_pct,
+           t.max_gain_pct, t.max_drawdown_pct
+    FROM backtest_trade t
+    LEFT JOIN stock_basic sb ON sb.code = t.code
+    LEFT JOIN backtest_pick p ON p.run_id = t.run_id AND p.trade_date = t.trade_date AND p.code = t.code
+    WHERE {where_sql}
+    ORDER BY t.trade_date DESC, t.return_{'1d' if return_mode == '1d' else '3d'}_pct DESC
+    LIMIT %s OFFSET %s
+    """
+    count_sql = f"""
+    SELECT COUNT(*) AS total
+    FROM backtest_trade t
+    WHERE {where_sql}
     """
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(sql, params)
+            cursor.execute(count_sql, base_params)
+            total = int((cursor.fetchone() or {}).get("total") or 0)
+            cursor.execute(sql, base_params + [limit, offset])
             rows = cursor.fetchall() or []
     return {
         "run_id": run_id,
         "limit": limit,
+        "page": page,
+        "total": total,
+        "total_pages": (total + limit - 1) // limit if limit else 0,
         "trade_date": trade_date,
         "code": code,
         "return_mode": return_mode,
         "items": [
             {
                 **row,
+                "factor_json": json.loads(row.get("factor_json")) if isinstance(row.get("factor_json"), str) else row.get("factor_json"),
                 "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
                 "entry_date": str(row.get("entry_date")) if row.get("entry_date") else None,
                 "exit_date_1d": str(row.get("exit_date_1d")) if row.get("exit_date_1d") else None,
@@ -211,9 +259,12 @@ def get_backtest_runs(
 def get_factor_input_status() -> dict:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) AS total_rows, COUNT(DISTINCT code) AS covered_codes, MIN(trade_date) AS min_trade_date, MAX(trade_date) AS max_trade_date FROM factor_input_daily")
+            cursor.execute("SELECT MIN(trade_date) AS min_trade_date, MAX(trade_date) AS max_trade_date FROM factor_input_daily")
             summary = cursor.fetchone() or {}
+            cursor.execute("SELECT TABLE_ROWS AS total_rows FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'factor_input_daily'")
+            table_stats = cursor.fetchone() or {}
 
+            latest_trade_date = summary.get("max_trade_date")
             cursor.execute(
                 """
                 SELECT
@@ -224,7 +275,9 @@ def get_factor_input_status() -> dict:
                     SUM(CASE WHEN revenue_yoy IS NOT NULL THEN 1 ELSE 0 END) AS revenue_yoy_filled,
                     COUNT(*) AS total_rows
                 FROM factor_input_daily
-                """
+                WHERE trade_date = %s
+                """,
+                (latest_trade_date,),
             )
             field_row = cursor.fetchone() or {}
 
@@ -239,19 +292,22 @@ def get_factor_input_status() -> dict:
             )
             latest_task = cursor.fetchone() or {}
 
-    total_rows = int(summary.get("total_rows") or 0)
+    latest_rows = int(field_row.get("total_rows") or 0)
+    total_rows = int(table_stats.get("total_rows") or latest_rows)
 
     def pct(filled: object) -> float | None:
-        if not total_rows:
+        if not latest_rows:
             return None
-        return round((int(filled or 0) / total_rows) * 100, 2)
+        return round((int(filled or 0) / latest_rows) * 100, 2)
 
     return {
         "coverage": {
             "trade_date_start": str(summary.get("min_trade_date")) if summary.get("min_trade_date") else None,
             "trade_date_end": str(summary.get("max_trade_date")) if summary.get("max_trade_date") else None,
-            "covered_stock_codes": int(summary.get("covered_codes") or 0),
+            "covered_stock_codes": latest_rows,
             "covered_rows": total_rows,
+            "latest_trade_date_rows": latest_rows,
+            "field_coverage_scope": "latest_trade_date",
             "fields": [
                 {"field": "pe_tushare", "coverage_pct": pct(field_row.get("pe_tushare_filled"))},
                 {"field": "pb_tushare", "coverage_pct": pct(field_row.get("pb_tushare_filled"))},

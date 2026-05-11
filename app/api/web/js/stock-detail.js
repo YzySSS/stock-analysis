@@ -13,6 +13,13 @@ function formatMoneyCN(value) {
   return num.toFixed(2);
 }
 
+function formatMoneyWan(value) {
+  const num = Number(value);
+  if (value == null || Number.isNaN(num)) return '-';
+  if (Math.abs(num) >= 10000) return `${(num / 10000).toFixed(2)}亿`;
+  return `${num.toFixed(2)}万`;
+}
+
 function formatRank(rank, percentile) {
   if (rank == null) return '-';
   const pct = percentile == null ? '' : ` · 前${Math.max(0, Math.min(100, 100 - Number(percentile))).toFixed(1)}%`;
@@ -50,6 +57,63 @@ function renderOverviewConsole(overview) {
   });
 }
 
+function renderChipPanel(chip) {
+  const container = qs('#stock-detail-chip');
+  if (!container) return;
+  if (!chip) {
+    container.innerHTML = '<div class="muted">暂无筹码数据</div>';
+    return;
+  }
+  const labelClass = chip.winner_rate >= 70 ? 'up' : chip.winner_rate <= 35 ? 'down' : '';
+  container.innerHTML = `
+    <div><strong>筹码状态</strong></div>
+    <div class="${labelClass}">${escapeHtml(chip.label || '-')}</div>
+    <div><strong>获利比例</strong></div>
+    <div>${formatPercent(chip.winner_rate)}</div>
+    <div><strong>加权平均成本</strong></div>
+    <div>${formatNumber(chip.weight_avg, 2)}</div>
+    <div><strong>价格偏离成本</strong></div>
+    <div>${formatPercent(chip.price_vs_weight_avg_pct)}</div>
+    <div><strong>中位成本</strong></div>
+    <div>${formatNumber(chip.cost_50pct, 2)}</div>
+    <div><strong>成本集中带</strong></div>
+    <div>${formatNumber(chip.cost_15pct, 2)} ~ ${formatNumber(chip.cost_85pct, 2)}</div>
+    <div><strong>集中带宽度</strong></div>
+    <div>${formatPercent(chip.cost_band_width_pct)}</div>
+    <div><strong>数据日期</strong></div>
+    <div>${escapeHtml(chip.trade_date || '-')}</div>
+  `;
+}
+
+function renderMoneyflowPanel(moneyflow) {
+  const container = qs('#stock-detail-moneyflow');
+  if (!container) return;
+  if (!moneyflow) {
+    container.innerHTML = '<div class="muted">暂无资金流数据</div>';
+    return;
+  }
+  const net = Number(moneyflow.net_mf_amount);
+  const labelClass = !Number.isNaN(net) && net > 0 ? 'up' : !Number.isNaN(net) && net < 0 ? 'down' : '';
+  container.innerHTML = `
+    <div><strong>资金状态</strong></div>
+    <div class="${labelClass}">${escapeHtml(moneyflow.label || '-')}</div>
+    <div><strong>净流入金额</strong></div>
+    <div class="${labelClass}">${formatMoneyWan(moneyflow.net_mf_amount)}</div>
+    <div><strong>净流入强度</strong></div>
+    <div>${formatPercent(moneyflow.net_flow_intensity_pct)}</div>
+    <div><strong>大/特大单净额</strong></div>
+    <div>${formatMoneyWan(moneyflow.large_net_amount)}</div>
+    <div><strong>大单占成交额</strong></div>
+    <div>${formatPercent(moneyflow.large_flow_ratio_pct)}</div>
+    <div><strong>特大单买 / 卖</strong></div>
+    <div>${formatMoneyWan(moneyflow.buy_elg_amount)} / ${formatMoneyWan(moneyflow.sell_elg_amount)}</div>
+    <div><strong>大单买 / 卖</strong></div>
+    <div>${formatMoneyWan(moneyflow.buy_lg_amount)} / ${formatMoneyWan(moneyflow.sell_lg_amount)}</div>
+    <div><strong>数据日期</strong></div>
+    <div>${escapeHtml(moneyflow.trade_date || '-')}</div>
+  `;
+}
+
 function factorLabel(key) {
   const labelMap = {
     trend: '趋势',
@@ -81,6 +145,10 @@ function getDisplayFactorEntries(factorScores) {
     'pe_tushare', 'pb_tushare', 'roe', 'roa', 'eps',
     'grossprofit_margin', 'netprofit_margin', 'revenue_yoy', 'profit_yoy',
     'completeness_score', 'data_quality_score', 'value_score', 'quality_score', 'stability_score',
+    'market_strength', 'market_state', 'news_count', 'sentiment_score', 'sentiment_source',
+    'chip_his_low', 'chip_his_high', 'chip_cost_5pct', 'chip_cost_15pct', 'chip_cost_50pct',
+    'chip_cost_85pct', 'chip_cost_95pct', 'chip_weight_avg', 'chip_winner_rate',
+    'raw_news_count', 'filtered_news_count', 'credibility_avg', 'quality_avg',
     'fundamental_missing_fields',
   ]);
   const scores = factorScores || {};
@@ -202,7 +270,8 @@ function renderInteractiveLineChart(svgSelector, rawPoints, options) {
     focusDot.setAttribute('cy', point.y);
     focusLabel.textContent = formatChartTime(point.label);
     const pctText = point.pct == null || Number.isNaN(Number(point.pct)) ? '' : ` · ${Number(point.pct).toFixed(2)}%`;
-    focusPrice.textContent = `价格 ${point.value.toFixed(2)}${pctText}`;
+    const carryText = point.carriedFrom ? ` · 延续${point.carriedFrom}` : '';
+    focusPrice.textContent = `价格 ${point.value.toFixed(2)}${pctText}${carryText}`;
   };
 
   const handleMove = (event) => {
@@ -219,9 +288,24 @@ function renderInteractiveLineChart(svgSelector, rawPoints, options) {
   showPoint(lastIndex);
 }
 
-function renderPriceChart(history) {
-  const svg = qs('#stock-price-chart');
-  if (!svg) return;
+function getDateParts(dateText) {
+  const [year, month, day] = String(dateText || '').slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return { year, month, day, date: new Date(Date.UTC(year, month - 1, day)) };
+}
+
+function getWeekKey(dateText) {
+  const parts = getDateParts(dateText);
+  if (!parts) return String(dateText || '-');
+  const date = new Date(parts.date);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function aggregateKlineHistory(history, period = 'day') {
   const points = (history || [])
     .map((item) => ({
       label: item.trade_date || '-',
@@ -230,10 +314,111 @@ function renderPriceChart(history) {
       low: Number(item.low),
       close: Number(item.close),
     }))
-    .filter((item) => [item.open, item.high, item.low, item.close].every((value) => value != null && !Number.isNaN(value)));
+    .filter((item) => [item.open, item.high, item.low, item.close].every((value) => value != null && !Number.isNaN(value)))
+    .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+
+  if (period === 'day') return points;
+
+  const groups = new Map();
+  points.forEach((item) => {
+    const key = period === 'week' ? getWeekKey(item.label) : String(item.label).slice(0, 7);
+    if (!groups.has(key)) {
+      groups.set(key, { ...item, key, start: item.label, end: item.label });
+      return;
+    }
+    const group = groups.get(key);
+    group.high = Math.max(group.high, item.high);
+    group.low = Math.min(group.low, item.low);
+    group.close = item.close;
+    group.end = item.label;
+    group.label = period === 'week' ? item.label : key;
+  });
+
+  return [...groups.values()].map((item) => ({
+    label: period === 'week' ? item.end : item.key,
+    periodLabel: period === 'week' ? `${item.start}~${item.end}` : item.key,
+    open: item.open,
+    high: item.high,
+    low: item.low,
+    close: item.close,
+  }));
+}
+
+function setupKlineTabs(history) {
+  const periodButtons = [...document.querySelectorAll('[data-kline-period]')];
+  const startInput = qs('#kline-start-date');
+  const endInput = qs('#kline-end-date');
+  const title = qs('#stock-kline-title');
+  if (!periodButtons.length) return;
+
+  const orderedHistory = [...(history || [])].sort((a, b) => String(a.trade_date || '').localeCompare(String(b.trade_date || '')));
+  const availableDates = orderedHistory.map((item) => String(item.trade_date || '').slice(0, 10)).filter(Boolean);
+  const minDate = availableDates[0] || '';
+  const maxDate = availableDates[availableDates.length - 1] || '';
+  const oneMonthAgo = maxDate ? (() => {
+    const date = new Date(`${maxDate}T00:00:00`);
+    date.setMonth(date.getMonth() - 1);
+    return date.toISOString().slice(0, 10);
+  })() : '';
+  const defaultStart = oneMonthAgo && oneMonthAgo > minDate ? oneMonthAgo : minDate;
+  const state = { period: 'day', startDate: defaultStart, endDate: maxDate };
+
+  if (startInput) {
+    startInput.min = minDate;
+    startInput.max = maxDate;
+    startInput.value = state.startDate;
+  }
+  if (endInput) {
+    endInput.min = minDate;
+    endInput.max = maxDate;
+    endInput.value = state.endDate;
+  }
+
+  const render = () => {
+    if (state.startDate && state.endDate && state.startDate > state.endDate) {
+      [state.startDate, state.endDate] = [state.endDate, state.startDate];
+      if (startInput) startInput.value = state.startDate;
+      if (endInput) endInput.value = state.endDate;
+    }
+    periodButtons.forEach((button) => button.classList.toggle('active', button.dataset.klinePeriod === state.period));
+    const titleMap = { day: '日K走势', week: '周K走势', month: '月K走势' };
+    if (title) title.textContent = titleMap[state.period] || 'K线走势';
+    const filtered = orderedHistory.filter((item) => {
+      const date = String(item.trade_date || '').slice(0, 10);
+      return (!state.startDate || date >= state.startDate) && (!state.endDate || date <= state.endDate);
+    });
+    renderPriceChart(filtered, state.period);
+  };
+
+  periodButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      state.period = button.dataset.klinePeriod || 'day';
+      render();
+    });
+  });
+  if (startInput) {
+    startInput.addEventListener('change', () => {
+      state.startDate = startInput.value || minDate;
+      render();
+    });
+  }
+  if (endInput) {
+    endInput.addEventListener('change', () => {
+      state.endDate = endInput.value || maxDate;
+      render();
+    });
+  }
+  render();
+}
+
+function renderPriceChart(history, period = 'day') {
+  const svg = qs('#stock-price-chart');
+  if (!svg) return;
+  const points = aggregateKlineHistory(history, period);
+  const periodLabel = period === 'week' ? '周K' : period === 'month' ? '月K' : '日线';
 
   if (points.length < 2) {
-    svg.innerHTML = '<text x="18" y="28" fill="#94a3b8" font-size="13">暂无日线数据</text>';
+    svg.innerHTML = `<text x="18" y="28" fill="#94a3b8" font-size="13">暂无${periodLabel}数据</text>`;
     return;
   }
 
@@ -319,7 +504,7 @@ function renderPriceChart(history) {
     focusY.setAttribute('y2', point.closeY);
     focusDot.setAttribute('cx', point.x);
     focusDot.setAttribute('cy', point.closeY);
-    focusLabel.textContent = formatChartTime(point.label);
+    focusLabel.textContent = point.periodLabel || formatChartTime(point.label);
     const pct = point.open ? ((point.close - point.open) / point.open) * 100 : null;
     focusPrice.textContent = `收 ${point.close.toFixed(2)} · ${pct == null ? '-' : pct.toFixed(2)}%`;
     focusExtra.textContent = `开 ${point.open.toFixed(2)} 高 ${point.high.toFixed(2)} 低 ${point.low.toFixed(2)}`;
@@ -339,7 +524,17 @@ function renderPriceChart(history) {
   showPoint(lastIndex);
 }
 
-function renderIntradayChart(points) {
+function normalizeIntradayBars(bars = []) {
+  return bars.map((item) => ({
+    quote_minute: item.minute_time,
+    latest_price: item.close,
+    pct_chg: null,
+    volume: item.volume,
+    amount: item.amount,
+  }));
+}
+
+function renderIntradayChart(points, meta = {}) {
   const svg = qs('#stock-intraday-chart');
   if (!svg) return;
 
@@ -349,34 +544,64 @@ function renderIntradayChart(points) {
     const match = text.match(/(\d{2}:\d{2})/);
     return match ? match[1] : null;
   };
-  const buildTradingMinutes = () => {
+  const buildTradingTimeline = () => {
     const result = [];
-    const pushRange = (startHour, startMinute, endHour, endMinute) => {
+    const pushRange = (startHour, startMinute, endHour, endMinute, session) => {
       let current = startHour * 60 + startMinute;
       const end = endHour * 60 + endMinute;
       while (current <= end) {
         const hour = String(Math.floor(current / 60)).padStart(2, '0');
         const minute = String(current % 60).padStart(2, '0');
-        result.push(`${hour}:${minute}`);
+        result.push({ label: `${hour}:${minute}`, session });
         current += 1;
       }
     };
-    pushRange(9, 30, 11, 30);
-    pushRange(13, 0, 15, 0);
+    pushRange(9, 30, 11, 30, 'am');
+    pushRange(13, 0, 15, 0, 'pm');
     return result;
   };
 
   const byMinute = new Map((points || []).map((item) => [minuteKey(item.quote_minute), item]).filter(([key]) => key));
-  const timeline = buildTradingMinutes().map((label) => {
-    const item = byMinute.get(label);
+  const timeline = buildTradingTimeline().map((slot) => {
+    const item = byMinute.get(slot.label);
     const value = item ? Number(item.latest_price) : null;
     return {
-      label,
+      ...slot,
       value: value != null && !Number.isNaN(value) ? value : null,
       pct: item?.pct_chg == null ? null : Number(item.pct_chg),
       hasData: value != null && !Number.isNaN(value),
+      carriedFrom: null,
     };
   });
+
+  const morningClose = timeline.find((item) => item.label === '11:30' && item.hasData);
+  const afternoonOpen = timeline.find((item) => item.label === '13:00');
+  if (morningClose && afternoonOpen && !afternoonOpen.hasData) {
+    afternoonOpen.value = morningClose.value;
+    afternoonOpen.pct = morningClose.pct;
+    afternoonOpen.hasData = true;
+    afternoonOpen.carriedFrom = '11:30';
+  }
+
+  // 实时快照来自每分钟全市场采样，偶尔会因为采集耗时/上游波动漏掉 1-3 个分钟点。
+  // 分时图的主心智是走势连续性，所以对同一交易时段内的短缺口用上一笔价格补齐；
+  // 午休和长时间采集故障仍然保留断点，避免制造不存在的行情。
+  timeline.forEach((item, index) => {
+    if (item.hasData) return;
+    const previousIndex = [...timeline].slice(0, index).reverse().findIndex((point) => point.hasData && point.session === item.session);
+    if (previousIndex < 0) return;
+    const actualPreviousIndex = index - previousIndex - 1;
+    const previous = timeline[actualPreviousIndex];
+    const nextIndex = timeline.findIndex((point, pointIndex) => pointIndex > index && point.hasData && point.session === item.session);
+    if (nextIndex < 0) return;
+    const gapSize = nextIndex - actualPreviousIndex;
+    if (gapSize > 4) return;
+    item.value = previous.value;
+    item.pct = previous.pct;
+    item.hasData = true;
+    item.carriedFrom = previous.label;
+  });
+
   const valid = timeline.filter((item) => item.hasData);
   if (valid.length < 2) {
     svg.innerHTML = '<text x="18" y="28" fill="#94a3b8" font-size="13">暂无今日分钟数据</text>';
@@ -431,10 +656,9 @@ function renderIntradayChart(points) {
       <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" />
     </g>
     ${segments.map((segment) => `<polyline class="chart-line" fill="none" stroke="${stroke}" stroke-width="2.4" points="${segment}" />`).join('')}
-    ${chartPoints.filter((item) => !item.hasData).length ? `<text x="${padding.left + 8}" y="${padding.top - 8}" fill="#64748b" font-size="10">空白区间表示暂无分钟快照</text>` : ''}
-    <text x="8" y="${padding.top + 4}" fill="#94a3b8" font-size="11">${rawMax.toFixed(2)}</text>
-    <text x="8" y="${height - padding.bottom}" fill="#94a3b8" font-size="11">${rawMin.toFixed(2)}</text>
-    ${sessionMarks.map((mark) => `<text x="${xOf(mark.index)}" y="${height - 10}" text-anchor="${mark.anchor}" fill="#94a3b8" font-size="11">${mark.label}</text>`).join('')}
+    <text class="intraday-axis-label" x="8" y="${padding.top + 4}">${rawMax.toFixed(2)}</text>
+    <text class="intraday-axis-label" x="8" y="${height - padding.bottom}">${rawMin.toFixed(2)}</text>
+    ${sessionMarks.map((mark) => `<text class="intraday-axis-label intraday-time-label" x="${xOf(mark.index)}" y="${height - 10}" text-anchor="${mark.anchor}">${mark.label}</text>`).join('')}
     <g class="chart-focus" style="display:none">
       <line data-focus-x x1="0" y1="${padding.top}" x2="0" y2="${height - padding.bottom}" />
       <line data-focus-y x1="${padding.left}" y1="0" x2="${width - padding.right}" y2="0" />
@@ -472,7 +696,8 @@ function renderIntradayChart(points) {
     focusDot.setAttribute('cx', point.x);
     focusDot.setAttribute('cy', point.y);
     const pctText = point.pct == null || Number.isNaN(Number(point.pct)) ? '' : ` · ${Number(point.pct).toFixed(2)}%`;
-    focusPrice.textContent = `价格 ${point.value.toFixed(2)}${pctText}`;
+    const carryText = point.carriedFrom ? ` · 延续${point.carriedFrom}` : '';
+    focusPrice.textContent = `价格 ${point.value.toFixed(2)}${pctText}${carryText}`;
   };
 
   const handleMove = (event) => {
@@ -524,11 +749,22 @@ function renderSelectionHistory(items) {
   `;
 }
 
-function renderRecentNews(items) {
+function renderRecentNews(items, latestSelection = {}) {
   const container = qs('#stock-detail-news');
   if (!container) return;
   if (!items || !items.length) {
-    container.innerHTML = '<div class="empty-state">暂无最近舆情新闻</div>';
+    const rawMetrics = latestSelection.raw_metrics || {};
+    const factorScores = latestSelection.factor_scores || {};
+    const sentimentScore = factorScores.sentiment ?? rawMetrics.sentiment_score;
+    const source = latestSelection.sentiment_source || rawMetrics.sentiment_source || 'fallback_price_volume';
+    const newsCount = latestSelection.news_count ?? rawMetrics.news_count ?? 0;
+    container.innerHTML = `
+      <div class="empty-state sentiment-empty-state">
+        <strong>暂无最近舆情新闻</strong>
+        <div class="muted">当前新闻库没有该股可展示新闻；V12 情绪因子已使用${escapeHtml(source === 'fallback_price_volume' ? '价格/成交量回退信号' : source)}计算。</div>
+        <div class="muted">情绪因子：${formatNumber(sentimentScore, 2)} · 新闻数：${escapeHtml(newsCount)}</div>
+      </div>
+    `;
     return;
   }
 
@@ -600,6 +836,8 @@ async function loadStockDetail() {
     qs('#stock-stat-date').textContent = escapeHtml(realtime.quote_time || data.latest_kline?.trade_date || '-');
     renderOverviewConsole(overview);
     renderFactorScorePills(factorScores, latestSelection);
+    renderChipPanel(data.chip);
+    renderMoneyflowPanel(data.moneyflow);
 
     qs('#stock-detail-basic').innerHTML = `
       <div><strong>股票代码</strong></div>
@@ -700,15 +938,40 @@ async function loadStockDetail() {
       trackingLink.href = `/tracking?run_id=${encodeURIComponent(latestSelection.run_id)}`;
     }
 
-    renderPriceChart(data.price_history || []);
-    renderIntradayChart(data.realtime_intraday || []);
-    renderRecentNews(data.recent_news || []);
+    setupKlineTabs(data.price_history || []);
+    const cachedIntradayBars = data.intraday_bars || {};
+    if ((cachedIntradayBars.items || []).length >= 2) {
+      renderIntradayChart(normalizeIntradayBars(cachedIntradayBars.items || []), {
+        label: `完整分钟线 · ${cachedIntradayBars.count || 0} 点 · 数据库缓存`,
+      });
+    } else {
+      renderIntradayChart(data.realtime_intraday || [], {
+        label: '实时采样线 · 正在按需补全完整分钟线',
+      });
+      fetchJson(`/api/stocks/${encodeURIComponent(code)}/intraday-bars?trade_date=${encodeURIComponent(realtime.trade_date || data.latest_kline?.trade_date || '')}`)
+        .then((intradayBars) => {
+          if ((intradayBars.items || []).length >= 2) {
+            renderIntradayChart(normalizeIntradayBars(intradayBars.items || []), {
+              label: `完整分钟线 · ${intradayBars.count || 0} 点 · ${intradayBars.source_status === 'cached' ? '数据库缓存' : '已补全并缓存'}`,
+            });
+          } else {
+            renderIntradayChart(data.realtime_intraday || [], { label: '完整分钟线暂无数据，展示实时采样线' });
+          }
+        })
+        .catch(() => renderIntradayChart(data.realtime_intraday || [], { label: '完整分钟线补全失败，展示实时采样线' }));
+    }
+    renderRecentNews(data.recent_news || [], latestSelection);
     renderSelectionHistory(data.selection_history || []);
   } catch (error) {
-    ['#stock-detail-basic', '#stock-detail-factors', '#stock-detail-fundamentals', '#stock-detail-selection', '#stock-detail-reasons', '#stock-detail-tracking-summary', '#stock-detail-news', '#stock-detail-history'].forEach((selector) => {
+    ['#stock-detail-basic', '#stock-detail-factors', '#stock-detail-fundamentals', '#stock-detail-chip', '#stock-detail-moneyflow', '#stock-detail-selection', '#stock-detail-reasons', '#stock-detail-tracking-summary', '#stock-detail-news', '#stock-detail-history'].forEach((selector) => {
       qs(selector).innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
     });
   }
 }
 
-document.addEventListener('DOMContentLoaded', loadStockDetail);
+document.addEventListener('DOMContentLoaded', () => {
+  loadStockDetail();
+  window.setInterval(() => {
+    if (!document.hidden) loadStockDetail();
+  }, 60 * 1000);
+});

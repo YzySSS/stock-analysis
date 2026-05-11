@@ -1,19 +1,19 @@
-default_strategy: lowvol_reversal
+default_strategy: v13_three_factor
 
 strategies:
   - id: lowvol_reversal
-    display_name: 低波动反转策略
+    display_name: 低波反转策略 v2.1
     entrypoint: app.strategies.active.lowvol_reversal_strategy.LowVolReversalStrategy
     config_path: app/strategies/registry/configs/lowvol_reversal.yaml
-    version: v1
-    status: active
+    version: v2.1-risk-filtered
+    status: experimental
     mode: current
     executable: true
-    tags: [lowvol, reversal, core]
-    description: 基于换手率、低波动和短期反转的基础选股策略
+    tags: [lowvol, reversal, experimental]
+    description: 低波动反转策略 v2.1，当前已恢复到选股中心可执行列表，适合作为实验策略观察
 
   - id: v13_three_factor
-    display_name: V13 三因子策略
+    display_name: 三因子策略
     entrypoint: app.strategies.active.v13_three_factor.strategy.V13ThreeFactorStrategy
     config_path: app/strategies/registry/configs/v13_three_factor.yaml
     version: 0.1.0
@@ -24,7 +24,7 @@ strategies:
     description: 新架构下的三因子策略骨架，已具备基础因子定义与近似打分逻辑
 
   - id: v12_legacy
-    display_name: V12 多因子策略
+    display_name: 多因子策略
     entrypoint: app.strategies.active.v12_legacy_strategy.V12LegacyStrategy
     config_path: app/strategies/registry/configs/v12_legacy.yaml
     version: 1.1-fixed

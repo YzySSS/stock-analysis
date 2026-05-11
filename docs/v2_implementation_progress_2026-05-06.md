@@ -419,3 +419,122 @@ POST /api/backtest/runs/{run_id}/cancel
 
 - 单 worker 串行执行，适合 V2-P0。
 - 通过 `UPDATE ... WHERE status='queued'` 做轻量原子抢占，后续若启用多 worker，需要继续加强锁字段和超时策略。
+
+## 回测中心支持 V13 / V12 基础版（2026-05-10 16:25）
+
+本轮按顺序完成多策略回测接入：
+
+1. 先打通 `v13_three_factor`
+2. 再接入 `v12_legacy` 基础回测
+3. 更新 `/backtest` 页面策略选择
+
+### 后端改动
+
+文件：`app/backtest/service.py`
+
+- `_validate_request()` 从仅允许 `lowvol_reversal`，扩展为允许：
+  - `lowvol_reversal`
+  - `v13_three_factor`
+  - `v12_legacy`
+- 回测候选池 `_load_candidates()` 已升级为按历史交易日构造当时可见输入：
+  - `factor_input_daily.turnover_rate / volume_ratio / total_mv / completeness_score`
+  - `stock_basic.is_st`
+  - 当日 `daily_kline.open / close / amount`
+  - 截至当前回测日的 20 日窗口：`ma20 / close_20d / max_close_20 / min_close_20 / avg_amount_20 / kline_count_20`
+  - V12 基础所需：`stock_sentiment_daily.sentiment_score / news_count`、`market_context_daily.market_strength / market_state`
+- 20 日窗口查询限定 `daily_kline.trade_date <= 当前回测日`，避免未来函数。
+- V12 回测基础版只使用已入库历史舆情，不在回测过程中实时调用 Tavily。
+
+### 前端改动
+
+文件：
+
+- `app/api/web/pages/backtest.html`
+- `app/api/web/js/backtest.js`
+
+更新：
+
+- 策略下拉新增：`三因子策略`、`多因子策略`
+- 切换策略自动调整默认参数：
+  - `lowvol_reversal`: threshold=60, max_picks=3
+  - `v13_three_factor`: threshold=65, max_picks=3
+  - `v12_legacy`: threshold=50, max_picks=3
+- 页面提示 V12 基础回测使用已入库历史舆情，不实时调用 Tavily。
+- JS 版本更新到 `backtest.js?v=20260510a`。
+
+### 验证
+
+已通过：
+
+```bash
+.venv/bin/python -m py_compile app/backtest/service.py app/api/routes/backtest.py
+node --check app/api/web/js/backtest.js
+```
+
+直接 API smoke（`save=false`，2026-04-24~2026-04-27，2 个交易日）：
+
+- `v13_three_factor`: `sample_days=2`, `total_picks=6`, `total_return_pct=-4.412`
+- `v12_legacy`: `sample_days=2`, `total_picks=6`, `total_return_pct=1.5886`
+
+队列/worker 验证（`save=true`）：
+
+- `backtest_v13_three_factor_20260510_162452`：success，`total_trades=6`，`total_return_pct=-4.412`
+- `backtest_v12_legacy_20260510_162452`：success，`total_trades=6`，`total_return_pct=1.5886`
+
+公网页面验证：
+
+- `https://www.yzysstock.cloud/backtest` 返回 200
+- 页面加载 `backtest.js?v=20260510a`
+
+### 后续注意
+
+- V12 当前是基础历史舆情版，不等同于线上选股的实时 Tavily Top40 精排；若要严格复刻，需要先做 V12 历史 Top40 舆情回填任务。
+- 当前回测仍是非复权价格；复权回测需接入 `adj_factor` 后再升级。
+
+## 暂停开放 V12 回测（2026-05-10 16:29）
+
+大X确认：V12 回测如果要严格复刻线上 Top40 舆情精排，会消耗大量 Tavily 搜索次数；因此先不开放 V12 回测。
+
+调整：
+
+- `BacktestService.SUPPORTED_STRATEGIES` 移除 `v12_legacy`，当前仅开放：
+  - `lowvol_reversal`
+  - `v13_three_factor`
+- `/backtest` 页面策略下拉移除 V12 选项。
+- 页面文案改为：V12 因 Tavily 搜索成本暂不开放回测。
+- JS 版本更新到 `backtest.js?v=20260510b`。
+
+说明：V12 选股中心仍可正常使用，并会在当前选股时按 Top40 流程补充 Tavily 舆情；本次只关闭 V12 的历史回测入口。
+
+## 回测高级设置短期计划（2026-05-10 17:09）
+
+当前 `/backtest` 的“高级设置”仍是占位入口。短期不展开复杂参数，先改为说明型提示，避免用户误解当前回测已经是完整资金组合回测。
+
+建议短期文案：
+
+> 当前为信号收益评估：不含手续费、滑点、复权和真实资金占用。高级资金模型后续开放。
+
+当前收益率口径：
+
+- `1d`：买入日开盘价买入，下一交易日开盘价卖出。
+- `3d`：买入日开盘价买入，第三个后续交易日收盘价卖出。
+
+后续高级设置候选项：
+
+- 交易成本：手续费、印花税、滑点。
+- 成交规则：开盘买/收盘买，次日开盘卖/收盘卖，停牌/涨跌停无法成交处理。
+- 价格口径：不复权、前复权、后复权。
+- 资金模型：信号收益评估、等权组合、固定资金投入、满仓滚动持仓、最大同时持仓数。
+- 过滤条件：排除 ST、最低成交额、最低/最高价格、行业过滤。
+
+## 2026-05-10 - lowvol_reversal_v2 开发计划
+
+DeepSeek v4 pro 完整审查确认旧 `lowvol_reversal` 存在“伪因子 + 大量同分 + 股票代码排序锁死”问题。当前计划保留策略入口，升级实现为真实行情因子版本：
+
+- `turnover`: 使用真实换手率/流动性横截面百分位。
+- `lowvol`: 使用 20 日振幅或后续收益率标准差，波动越低分越高。
+- `reversal`: 使用 20 日收益率取反，跌幅越深反转分越高。
+- 每日候选池内做 percentile rank，输出 0~100 因子分。
+- 加过滤：ST、`kline_count_20 < 15`、`avg_amount_20` 太低、`close <= 1`。
+- 加 tie-breaker 与同分诊断，避免回测被 `ORDER BY sb.code` 污染。
+- 验证口径：跑 2026-01-01~2026-05-10 回测，唯一股票数、得分分布、同分池规模必须明显改善。

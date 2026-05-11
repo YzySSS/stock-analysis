@@ -83,6 +83,7 @@ function renderSummaryCard({ title, summary, strategyText, dateText }) {
 
 function renderReviewSummary(filteredSummary = {}, strategySummaries = [], pageItems = []) {
   const container = qs('#tracking-review-summary');
+  if (!container) return;
   if (strategySummaries.length > 1) {
     container.innerHTML = strategySummaries.map((item) => renderSummaryCard({
       title: item.strategy_display_name || item.strategy_id || '-',
@@ -128,6 +129,7 @@ function renderStrategyNoteCard(item) {
 
 function renderReviewNotes(filteredSummary = {}, strategySummaries = [], pageItems = []) {
   const container = qs('#tracking-review-notes');
+  if (!container) return;
   if (strategySummaries.length > 1) {
     container.innerHTML = strategySummaries.map(renderStrategyNoteCard).join('');
     return;
@@ -156,12 +158,9 @@ let lastTrackingState = {
 function renderTrackingTable(items, summary = {}) {
   const body = qs('#tracking-results-body');
   if (!items.length) {
-    renderTrackingCards([]);
     body.innerHTML = renderEmptyRow(14, '暂无跟踪数据');
     return;
   }
-
-  renderTrackingCards(items, summary);
 
   body.innerHTML = items.map((item) => {
     const pct = item.price_change_pct;
@@ -266,24 +265,29 @@ function renderStrategyOptions(options = [], selectedValue = '') {
   select.value = selectedValue || '';
 }
 
+function syncDateInputShell() {
+  const input = qs('#tracking-selection-date');
+  const shell = qs('#tracking-selection-date-shell');
+  const display = qs('#tracking-selection-date-display');
+  if (!input || !shell) return;
+  const hasValue = Boolean(input.value);
+  shell.classList.toggle('has-value', hasValue);
+  if (display) {
+    display.textContent = hasValue ? input.value.replaceAll('-', '/') : '全部日期';
+  }
+}
+
 function renderSelectionDateOptions(dates = [], selectedValue = '') {
-  const select = qs('#tracking-selection-date');
-  if (!select) return;
-  select.innerHTML = '';
-  const latestOption = document.createElement('option');
-  latestOption.value = '';
-  latestOption.textContent = '全部日期';
-  select.appendChild(latestOption);
-
-  dates.forEach((value) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
-    if (value === selectedValue) option.selected = true;
-    select.appendChild(option);
-  });
-
-  select.value = selectedValue || '';
+  const input = qs('#tracking-selection-date');
+  if (!input) return;
+  const sortedDates = [...dates].filter(Boolean).sort();
+  input.min = sortedDates[0] || '';
+  input.max = sortedDates[sortedDates.length - 1] || '';
+  input.value = selectedValue || '';
+  input.title = sortedDates.length
+    ? `可选日期范围：${sortedDates[0]} ~ ${sortedDates[sortedDates.length - 1]}`
+    : '暂无可选日期';
+  syncDateInputShell();
 }
 
 function renderPagination(pagination = {}, pageSize = 10) {
@@ -308,16 +312,19 @@ async function loadTrackingFilters(strategyId, instrumentType = 'stock') {
 
 async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 'stock', selectionDate = '', offset = 0 } = {}) {
   const summaryText = qs('#tracking-summary-text');
-  summaryText.textContent = '加载中...';
+  if (summaryText) summaryText.textContent = '加载中...';
 
   const filters = await loadTrackingFilters(strategyId, instrumentType);
   renderStrategyOptions(filters.strategy_options || [], strategyId);
   const selectionDates = filters.selection_dates || [];
-  renderSelectionDateOptions(selectionDates, selectionDate);
+  const effectiveSelectionDate = selectionDate && selectionDates.includes(selectionDate)
+    ? selectionDate
+    : '';
+  renderSelectionDateOptions(selectionDates, effectiveSelectionDate);
 
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset), instrument_type: instrumentType });
   if (strategyId) query.set('strategy_id', strategyId);
-  if (selectionDate) query.set('selection_date', selectionDate);
+  if (effectiveSelectionDate) query.set('selection_date', effectiveSelectionDate);
 
   const data = await fetchJson(`/api/tracking?${query.toString()}`);
   const items = data.items || [];
@@ -325,19 +332,19 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
   const pageSummary = data.summary || {};
   const strategySummaries = data.strategy_summaries || [];
   const pagination = data.pagination || {};
-  lastTrackingState = { strategyId, limit, instrumentType, selectionDate, offset };
+  lastTrackingState = { strategyId, limit, instrumentType, selectionDate: effectiveSelectionDate, offset };
   renderTrackingTable(items, filteredSummary);
   updateTrackingStats(filteredSummary, items);
   renderReviewSummary(filteredSummary, strategySummaries, items);
   renderReviewNotes(filteredSummary, strategySummaries, items);
   renderPagination(pagination, limit);
-  const modeText = selectionDate
-      ? `当前显示 ${selectionDate} 的复盘结果`
+  const modeText = effectiveSelectionDate
+      ? `当前显示 ${effectiveSelectionDate} 的复盘结果`
       : strategyId
         ? '当前显示该策略全部历史复盘列表'
         : '当前显示全部策略历史复盘列表';
   const excludedText = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
-  summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}`;
+  if (summaryText) summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}`;
 }
 
 async function toggleTrackingStats(button) {
@@ -430,12 +437,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       strategyId: strategySelect.value || '',
       limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
-      selectionDate: '',
+      selectionDate: dateSelect?.value || lastTrackingState.selectionDate || '',
       offset: 0,
     });
   });
 
   dateSelect?.addEventListener('change', async () => {
+    syncDateInputShell();
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
       limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
@@ -444,6 +452,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       offset: 0,
     });
   });
+
 
   pageSizeSelect?.addEventListener('change', async () => {
     await loadTrackingData({
