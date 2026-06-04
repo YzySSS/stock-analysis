@@ -614,7 +614,7 @@ class PostMarketReportV10Plus:
     def send_to_feishu(self, report_text: str):
         """推送到飞书 - 分段推送完整报告"""
         import re
-        FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+        FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
         
         today = datetime.now().strftime('%m-%d %H:%M')
         
@@ -693,7 +693,7 @@ class PostMarketReportV10Plus:
     
     def _send_text_fallback(self, report_text: str):
         """卡片发送失败时的回退方案"""
-        FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+        FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
         
         lines = report_text.split('\n')
         summary = []

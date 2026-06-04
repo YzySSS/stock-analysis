@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 V12_MarketAdaptive - 市场自适应多因子策略
 =============================================
@@ -22,7 +23,7 @@ from datetime import datetime, timedelta
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4'
 }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 修复PE数据问题
 1. 使用pe_ratio（原始PE）替代pe_clean（标准化值）
@@ -12,7 +13,7 @@ from collections import defaultdict
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4', 'collation': 'utf8mb4_unicode_ci'
 }
 

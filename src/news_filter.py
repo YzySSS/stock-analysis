@@ -186,26 +186,43 @@ class NewsFilter:
         self.seen_titles.add(simplified)
         return False
     
-    def is_too_old(self, news_date: str) -> bool:
-        """检查新闻是否过期"""
+    def _parse_news_datetime(self, news_date: str, fallback_text: str = ''):
+        if not news_date and fallback_text:
+            match = re.search(r'(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?', fallback_text)
+            if match:
+                try:
+                    return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+                except Exception:
+                    return None
+            match = re.search(r'(\d{1,2})月(\d{1,2})日', fallback_text)
+            if match:
+                try:
+                    return datetime(datetime.now().year, int(match.group(1)), int(match.group(2)))
+                except Exception:
+                    return None
+
         if not news_date:
-            return False  # 无日期默认不过期
-        
-        try:
-            # 解析日期
-            if isinstance(news_date, str):
-                if ' ' in news_date:
-                    news_date = news_date.split(' ')[0]
-                news_dt = datetime.strptime(news_date, '%Y-%m-%d')
-            else:
-                news_dt = news_date
-            
-            # 检查是否超过最大年龄
-            cutoff = datetime.now() - timedelta(days=self.max_age_days)
-            return news_dt < cutoff
-            
-        except:
-            return False
+            return None
+
+        raw = str(news_date).strip()
+        if not raw:
+            return None
+        normalized = raw.replace('T', ' ').replace('Z', '').split('+')[0]
+        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d', '%Y/%m/%d %H:%M:%S', '%Y/%m/%d', '%Y年%m月%d日']:
+            try:
+                return datetime.strptime(normalized[:len(fmt)], fmt)
+            except Exception:
+                pass
+        return None
+
+    def is_too_old(self, news_date: str, fallback_text: str = '') -> bool:
+        """检查新闻是否过期"""
+        news_dt = self._parse_news_datetime(news_date, fallback_text)
+        if not news_dt:
+            return True
+
+        cutoff = datetime.now() - timedelta(days=self.max_age_days)
+        return news_dt < cutoff
     
     def calculate_quality_score(self, news: Dict) -> float:
         """
@@ -243,7 +260,8 @@ class NewsFilter:
         
         # 4. 时效性 (10分)
         news_date = news.get('datetime', news.get('date', ''))
-        if not self.is_too_old(news_date):
+        fallback_text = f"{news.get('title', '')} {news.get('content', '')}"
+        if not self.is_too_old(news_date, fallback_text):
             score += 10
         
         return score
@@ -290,8 +308,13 @@ class NewsFilter:
             
             # 5. 检查时效性
             news_date = news.get('datetime', news.get('date', ''))
-            if self.is_too_old(news_date):
+            fallback_text = f"{news.get('title', '')} {news.get('content', '')}"
+            if self.is_too_old(news_date, fallback_text):
                 continue
+            if not news.get('datetime') and not news.get('date'):
+                parsed_dt = self._parse_news_datetime('', fallback_text)
+                if parsed_dt:
+                    news['datetime'] = parsed_dt.strftime('%Y-%m-%d')
             
             # 6. 计算质量分
             quality_score = self.calculate_quality_score(news)

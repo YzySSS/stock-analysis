@@ -33,3 +33,58 @@ strategies:
     executable: true
     tags: [trend, momentum, quality, sentiment, value, v12]
     description: 历史版本多因子策略，当前以轻量兼容版本接入选股中心执行链路
+
+  - id: fund_chip_repair
+    display_name: 资金筹码修复选股
+    entrypoint: app.strategies.active.thematic_strategies.FundChipRepairStrategy
+    config_path: app/strategies/registry/configs/fund_chip_repair.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [moneyflow, chip, repair, experimental]
+    description: 结合资金回流、筹码成本分布、温和回撤与低波动，寻找价格尚未明显拉升但修复迹象增强的股票
+
+  - id: quality_lowvol
+    display_name: 质量低波选股
+    entrypoint: app.strategies.active.thematic_strategies.QualityLowVolStrategy
+    config_path: app/strategies/registry/configs/quality_lowvol.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [quality, value, lowvol, experimental]
+    description: 偏稳健的质量/估值/低波组合，优先盈利质量较好、估值不过分且波动较低的股票
+
+  - id: leader_tactics
+    display_name: 龙头战法选股
+    entrypoint: app.strategies.active.thematic_strategies.LeaderTacticsStrategy
+    config_path: app/strategies/registry/configs/leader_tactics.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [leader, momentum, moneyflow, sentiment, experimental]
+    description: 面向 A 股题材和行业龙头，综合强势程度、放量确认、资金流、辨识度和市场热度
+
+  - id: limitup_reversal
+    display_name: 连板分歧反包观察
+    entrypoint: app.strategies.active.thematic_strategies.LimitUpReversalStrategy
+    config_path: app/strategies/registry/configs/limitup_reversal.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [emotion, limitup, reversal, leader, experimental]
+    description: 面向连板/强势票分歧后反包的情绪龙观察池，允许涨停票保留，仅用于高波动短线观察
+
+  - id: a_share_sentiment
+    display_name: A股舆情选股
+    entrypoint: app.strategies.active.thematic_strategies.AShareSentimentStrategy
+    config_path: app/strategies/registry/configs/a_share_sentiment.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [sentiment, news, moneyflow, experimental]
+    description: 贴合 A 股新闻/公告/题材驱动特征，优先使用本地舆情缓存，后续可对 TopN 接 DeepSeek 精排

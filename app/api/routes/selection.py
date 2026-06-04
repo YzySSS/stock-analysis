@@ -14,8 +14,10 @@ router = APIRouter(tags=["selection"])
 class SelectionRunRequest(BaseModel):
     strategy_id: Optional[str] = None
     limit: int = 3
+    max_picks: Optional[int] = None
     score_threshold: Optional[float] = None
     instrument_type: str = "stock"
+    market_board: Optional[str] = None
     save: bool = False
 
 
@@ -29,10 +31,12 @@ class SelectionSaveItemRequest(BaseModel):
 @router.post("/selection/run")
 def run_selection(payload: SelectionRunRequest) -> dict:
     service = StrategyService()
+    effective_limit = payload.max_picks if payload.max_picks is not None else payload.limit
     return service.run_strategy(
         strategy_id=payload.strategy_id,
-        limit=payload.limit,
+        limit=effective_limit,
         instrument_type=payload.instrument_type,
+        market_board=payload.market_board,
         save=payload.save,
         score_threshold=payload.score_threshold,
         run_id=None,

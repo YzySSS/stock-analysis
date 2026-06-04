@@ -44,6 +44,11 @@ def backtest_page() -> FileResponse:
     return serve_page("backtest.html")
 
 
+@router.get("/trade-strategies", include_in_schema=False)
+def trade_strategies_page() -> FileResponse:
+    return serve_page("trade-strategies.html")
+
+
 @router.get("/system", include_in_schema=False)
 def system_page() -> FileResponse:
     return serve_page("system.html")

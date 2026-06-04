@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Optional
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,14 +13,42 @@ from app.shared.db import mysql_conn
 router = APIRouter(tags=["backtest"])
 
 
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct(entry: float | None, price: float | None) -> float | None:
+    if entry is None or price is None or entry <= 0:
+        return None
+    return round((price - entry) / entry * 100, 4)
+
+
+def _adjust_price(price: float | None, factor: float | None, entry_factor: float | None) -> float | None:
+    if price is None:
+        return None
+    if factor is None or entry_factor is None or entry_factor <= 0:
+        return price
+    return price * factor / entry_factor
+
+
 class BacktestRunRequest(BaseModel):
     strategy_id: str = "lowvol_reversal"
     start_date: str
     end_date: str
     return_mode: str = "1d"
+    trade_strategy_id: Optional[str] = None
+    evaluation_mode: str = "research"
     instrument_type: str = "stock"
     use_adjusted_price: bool = False
     commission_bps: float = Field(default=0, ge=0, le=100)
+    stamp_tax_bps: float = Field(default=0, ge=0, le=100)
     slippage_bps: float = Field(default=0, ge=0, le=100)
     apply_execution_constraints: bool = False
     save: bool = True
@@ -59,6 +88,10 @@ def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str
         "lowvol_reversal": "低波反转策略",
         "v13_three_factor": "三因子策略",
         "v12_legacy": "多因子策略",
+        "fund_chip_repair": "资金筹码修复选股",
+        "quality_lowvol": "质量低波选股",
+        "leader_tactics": "龙头战法选股",
+        "a_share_sentiment": "A股舆情选股",
     }
     base = base_names.get(strategy_id or "", strategy_id or "-")
     if not strategy_version:
@@ -83,11 +116,13 @@ def normalize_run_row(row: dict) -> dict:
     return {
         "run_id": row.get("run_id"),
         "strategy_id": strategy_id,
+        "trade_strategy_id": row.get("trade_strategy_id"),
         "strategy_version": strategy_version,
         "strategy_display_name": strategy_display_name_for_run(strategy_id, strategy_version),
         "start_date": str(row.get("start_date")) if row.get("start_date") else None,
         "end_date": str(row.get("end_date")) if row.get("end_date") else None,
         "return_mode": row.get("return_mode"),
+        "evaluation_mode": row.get("evaluation_mode"),
         "status": row.get("status"),
         "worker_id": row.get("worker_id"),
         "locked_at": str(row.get("locked_at")) if row.get("locked_at") else None,
@@ -201,10 +236,13 @@ def get_backtest_trades(
     """
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
+            cursor.execute("SELECT use_adjusted_price FROM backtest_run WHERE run_id=%s", (run_id,))
+            run_row = cursor.fetchone() or {}
             cursor.execute(count_sql, base_params)
             total = int((cursor.fetchone() or {}).get("total") or 0)
             cursor.execute(sql, base_params + [limit, offset])
             rows = cursor.fetchall() or []
+            horizon_by_key = build_trade_horizon_rows(cursor, rows, bool(run_row.get("use_adjusted_price")))
     return {
         "run_id": run_id,
         "limit": limit,
@@ -217,6 +255,7 @@ def get_backtest_trades(
         "items": [
             {
                 **row,
+                "horizon_days": horizon_by_key.get((row.get("trade_date"), row.get("code")), []),
                 "factor_json": json.loads(row.get("factor_json")) if isinstance(row.get("factor_json"), str) else row.get("factor_json"),
                 "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
                 "entry_date": str(row.get("entry_date")) if row.get("entry_date") else None,
@@ -226,6 +265,55 @@ def get_backtest_trades(
             for row in rows
         ],
     }
+
+
+def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: bool = False) -> dict[tuple[object, object], list[dict]]:
+    """Build T/T+1/T+2/T+3/T+4 close and intraday risk snapshots for trade rows.
+
+    Values are relative to the recorded entry price. When the run used adjusted
+    prices, future close/high/low are compared on the same adjusted basis as the
+    backtest return calculation.
+    """
+    result: dict[tuple[object, object], list[dict]] = {}
+    if not trades:
+        return result
+    sql = """
+    SELECT dk.trade_date, dk.close, dk.high, dk.low, af.adj_factor
+    FROM daily_kline dk
+    LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
+    WHERE dk.code=%s AND dk.trade_date >= %s
+    ORDER BY dk.trade_date
+    LIMIT 5
+    """
+    for trade in trades:
+        code = trade.get("code")
+        trade_date = trade.get("trade_date")
+        entry_price = _to_float(trade.get("entry_price"))
+        if not code or not trade_date or not entry_price:
+            continue
+        cursor.execute(sql, (code, trade_date))
+        bars = cursor.fetchall() or []
+        entry_factor = _to_float(bars[0].get("adj_factor")) if bars else None
+        items: list[dict] = []
+        for day_no, bar in enumerate(bars[:5], start=0):
+            factor = _to_float(bar.get("adj_factor")) if use_adjusted_price else None
+            base_factor = entry_factor if use_adjusted_price else None
+            close = _adjust_price(_to_float(bar.get("close")), factor, base_factor)
+            high = _adjust_price(_to_float(bar.get("high")), factor, base_factor)
+            low = _adjust_price(_to_float(bar.get("low")), factor, base_factor)
+            items.append(
+                {
+                    "day_no": day_no,
+                    "label": "入选日" if day_no == 0 else f"T+{day_no}",
+                    "trade_date": str(bar.get("trade_date")) if bar.get("trade_date") else None,
+                    "close_price": round(close, 4) if close is not None else None,
+                    "close_return_pct": _pct(entry_price, close),
+                    "max_gain_pct": _pct(entry_price, high),
+                    "max_drawdown_pct": _pct(entry_price, low),
+                }
+            )
+        result[(trade_date, code)] = items
+    return result
 
 
 @router.get("/backtest/runs")

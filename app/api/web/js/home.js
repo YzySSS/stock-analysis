@@ -6,6 +6,14 @@ function formatAmount(value) {
   return n.toFixed(0);
 }
 
+function formatCompactAmount(value) {
+  const num = Number(value);
+  if (value == null || Number.isNaN(num)) return '-';
+  if (Math.abs(num) >= 100000000) return `${(num / 100000000).toFixed(1)}亿`;
+  if (Math.abs(num) >= 10000) return `${(num / 10000).toFixed(1)}万`;
+  return num.toFixed(0);
+}
+
 function formatSectorAmount(value, unit) {
   if (value == null || Number.isNaN(Number(value))) return '-';
   if (unit === '亿元') return `${Number(value).toFixed(1)}亿`;
@@ -53,6 +61,62 @@ function renderSectorList(selector, sectors, emptyText) {
           <small>${extraLine}</small>
         </span>
       </a>
+    `;
+  }).join('');
+}
+
+function formatHotThemeStock(stock) {
+  if (!stock) return '';
+  if (typeof stock === 'string') return stock;
+  return stock.name || stock.stock_name || stock.code || '';
+}
+
+function renderHotThemes(data = {}) {
+  const summary = qs('#home-hot-theme-summary');
+  const container = qs('#home-hot-themes');
+  const items = data.items || [];
+  if (summary) {
+    summary.textContent = data.as_of ? `更新 ${data.as_of} · 每 15 分钟` : '暂无热点主题快照';
+  }
+  if (!container) return;
+  if (!items.length) {
+    container.innerHTML = '<div class="empty-state">暂无热点主题数据</div>';
+    return;
+  }
+  container.innerHTML = items.slice(0, 8).map((item, index) => {
+    const stocks = (item.top_stocks || []).map(formatHotThemeStock).filter(Boolean).slice(0, 3).join(' / ') || '-';
+    const firstNews = (item.top_news || [])[0] || {};
+    const fundSummary = item.net_amount != null
+      ? `资金 ${formatCompactAmount(item.net_amount * 100000000)} · 涨幅 ${formatPercent(item.pct_chg)} · 领涨 ${item.leading_stock || '-'}`
+      : '';
+    const newsTitle = typeof firstNews === 'string' ? firstNews : (firstNews.title || firstNews.summary || '');
+    const positive = Number(item.positive_news_count || 0);
+    const negative = Number(item.negative_news_count || 0);
+    const toneClass = positive >= negative ? 'up' : 'down';
+    const displayScore = item.hot_score ?? item.sector_score;
+    const detailLine = item.fund_flow_score != null
+      ? `资金 ${formatNumber(item.fund_flow_score, 1)}${item.opinion_match_score != null ? ` · 舆情共振 ${formatNumber(item.opinion_match_score, 1)}` : ''}${item.ths_score != null ? ` · 同花顺 ${formatNumber(item.ths_score, 1)}` : ''}`
+      : item.ths_score != null
+        ? `同花顺 ${formatNumber(item.ths_score, 1)} · 成分 ${item.ths_member_count ?? item.stock_count ?? '-'}`
+        : `来源 ${item.source_count ?? '-'} · 新闻 ${item.news_count ?? '-'}`;
+    return `
+      <article class="home-hot-theme-card">
+        <div class="hot-theme-rank">${index + 1}</div>
+        <div class="hot-theme-main">
+          <div class="hot-theme-title-row">
+            <strong>${escapeHtml(item.sector_name || '-')}</strong>
+            <span>${escapeHtml(item.sector_type_label || item.sector_type || '-')}</span>
+          </div>
+          <div class="hot-theme-news">${escapeHtml(newsTitle || fundSummary || '暂无热点新闻摘要')}</div>
+          <div class="hot-theme-stocks">关联个股：${escapeHtml(stocks)}</div>
+        </div>
+        <div class="hot-theme-metrics">
+          <b>${formatNumber(displayScore, 1)}</b>
+          <span>热度分</span>
+          <small class="${toneClass}">正 ${positive} / 负 ${negative}</small>
+          <small>${escapeHtml(detailLine)}</small>
+        </div>
+      </article>
     `;
   }).join('');
 }
@@ -105,6 +169,7 @@ function nextTradingMorning(date) {
 }
 
 function marketSessionInfo(now) {
+  const preOpenAuction = marketTimeAt(now, 9, 15);
   const morningOpen = marketTimeAt(now, 9, 30);
   const lunchBreak = marketTimeAt(now, 11, 30);
   const afternoonOpen = marketTimeAt(now, 13, 0);
@@ -113,7 +178,8 @@ function marketSessionInfo(now) {
     const target = nextTradingMorning(now);
     return { label: '休市中', targetLabel: '早盘', target, className: 'closed' };
   }
-  if (now < morningOpen) return { label: '未开盘', targetLabel: '早盘', target: morningOpen, className: 'closed' };
+  if (now < preOpenAuction) return { label: '未开盘', targetLabel: '盘前竞价', target: preOpenAuction, className: 'closed' };
+  if (now < morningOpen) return { label: '盘前竞价中', targetLabel: '连续竞价', target: morningOpen, className: 'paused' };
   if (now < lunchBreak) return { label: '交易中', targetLabel: '午盘', target: lunchBreak, className: 'trading' };
   if (now < afternoonOpen) return { label: '午间休市', targetLabel: '午后开盘', target: afternoonOpen, className: 'paused' };
   if (now < close) return { label: '交易中', targetLabel: '收盘', target: close, className: 'trading' };
@@ -210,6 +276,186 @@ function renderTrackingCards(items = []) {
   }).join('');
 }
 
+function renderRiskTags(tags = []) {
+  if (!tags.length) return '<span class="emotion-risk-tag muted-tag">暂无风险标签</span>';
+  return tags.slice(0, 3).map((tag) => `<span class="emotion-risk-tag">${escapeHtml(tag)}</span>`).join('');
+}
+
+function renderLimitUpPool(items = []) {
+  if (!items.length) return '<div class="empty-state">暂无涨停/连板观察数据</div>';
+  const rows = items.slice(0, 10).map((item, index) => {
+    const detailUrl = `/stocks/${encodeURIComponent(item.code || '')}`;
+    return `
+      <tr>
+        <td><span class="emotion-rank">${index + 1}</span></td>
+        <td>
+          <a class="emotion-stock-link" href="${detailUrl}">${escapeHtml(item.name || item.code || '-')}</a>
+          <div class="muted">${escapeHtml(item.code || '-')} · ${escapeHtml(item.industry || '-')}</div>
+        </td>
+        <td>
+          <span class="emotion-height-badge">${escapeHtml(item.board_height_label || '-')}</span>
+          ${item.recent_pattern_label ? `<div class="muted">${escapeHtml(item.recent_pattern_label)}</div>` : ''}
+        </td>
+        <td>
+          <div>${escapeHtml(item.status_label || '-')}</div>
+          <div class="muted">${formatCompactAmount(item.amount)}</div>
+        </td>
+        <td class="up">${formatPercent(item.pct_chg)}</td>
+        <td>${formatPercent(item.turnover_rate)}</td>
+        <td><div class="emotion-tags">${renderRiskTags(item.risk_tags || [])}</div></td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div class="home-emotion-table-wrap">
+      <table class="home-emotion-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>股票</th>
+            <th>高度</th>
+            <th>状态/成交额</th>
+            <th>涨幅</th>
+            <th>换手</th>
+            <th>风险</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderHotLimitWatchPool(items = []) {
+  if (!items.length) return '<div class="empty-state">暂无强势冲板观察数据</div>';
+  const rows = items.slice(0, 6).map((item, index) => {
+    const detailUrl = `/stocks/${encodeURIComponent(item.code || '')}`;
+    const limitText = item.limit_gap_pct == null ? '水上' : `距板 ${formatPercent(item.limit_gap_pct)}`;
+    const themeLine = item.theme_name
+      ? `${item.theme_name} · 热度 ${formatNumber(item.theme_score, 1)}`
+      : '热点映射待确认';
+    const watchLine = (item.watch_points || []).join(' · ') || themeLine;
+    return `
+      <tr>
+        <td><span class="emotion-rank">${index + 1}</span></td>
+        <td>
+          <a class="emotion-stock-link" href="${detailUrl}">${escapeHtml(item.name || item.code || '-')}</a>
+          <div class="muted">${escapeHtml(item.code || '-')} · ${escapeHtml(item.industry || '-')}</div>
+        </td>
+        <td>
+          <span class="emotion-status-badge">${escapeHtml(item.status_label || '-')}</span>
+          <div class="muted">${escapeHtml(limitText)}</div>
+        </td>
+        <td>
+          <div>${escapeHtml(themeLine)}</div>
+          <div class="muted">${escapeHtml(item.theme_match_reason || watchLine)}</div>
+        </td>
+        <td class="up">${formatPercent(item.pct_chg)}</td>
+        <td>${formatNumber(item.hot_score, 1)}</td>
+        <td>
+          <div>${item.net_amount_yi == null ? '-' : `${formatNumber(item.net_amount_yi, 2)}亿`}</div>
+          <div class="muted">${item.popularity_rank ? `人气 #${escapeHtml(item.popularity_rank)}` : '人气 -'}</div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div class="home-emotion-table-wrap">
+      <table class="home-emotion-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>股票</th>
+            <th>状态</th>
+            <th>热点依据</th>
+            <th>涨幅</th>
+            <th>冲板分</th>
+            <th>资金/人气</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderReversalPool(items = []) {
+  if (!items.length) return '<div class="empty-state">暂无分歧反包观察数据</div>';
+  const rows = items.slice(0, 6).map((item, index) => {
+    const detailUrl = `/stocks/${encodeURIComponent(item.code || '')}`;
+    const limitGap = item.is_limit_up ? '已封板' : (item.limit_gap_pct == null ? '' : `距板 ${formatPercent(item.limit_gap_pct)}`);
+    return `
+      <tr>
+        <td><span class="emotion-rank">${index + 1}</span></td>
+        <td>
+          <a class="emotion-stock-link" href="${detailUrl}">${escapeHtml(item.name || item.code || '-')}</a>
+          <div class="muted">${escapeHtml(item.code || '-')} · ${escapeHtml(item.industry || '-')}</div>
+        </td>
+        <td>
+          <span class="emotion-status-badge">${escapeHtml(item.status_label || '-')}</span>
+          ${item.previous_board_label ? `<div class="muted">${escapeHtml(item.previous_board_label)}</div>` : ''}
+          ${limitGap ? `<div class="muted">${escapeHtml(limitGap)}</div>` : ''}
+        </td>
+        <td>${formatPercent(item.prev_divergence_pct)}</td>
+        <td class="up">${formatPercent(item.reversal_pct)}</td>
+        <td>${formatNumber(item.support_score, 1)}</td>
+        <td><div class="emotion-tags">${renderRiskTags(item.risk_tags || [])}</div></td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <div class="home-emotion-table-wrap">
+      <table class="home-emotion-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>股票</th>
+            <th>前连板/状态</th>
+            <th>昨日分歧</th>
+            <th>今日修复</th>
+            <th>承接</th>
+            <th>风险</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderStrongWatchPool(hotLimitItems = [], reversalItems = []) {
+  return `
+    <div class="home-emotion-subsection">
+      <div class="home-emotion-subhead">
+        <strong>强势冲板观察</strong>
+        <span>水上强势 / 冲刺涨停 / 热度与资金确认</span>
+      </div>
+      ${renderHotLimitWatchPool(hotLimitItems)}
+    </div>
+    <div class="home-emotion-subsection">
+      <div class="home-emotion-subhead">
+        <strong>分歧反包观察</strong>
+        <span>昨日分歧 / 今日修复 / 承接</span>
+      </div>
+      ${renderReversalPool(reversalItems)}
+    </div>
+  `;
+}
+
+function renderEmotionBoard(board = {}) {
+  const summary = qs('#home-emotion-summary');
+  const limitPool = board.limit_up_pool || [];
+  const hotLimitPool = board.hot_limit_watch_pool || [];
+  const reversalPool = board.reversal_watch_pool || [];
+  if (summary) {
+    summary.textContent = `观察池：连板 ${limitPool.length} · 冲板潜力 ${hotLimitPool.length} · 反包 ${reversalPool.length} · 非正式策略`;
+  }
+  const limitContainer = qs('#home-limit-up-pool');
+  if (limitContainer) limitContainer.innerHTML = renderLimitUpPool(limitPool);
+  const reversalContainer = qs('#home-reversal-watch-pool');
+  if (reversalContainer) reversalContainer.innerHTML = renderStrongWatchPool(hotLimitPool, reversalPool);
+}
+
 async function loadHomePage() {
   const trackingSummary = qs('#home-tracking-summary');
   const trackingPreview = qs('#home-tracking-preview');
@@ -218,6 +464,8 @@ async function loadHomePage() {
     const data = await fetchJson('/api/dashboard/summary?limit=8');
     const items = data.latest_tracking_preview || [];
     renderMarketOverview(data.market_overview);
+    renderHotThemes(data.hot_themes || {});
+    renderEmotionBoard(data.emotion_board || {});
 
     const avgText = data.latest_tracking_avg_price_change_pct == null
       ? '平均涨跌幅 -'
@@ -227,6 +475,14 @@ async function loadHomePage() {
   } catch (error) {
     trackingSummary.textContent = '加载失败';
     trackingPreview.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    setText('#home-emotion-summary', '加载失败');
+    setText('#home-hot-theme-summary', '加载失败');
+    const hotThemeContainer = qs('#home-hot-themes');
+    if (hotThemeContainer) hotThemeContainer.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    const limitContainer = qs('#home-limit-up-pool');
+    const reversalContainer = qs('#home-reversal-watch-pool');
+    if (limitContainer) limitContainer.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (reversalContainer) reversalContainer.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
   }
 }
 

@@ -9,7 +9,7 @@ sentiment_prefetch:
   max_age_days: 7
   min_credibility: 0.35
   sleep_seconds: 0.1
-  skip_existing: false
+  skip_existing: true
 
 sentiment_rank:
   v12_weight: 0.8

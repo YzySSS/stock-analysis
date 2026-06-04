@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 V11_IC_Optimized 分批回测 (按月处理)
 =====================================
@@ -13,7 +14,7 @@ from datetime import datetime
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4'
 }
 

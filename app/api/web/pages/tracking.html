@@ -19,7 +19,8 @@
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
         <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/strategies" data-nav="strategies">选股策略</a>
+        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
@@ -75,8 +76,11 @@
 
         <article class="card review-notes-card">
           <div class="card-header">
-            <p class="card-kicker">Attribution</p>
-            <h2>复盘备注 / 成败归因</h2>
+            <div>
+              <p class="card-kicker">Attribution</p>
+              <h2>复盘备注 / 成败归因</h2>
+            </div>
+            <button id="tracking-deep-review" class="btn btn-primary" type="button">详细复盘</button>
           </div>
           <div id="tracking-review-notes" class="note-block">加载中...</div>
         </article>
@@ -153,6 +157,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260428d"></script>
-  <script src="/static/js/tracking.js?v=20260511a"></script>
+  <script src="/static/js/tracking.js?v=20260521b"></script>
 </body>
 </html>

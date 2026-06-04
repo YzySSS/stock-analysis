@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 
 # 飞书Webhook
-FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
 
 # 读取选股结果
 REPORT_FILE = "/workspace/projects/workspace/股票分析项目/reports/daily_pick_20260318.json"

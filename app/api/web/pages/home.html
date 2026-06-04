@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260510n" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260526f" />
 </head>
 <body data-page="home">
   <div class="app-shell dashboard-shell">
@@ -19,7 +19,8 @@
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
         <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/strategies" data-nav="strategies">选股策略</a>
+        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
@@ -87,11 +88,54 @@
             </article>
           </section>
 
+          <section class="home-hot-theme-section">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Hot Themes</p>
+                <h2>热点主题</h2>
+              </div>
+              <span id="home-hot-theme-summary" class="muted">加载中...</span>
+            </div>
+            <div id="home-hot-themes" class="home-hot-theme-list">
+              <div class="empty-state">加载中...</div>
+            </div>
+          </section>
+
+          <section class="home-short-emotion-section">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Emotion Watch</p>
+                <h2>短线情绪观察</h2>
+              </div>
+              <span id="home-emotion-summary" class="muted">加载中...</span>
+            </div>
+            <div class="home-emotion-grid">
+              <article class="home-emotion-panel">
+                <div class="home-emotion-panel-head">
+                  <h3>连板池</h3>
+                  <span>高度 / 题材 / 封板状态</span>
+                </div>
+                <div id="home-limit-up-pool" class="home-emotion-list">
+                  <div class="empty-state">加载中...</div>
+                </div>
+              </article>
+              <article class="home-emotion-panel">
+                <div class="home-emotion-panel-head">
+                  <h3>热点强势观察</h3>
+                  <span>冲板潜力 / 分歧反包 / 观察池</span>
+                </div>
+                <div id="home-reversal-watch-pool" class="home-emotion-list">
+                  <div class="empty-state">加载中...</div>
+                </div>
+              </article>
+            </div>
+          </section>
+
           <section class="home-card-sector-grid">
             <article class="sector-card positive-sector-card">
               <div class="card-header">
-                <p class="card-kicker">Fund Flow</p>
-                <h2>资金强势板块</h2>
+                <p class="card-kicker">Fund Inflow</p>
+                <h2>资金流入板块</h2>
               </div>
               <div id="home-strong-sectors" class="home-sector-list">
                 <div class="empty-state">加载中...</div>
@@ -99,8 +143,8 @@
             </article>
             <article class="sector-card negative-sector-card">
               <div class="card-header">
-                <p class="card-kicker">Weak Flow</p>
-                <h2>资金弱势板块</h2>
+                <p class="card-kicker">Fund Outflow</p>
+                <h2>资金流出板块</h2>
               </div>
               <div id="home-weak-sectors" class="home-sector-list">
                 <div class="empty-state">加载中...</div>
@@ -126,6 +170,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/home.js?v=20260508j"></script>
+  <script src="/static/js/home.js?v=20260526f"></script>
 </body>
 </html>

@@ -12,6 +12,10 @@ const BACKTEST_STRATEGY_LABELS = {
   lowvol_reversal: '低波反转策略 v2.1',
   v13_three_factor: '三因子策略',
   v12_legacy: '多因子策略',
+  fund_chip_repair: '资金筹码修复选股',
+  quality_lowvol: '质量低波选股',
+  leader_tactics: '龙头战法选股',
+  a_share_sentiment: 'A股舆情选股',
 };
 
 function backtestStrategyLabel(strategyId) {
@@ -22,6 +26,18 @@ function backtestRunStrategyLabel(item) {
   return item?.strategy_display_name || backtestStrategyLabel(item?.strategy_id);
 }
 
+const BACKTEST_TRADE_STRATEGY_LABELS = {
+  next_open_1d: '次日开盘卖出',
+  hold_3d_close: '持有3日收盘',
+  triple_barrier_5d: '五日止盈止损',
+  observe_t3_daily: '选股专属回测',
+};
+
+function backtestTradeStrategyLabel(item) {
+  const id = item?.trade_strategy_id || item?.request?.trade_strategy_id || (item?.return_mode === '3d' ? 'hold_3d_close' : item?.return_mode === 'triple_barrier_5d' ? 'triple_barrier_5d' : item?.return_mode === 'observe_t3_daily' ? 'observe_t3_daily' : 'next_open_1d');
+  return BACKTEST_TRADE_STRATEGY_LABELS[id] || id || '-';
+}
+
 const BACKTEST_STRATEGY_DEFAULTS = {
   lowvol_reversal: {
     threshold: 60,
@@ -29,6 +45,18 @@ const BACKTEST_STRATEGY_DEFAULTS = {
   },
   v13_three_factor: {
     threshold: 65,
+    maxPicks: 3,
+  },
+  fund_chip_repair: {
+    threshold: 60,
+    maxPicks: 3,
+  },
+  quality_lowvol: {
+    threshold: 60,
+    maxPicks: 3,
+  },
+  leader_tactics: {
+    threshold: 60,
     maxPicks: 3,
   },
 };
@@ -51,9 +79,10 @@ function pctCell(value) {
 function setBacktestStats(data) {
   const summary = data?.summary || {};
   const adjustedLabel = data?.request?.use_adjusted_price ? ' · 复权收益' : ' · 不复权';
-  const costLabel = (Number(data?.request?.commission_bps || 0) || Number(data?.request?.slippage_bps || 0) || data?.request?.apply_execution_constraints)
-    ? ` · 成本${Number(data?.request?.commission_bps || 0)}bps/滑点${Number(data?.request?.slippage_bps || 0)}bps${data?.request?.apply_execution_constraints ? ' · 成交约束' : ''}`
+  const costLabel = (Number(data?.request?.commission_bps || 0) || Number(data?.request?.stamp_tax_bps || 0) || Number(data?.request?.slippage_bps || 0) || data?.request?.apply_execution_constraints)
+    ? ` · 成本${Number(data?.request?.commission_bps || 0)}bps/印花${Number(data?.request?.stamp_tax_bps || 0)}bps/滑点${Number(data?.request?.slippage_bps || 0)}bps${data?.request?.apply_execution_constraints ? ' · 成交约束' : ''}`
     : '';
+  const tradeStrategyLabel = data?.request?.trade_strategy_id ? ` · ${data.request.trade_strategy_id}` : '';
   qs('#backtest-detail-section').style.display = '';
   qs('#backtest-stat-days').textContent = data?.sample_days || summary.trade_days || `${data?.progress_done_days ?? 0}/${data?.progress_total_days ?? 0}`;
   qs('#backtest-stat-picks').textContent = data?.total_picks ?? summary.total_picks ?? data?.total_trades ?? summary.trade_count ?? '-';
@@ -61,7 +90,7 @@ function setBacktestStats(data) {
   qs('#backtest-stat-avg-return').innerHTML = pctCell(data?.avg_return_pct ?? summary.avg_return_pct);
   qs('#backtest-stat-max-drawdown').innerHTML = pctCell(data?.max_drawdown_pct ?? summary.max_drawdown_pct);
   qs('#backtest-stat-win-rate').textContent = formatPercent(data?.win_rate_pct ?? summary.win_rate_pct);
-  qs('#backtest-run-id').textContent = data?.run_id ? `run_id: ${data.run_id}${adjustedLabel}${costLabel}` : '暂无 run';
+  qs('#backtest-run-id').textContent = data?.run_id ? `run_id: ${data.run_id}${tradeStrategyLabel}${adjustedLabel}${costLabel}` : '暂无 run';
 }
 
 function formatEta(seconds) {
@@ -101,7 +130,7 @@ function renderBacktestChart(curve = []) {
   if (!svg) return;
   const points = [];
   let equity = 1;
-  const returnField = currentBacktestReturnMode === '3d' ? 'avg_return_3d_pct' : 'avg_return_1d_pct';
+  const returnField = currentBacktestReturnMode === '3d' || currentBacktestReturnMode === 'triple_barrier_5d' || currentBacktestReturnMode === 'observe_t3_daily' ? 'avg_return_3d_pct' : 'avg_return_1d_pct';
   (curve || []).forEach((item) => {
     const daily = Number(item[returnField] ?? item.daily_return_pct ?? 0);
     if (!Number.isNaN(daily)) equity *= (1 + daily / 100);
@@ -251,7 +280,7 @@ function buildBacktestFactorTooltip(item = {}) {
 function syncTradeReturnHeader(returnMode = currentBacktestReturnMode) {
   const header = qs('#backtest-trade-return-header');
   if (!header) return;
-  header.textContent = returnMode === '3d' ? '3 日卖出/收益' : '1 日卖出/收益';
+  header.textContent = returnMode === 'observe_t3_daily' ? 'T+3 收盘/收益' : returnMode === 'triple_barrier_5d' ? '止盈止损卖出/收益' : returnMode === '3d' ? '3 日卖出/收益' : '1 日卖出/收益';
 }
 
 function renderTradesPagination(meta = {}) {
@@ -289,6 +318,27 @@ function renderTradesPagination(meta = {}) {
   container.querySelector('[data-trades-page="next"]')?.addEventListener('click', () => loadTrades(currentBacktestRunId, Math.min(totalPages, page + 1)));
 }
 
+function renderTradeHorizonDays(days = []) {
+  if (!days.length) return '<span class="muted">入选日/T+1/T+2/T+3/T+4 数据不足</span>'; 
+  return `
+    <div class="backtest-horizon-grid">
+      ${days.map((day) => `
+        <div class="backtest-horizon-card">
+          <div class="backtest-horizon-card-head">
+            <strong>${escapeHtml(day.label || `T+${day.day_no || ''}`)}</strong>
+            <span>${escapeHtml(day.trade_date || '-')}</span>
+          </div>
+          <div class="backtest-horizon-metrics">
+            <div><span>收盘</span><b>${formatNumber(day.close_price, 4)}</b><em>${pctCell(day.close_return_pct)}</em></div>
+            <div><span>最大浮盈</span><b>${pctCell(day.max_gain_pct)}</b></div>
+            <div><span>最大回撤</span><b>${pctCell(day.max_drawdown_pct)}</b></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderTrades(items = [], returnMode = currentBacktestReturnMode, meta = {}) {
   const body = qs('#backtest-trades-body');
   syncTradeReturnHeader(returnMode);
@@ -297,7 +347,9 @@ function renderTrades(items = [], returnMode = currentBacktestReturnMode, meta =
     body.innerHTML = renderEmptyRow(9, '暂无个股明细');
     return;
   }
-  const is3d = returnMode === '3d';
+  const isSelectionDiagnostics = returnMode === 'observe_t3_daily';
+  const is3d = returnMode === '3d' || returnMode === 'triple_barrier_5d' || isSelectionDiagnostics;
+  const horizonTitle = '选股专属回测：入选日 / T+1 / T+2 / T+3 / T+4 收盘与日内风险';
   body.innerHTML = items.map((item) => `
     <tr>
       <td>${escapeHtml(item.trade_date || '')}</td>
@@ -313,6 +365,14 @@ function renderTrades(items = [], returnMode = currentBacktestReturnMode, meta =
       <td>${pctCell(item.max_gain_pct)}</td>
       <td>${pctCell(item.max_drawdown_pct)}</td>
     </tr>
+    ${isSelectionDiagnostics ? `
+      <tr class="backtest-horizon-row">
+        <td colspan="9">
+          <div class="backtest-horizon-title">${horizonTitle}</div>
+          ${renderTradeHorizonDays(item.horizon_days || [])}
+        </td>
+      </tr>
+    ` : ''}
   `).join('');
   bindTooltips();
 }
@@ -402,8 +462,9 @@ function renderRecentRunsPanel(items = []) {
   container.classList.remove('empty-state');
   container.innerHTML = items.slice(0, 20).map((item) => `
     <button class="recent-backtest-row" type="button" data-load-run="${escapeHtml(item.run_id || '')}">
-      <span>${escapeHtml(backtestRunStrategyLabel(item))}</span>
-      <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')}${item.request?.use_adjusted_price ? ' · 复权' : ''}${(Number(item.request?.commission_bps || 0) || Number(item.request?.slippage_bps || 0) || item.request?.apply_execution_constraints) ? ' · 真实化' : ''}</span>
+      <span class="recent-selection-strategy" title="选股策略：${escapeHtml(backtestRunStrategyLabel(item))}">${escapeHtml(backtestRunStrategyLabel(item))}</span>
+      <span class="recent-trade-strategy" title="交易策略：${escapeHtml(backtestTradeStrategyLabel(item))}">${escapeHtml(backtestTradeStrategyLabel(item))}</span>
+      <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')}${item.request?.use_adjusted_price ? ' · 复权' : ''}${(Number(item.request?.commission_bps || 0) || Number(item.request?.stamp_tax_bps || 0) || Number(item.request?.slippage_bps || 0) || item.request?.apply_execution_constraints) ? ' · 真实化' : ''}</span>
       <span><i class="badge ${statusBadgeClass(item.status)}">${escapeHtml(item.status || '-')}</i></span>
       <strong class="${getPctClass(item.total_return_pct) || ''}">${formatPercent(item.total_return_pct)}</strong>
     </button>
@@ -530,14 +591,19 @@ async function runBacktest(event) {
   const messageShell = message?.closest('.backtest-terminal-foot');
   if (messageShell) messageShell.hidden = true;
   if (message) message.textContent = '';
+  const tradeStrategyId = qs('#backtest-trade-strategy-id')?.value || 'next_open_1d';
+  const returnMode = tradeStrategyId === 'observe_t3_daily' ? 'observe_t3_daily' : tradeStrategyId === 'triple_barrier_5d' ? 'triple_barrier_5d' : tradeStrategyId === 'hold_3d_close' ? '3d' : '1d';
+  if (qs('#backtest-return-mode')) qs('#backtest-return-mode').value = returnMode;
   const payload = {
     strategy_id: qs('#backtest-strategy-id').value,
     start_date: qs('#backtest-start-date').value,
     end_date: qs('#backtest-end-date').value,
-    return_mode: qs('#backtest-return-mode').value,
+    return_mode: returnMode,
+    trade_strategy_id: tradeStrategyId,
     instrument_type: 'stock',
     use_adjusted_price: Boolean(qs('#backtest-use-adjusted-price')?.checked),
     commission_bps: Number(qs('#backtest-commission-bps')?.value || 0),
+    stamp_tax_bps: Number(qs('#backtest-stamp-tax-bps')?.value || 0),
     slippage_bps: Number(qs('#backtest-slippage-bps')?.value || 0),
     apply_execution_constraints: Boolean(qs('#backtest-execution-constraints')?.checked),
     save: true,
@@ -567,6 +633,13 @@ qs('#backtest-form')?.addEventListener('submit', runBacktest);
 qs('#refresh-backtest-page')?.addEventListener('click', refreshBacktestPage);
 qs('#backtest-return-mode')?.addEventListener('change', () => {
   currentBacktestReturnMode = qs('#backtest-return-mode')?.value || '1d';
+  currentBacktestTradesPage = 1;
+  loadTrades(currentBacktestRunId, 1);
+});
+qs('#backtest-trade-strategy-id')?.addEventListener('change', () => {
+  const tradeStrategyId = qs('#backtest-trade-strategy-id')?.value || 'next_open_1d';
+  currentBacktestReturnMode = tradeStrategyId === 'observe_t3_daily' ? 'observe_t3_daily' : tradeStrategyId === 'triple_barrier_5d' ? 'triple_barrier_5d' : tradeStrategyId === 'hold_3d_close' ? '3d' : '1d';
+  if (qs('#backtest-return-mode')) qs('#backtest-return-mode').value = currentBacktestReturnMode;
   currentBacktestTradesPage = 1;
   loadTrades(currentBacktestRunId, 1);
 });

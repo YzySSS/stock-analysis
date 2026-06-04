@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -74,15 +75,16 @@ class StrategyLoader:
         cls = getattr(module, class_name)
 
         config = self.load_config(strategy_id)
-        strategy_config = {
-            **config.get("selection", {}),
-            "sentiment_prefetch": config.get("sentiment_prefetch", {}),
-            "sentiment_rank": config.get("sentiment_rank", {}),
-            "weights": {
-                k: v.get("weight", 0)
-                for k, v in config.get("factors", {}).items()
-            },
-            "hard_filters": config.get("hard_filters", {}),
-            "market_weight_adjustments": config.get("market_weight_adjustments", {}),
+        strategy_config = deepcopy(config)
+        strategy_config.update(deepcopy(config.get("selection", {})))
+        strategy_config["sentiment_prefetch"] = deepcopy(config.get("sentiment_prefetch", {}))
+        strategy_config["sentiment_rank"] = deepcopy(config.get("sentiment_rank", {}))
+        strategy_config["deepseek_rerank"] = deepcopy(config.get("deepseek_rerank", {}))
+        strategy_config["progressive_rerank"] = deepcopy(config.get("progressive_rerank", {}))
+        strategy_config["weights"] = {
+            k: v.get("weight", 0)
+            for k, v in config.get("factors", {}).items()
         }
+        strategy_config["hard_filters"] = deepcopy(config.get("hard_filters", {}))
+        strategy_config["market_weight_adjustments"] = deepcopy(config.get("market_weight_adjustments", {}))
         return cls(config=strategy_config)

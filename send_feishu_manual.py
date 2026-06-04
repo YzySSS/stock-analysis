@@ -8,7 +8,7 @@ import json
 import os
 
 # 飞书 Webhook
-FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
 
 # 读取报告
 report_path = "/workspace/projects/workspace/股票分析项目/daily_reports/premarket/20260325_112849_premarket_v10.md"

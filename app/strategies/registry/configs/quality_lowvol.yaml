@@ -1,0 +1,38 @@
+selection:
+  max_picks: 3
+  score_threshold: 60
+
+hard_filters:
+  min_amount: 35000000
+
+factors:
+  quality:
+    name: 盈利质量
+    category: fundamental
+    direction: positive
+    weight: 0.34
+    description: 综合 ROE、ROA、利润同比、营收同比和 EPS，优先盈利质量稳的公司。
+  value:
+    name: 合理估值
+    category: valuation
+    direction: positive
+    weight: 0.22
+    description: PE/PB 位于合理区间更高分，异常高估或亏损估值降分。
+  lowvol:
+    name: 低波动
+    category: risk
+    direction: positive
+    weight: 0.22
+    description: 20 日波动越低，策略越偏稳健。
+  liquidity:
+    name: 流动性
+    category: liquidity
+    direction: neutral
+    weight: 0.12
+    description: 换手率适中，避免过冷或过热。
+  size_stability:
+    name: 规模稳定性
+    category: risk
+    direction: positive
+    weight: 0.10
+    description: 总市值较大的股票稳定性略高。

@@ -14,9 +14,8 @@ import os
 import sys
 import argparse
 
-# 设置飞书Webhook（如果环境变量未设置）
-if not os.getenv('FEISHU_WEBHOOK'):
-    os.environ['FEISHU_WEBHOOK'] = 'https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067'
+# 飞书Webhook从环境变量读取，避免提交真实密钥。
+os.environ['FEISHU_WEBHOOK'] = os.getenv('FEISHU_WEBHOOK', '')
 
 # 设置报告存储目录（如果环境变量未设置）
 if not os.getenv('STOCK_REPORTS_DIR'):

@@ -153,7 +153,24 @@ let lastTrackingState = {
   instrumentType: 'stock',
   selectionDate: '',
   offset: 0,
+  deepReview: null,
 };
+
+function renderDeepReviewAnalysis(result) {
+  const container = qs('#tracking-review-notes');
+  if (!container) return;
+  const analysis = result?.analysis || '暂无复盘结果';
+  container.innerHTML = `
+    <article class="strategy-item deep-review-result">
+      <div class="strategy-item-head">
+        <strong>DeepSeek 详细复盘</strong>
+        <span class="badge status-ok">${escapeHtml(result?.model || '-')}</span>
+      </div>
+      <div class="muted">分析样本：${escapeHtml(result?.item_count ?? '-')} 条 · 模板：${escapeHtml(result?.prompt_template || '-')}</div>
+      <pre class="deep-review-text">${escapeHtml(analysis)}</pre>
+    </article>
+  `;
+}
 
 function renderTrackingTable(items, summary = {}) {
   const body = qs('#tracking-results-body');
@@ -332,7 +349,7 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
   const pageSummary = data.summary || {};
   const strategySummaries = data.strategy_summaries || [];
   const pagination = data.pagination || {};
-  lastTrackingState = { strategyId, limit, instrumentType, selectionDate: effectiveSelectionDate, offset };
+  lastTrackingState = { strategyId, limit, instrumentType, selectionDate: effectiveSelectionDate, offset, deepReview: null };
   renderTrackingTable(items, filteredSummary);
   updateTrackingStats(filteredSummary, items);
   renderReviewSummary(filteredSummary, strategySummaries, items);
@@ -345,6 +362,38 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
         : '当前显示全部策略历史复盘列表';
   const excludedText = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
   if (summaryText) summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}`;
+}
+
+async function runDeepReview() {
+  const button = qs('#tracking-deep-review');
+  const summaryText = qs('#tracking-summary-text');
+  if (button) {
+    button.disabled = true;
+    button.textContent = '复盘中...';
+  }
+  if (summaryText) summaryText.textContent = '正在调用 DeepSeek 进行详细复盘...';
+  try {
+    const result = await fetchJson('/api/tracking/deep-review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        strategy_id: lastTrackingState.strategyId || null,
+        selection_date: lastTrackingState.selectionDate || null,
+        instrument_type: lastTrackingState.instrumentType || 'stock',
+        max_items: 80,
+      }),
+    });
+    lastTrackingState.deepReview = result;
+    renderDeepReviewAnalysis(result);
+    if (summaryText) summaryText.textContent = `详细复盘完成：${result.item_count ?? '-'} 条，模型 ${result.model || '-'}`;
+  } catch (error) {
+    if (summaryText) summaryText.textContent = `详细复盘失败：${error.message}`;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = '详细复盘';
+    }
+  }
 }
 
 async function toggleTrackingStats(button) {
@@ -418,6 +467,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const dateSelect = qs('#tracking-selection-date');
   const pageSizeSelect = qs('#tracking-page-size');
   const refreshBtn = qs('#refresh-tracking-page');
+  const deepReviewBtn = qs('#tracking-deep-review');
   const prevBtn = qs('#tracking-prev-page');
   const nextBtn = qs('#tracking-next-page');
 
@@ -473,6 +523,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       offset: lastTrackingState.offset || 0,
     });
   });
+  deepReviewBtn?.addEventListener('click', runDeepReview);
 
   prevBtn?.addEventListener('click', async () => {
     const nextOffset = Math.max((lastTrackingState.offset || 0) - (lastTrackingState.limit || 10), 0);

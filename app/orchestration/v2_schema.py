@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
+import json
 
 
 FACTOR_INPUT_DAILY_COLUMNS: dict[str, str] = {
@@ -23,6 +24,8 @@ FACTOR_INPUT_DAILY_INDEXES: dict[str, str] = {
 }
 
 BACKTEST_RUN_COLUMNS: dict[str, str] = {
+    "trade_strategy_id": "ALTER TABLE backtest_run ADD COLUMN trade_strategy_id VARCHAR(64) DEFAULT NULL AFTER strategy_id",
+    "evaluation_mode": "ALTER TABLE backtest_run ADD COLUMN evaluation_mode VARCHAR(32) NOT NULL DEFAULT 'research' AFTER return_mode",
     "progress_total_days": "ALTER TABLE backtest_run ADD COLUMN progress_total_days INT DEFAULT 0 AFTER total_trades",
     "progress_done_days": "ALTER TABLE backtest_run ADD COLUMN progress_done_days INT DEFAULT 0 AFTER progress_total_days",
     "progress_pct": "ALTER TABLE backtest_run ADD COLUMN progress_pct DECIMAL(8,4) DEFAULT 0 AFTER progress_done_days",
@@ -37,9 +40,91 @@ BACKTEST_RUN_COLUMNS: dict[str, str] = {
     "worker_heartbeat_at": "ALTER TABLE backtest_run ADD COLUMN worker_heartbeat_at DATETIME DEFAULT NULL AFTER locked_at",
     "cancel_requested": "ALTER TABLE backtest_run ADD COLUMN cancel_requested TINYINT(1) NOT NULL DEFAULT 0 AFTER worker_heartbeat_at",
     "is_system_test": "ALTER TABLE backtest_run ADD COLUMN is_system_test TINYINT(1) NOT NULL DEFAULT 0 AFTER cancel_requested",
+    "commission_bps": "ALTER TABLE backtest_run ADD COLUMN commission_bps DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER use_adjusted_price",
+    "stamp_tax_bps": "ALTER TABLE backtest_run ADD COLUMN stamp_tax_bps DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER commission_bps",
+    "slippage_bps": "ALTER TABLE backtest_run ADD COLUMN slippage_bps DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER stamp_tax_bps",
+    "execution_constraints_enabled": "ALTER TABLE backtest_run ADD COLUMN execution_constraints_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER slippage_bps",
 }
 
 V21_TABLE_DDL: dict[str, str] = {
+    "trade_strategy": """
+    CREATE TABLE IF NOT EXISTS trade_strategy (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        strategy_id VARCHAR(64) NOT NULL,
+        display_name VARCHAR(128) NOT NULL,
+        version VARCHAR(32) NOT NULL DEFAULT 'v1',
+        status VARCHAR(32) NOT NULL DEFAULT 'active',
+        is_builtin TINYINT(1) NOT NULL DEFAULT 0,
+        description TEXT DEFAULT NULL,
+        buy_rule_json JSON NOT NULL,
+        sell_rule_json JSON NOT NULL,
+        risk_rule_json JSON DEFAULT NULL,
+        cost_rule_json JSON DEFAULT NULL,
+        execution_rule_json JSON DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_trade_strategy_version (strategy_id, version),
+        KEY idx_trade_strategy_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    "backtest_trade_order": """
+    CREATE TABLE IF NOT EXISTS backtest_trade_order (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        run_id VARCHAR(128) NOT NULL,
+        selection_strategy_id VARCHAR(64) NOT NULL,
+        trade_strategy_id VARCHAR(64) NOT NULL,
+        trade_date DATE NOT NULL,
+        code VARCHAR(16) NOT NULL,
+        name VARCHAR(64) DEFAULT NULL,
+        rank_no INT DEFAULT NULL,
+        score DECIMAL(12,4) DEFAULT NULL,
+        order_side VARCHAR(16) NOT NULL,
+        order_status VARCHAR(32) NOT NULL DEFAULT 'planned',
+        failure_reason VARCHAR(128) DEFAULT NULL,
+        planned_trade_date DATE DEFAULT NULL,
+        planned_price_type VARCHAR(32) DEFAULT NULL,
+        planned_price DECIMAL(14,4) DEFAULT NULL,
+        executed_trade_date DATE DEFAULT NULL,
+        executed_price_type VARCHAR(32) DEFAULT NULL,
+        executed_price DECIMAL(14,4) DEFAULT NULL,
+        executed_quantity DECIMAL(20,4) DEFAULT NULL,
+        executed_amount DECIMAL(20,4) DEFAULT NULL,
+        fee_amount DECIMAL(20,4) DEFAULT NULL,
+        stamp_tax_amount DECIMAL(20,4) DEFAULT NULL,
+        slippage_amount DECIMAL(20,4) DEFAULT NULL,
+        rule_snapshot_json JSON DEFAULT NULL,
+        decision_reason_json JSON DEFAULT NULL,
+        market_context_json JSON DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_bto_run (run_id),
+        KEY idx_bto_code_date (code, trade_date),
+        KEY idx_bto_status (order_status),
+        KEY idx_bto_strategy (selection_strategy_id, trade_strategy_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    "backtest_trade_analysis": """
+    CREATE TABLE IF NOT EXISTS backtest_trade_analysis (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        run_id VARCHAR(128) NOT NULL,
+        analysis_scope VARCHAR(32) NOT NULL DEFAULT 'run',
+        code VARCHAR(16) DEFAULT NULL,
+        trade_date DATE DEFAULT NULL,
+        summary TEXT DEFAULT NULL,
+        buy_reason TEXT DEFAULT NULL,
+        sell_reason TEXT DEFAULT NULL,
+        failure_analysis TEXT DEFAULT NULL,
+        optimization_suggestion TEXT DEFAULT NULL,
+        metrics_json JSON DEFAULT NULL,
+        reason_json JSON DEFAULT NULL,
+        generated_by VARCHAR(32) NOT NULL DEFAULT 'rule',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_bta_run (run_id),
+        KEY idx_bta_code_date (code, trade_date),
+        KEY idx_bta_scope (analysis_scope)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
     "adj_factor_daily": """
     CREATE TABLE IF NOT EXISTS adj_factor_daily (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -124,6 +209,71 @@ def _existing_indexes(table: str) -> set[str]:
             return {row["Key_name"] for row in cursor.fetchall()}
 
 
+def seed_trade_strategies() -> int:
+    strategies = [
+        {
+            "strategy_id": "next_open_1d",
+            "display_name": "次日开盘卖出",
+            "version": "v1",
+            "description": "入选日开盘买入，下一交易日开盘卖出；对应旧 1 日收益口径。",
+            "buy_rule_json": {"entry_day": "selection_day", "entry_price": "open"},
+            "sell_rule_json": {"exit_day_offset": 1, "exit_price": "open"},
+        },
+        {
+            "strategy_id": "hold_3d_close",
+            "display_name": "持有 3 日收盘卖出",
+            "version": "v1",
+            "description": "入选日开盘买入，第 3 个后续交易日收盘卖出；对应旧 3 日收益口径。",
+            "buy_rule_json": {"entry_day": "selection_day", "entry_price": "open"},
+            "sell_rule_json": {"exit_day_offset": 3, "exit_price": "close"},
+        },
+        {
+            "strategy_id": "triple_barrier_5d",
+            "display_name": "五日止盈止损",
+            "version": "v1",
+            "description": "入选日开盘买入，最多持有 5 个交易日；触及 +6% 止盈、-3% 止损或到期收盘，谁先发生就卖出。",
+            "buy_rule_json": {"entry_day": "selection_day", "entry_price": "open"},
+            "sell_rule_json": {"take_profit_pct": 6, "stop_loss_pct": -3, "max_holding_days": 5, "time_exit_price": "close"},
+        },
+        {
+            "strategy_id": "observe_t3_daily",
+            "display_name": "T+3 每日观察回测",
+            "version": "v1",
+            "description": "入选日开盘买入，不做真实卖出模拟；重点观察 T+1/T+2/T+3 每日收盘价、最大浮盈和最大回撤，汇总收益暂按 T+3 收盘计算。",
+            "buy_rule_json": {"entry_day": "selection_day", "entry_price": "open"},
+            "sell_rule_json": {"observe_days": [1, 2, 3], "summary_exit_day_offset": 3, "summary_exit_price": "close", "purpose": "selection_strategy_diagnostics"},
+        },
+    ]
+    sql = """
+    INSERT INTO trade_strategy (
+        strategy_id, display_name, version, status, is_builtin, description,
+        buy_rule_json, sell_rule_json, risk_rule_json, cost_rule_json, execution_rule_json
+    ) VALUES (%s, %s, %s, 'active', 1, %s, %s, %s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+        display_name=VALUES(display_name), status='active', is_builtin=1, description=VALUES(description),
+        buy_rule_json=VALUES(buy_rule_json), sell_rule_json=VALUES(sell_rule_json),
+        risk_rule_json=VALUES(risk_rule_json), cost_rule_json=VALUES(cost_rule_json), execution_rule_json=VALUES(execution_rule_json)
+    """
+    rows = [
+        (
+            item["strategy_id"],
+            item["display_name"],
+            item["version"],
+            item["description"],
+            json.dumps(item["buy_rule_json"], ensure_ascii=False),
+            json.dumps(item["sell_rule_json"], ensure_ascii=False),
+            json.dumps({}, ensure_ascii=False),
+            json.dumps({"enabled": False}, ensure_ascii=False),
+            json.dumps({"enabled": False}, ensure_ascii=False),
+        )
+        for item in strategies
+    ]
+    with mysql_conn(dict_cursor=False) as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany(sql, rows)
+            return cursor.rowcount
+
+
 def ensure_v2_schema() -> dict:
     init_mysql_schema()
     applied: list[str] = []
@@ -153,6 +303,7 @@ def ensure_v2_schema() -> dict:
                 if column not in backtest_columns:
                     cursor.execute(sql)
                     applied.append(column)
+    seed_trade_strategies()
     return {"status": "ok", "applied": applied}
 
 

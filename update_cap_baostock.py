@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 更新股票市值数据 - 使用BaoStock
 """
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4', 'collation': 'utf8mb4_unicode_ci'
 }
 

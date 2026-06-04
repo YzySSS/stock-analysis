@@ -1,0 +1,143 @@
+selection:
+  max_picks: 3
+  score_threshold: 45
+
+hard_filters:
+  min_amount: 50000000
+  min_news_count: 1
+  min_sector_score: 45
+  min_price: 3
+  max_price:
+  # Tushare total_mv unit is 万元；30000000≈3000亿，避免超大市值票挤占短线散户候选。
+  max_total_mv: 30000000
+  require_direct_stock_news: false
+  # 盘中深跌不接飞刀；-3%~-5% 只有强个股新闻还能保留观察资格。
+  hard_realtime_loss_pct: -5
+  soft_realtime_loss_pct: -3
+  strong_news_min_impact: 75
+  # 板块候选池必须至少具备一定主题内辨识度；个股新闻直接命中不受该硬过滤限制。
+  min_stock_recognition: 58
+  # 事件驱动也不放明显亏损/ROE为负的票进入散户短线池。
+  min_roe:
+
+market_opinion:
+  # Intraday stale guard. After close / overnight, the latest snapshot for the
+  # same latest trade date is still valid until the next trading-day snapshot.
+  max_age_minutes: 60
+  allow_same_trade_date_stale: true
+  # 舆情策略以“主题热点”为主，不让行业直连和金融权重股抢走 AI/芯片/机器人等主线。
+  allowed_sector_types:
+    - theme
+  excluded_sector_names:
+    - 金融
+  excluded_industries:
+    - 证券
+    - 银行
+    - 保险
+    - 多元金融
+
+deepseek_rerank:
+  enabled: false
+  model: deepseek-chat
+  top_n: 10
+  ai_weight: 0.30
+  max_news_per_stock: 2
+  timeout_seconds: 35
+  min_confidence_for_boost: 0.35
+
+progressive_rerank:
+  enabled: true
+  model: deepseek-chat
+  timeout_seconds: 45
+  sector_local_limit: 30
+  sector_final_limit: 8
+  sector_ai_weight: 0.45
+  stock_local_limit: 30
+  stock_ai_weight: 0.35
+  tavily_days: 3
+  sector_tavily_sleep_seconds: 0.05
+  stock_tavily_sleep_seconds: 0.1
+  news_top_n: 10
+  max_news_per_stock: 4
+  min_credibility: 0.35
+  min_confidence_for_boost: 0.35
+
+factors:
+  sector_heat:
+    name: 板块/主题热度
+    category: sentiment
+    direction: positive
+    weight: 0.17
+    description: 基于 NewsNow/RSS/AkShare 聚合的热点板块/主题分，是新版舆情选股的主因子。
+  source_credibility:
+    name: 信源可信度
+    category: sentiment
+    direction: positive
+    weight: 0.09
+    description: 来源数量、可靠度和正负面新闻结构共同影响，避免单一低质来源噪音。
+  info_importance:
+    name: 信息重要度
+    category: sentiment
+    direction: positive
+    weight: 0.13
+    description: 根据政策、订单、业绩、技术突破、涨价等事件类型估计信息催化强度。
+  amplification:
+    name: 传播热度
+    category: sentiment
+    direction: positive
+    weight: 0.07
+    description: 热榜排名、新闻数量和多源覆盖反映市场扩散程度。
+  stock_match:
+    name: 个股映射强度
+    category: sentiment
+    direction: positive
+    weight: 0.08
+    description: 板块/主题落到个股时的匹配强度，直接命中优于仅行业兜底。
+  stock_recognition:
+    name: 板块内辨识度
+    category: sentiment
+    direction: positive
+    weight: 0.12
+    description: 衡量个股在当前热点主题中的前排程度，综合板块内排名、涨幅、成交额、直接新闻命中与涨停记忆。
+  market_theme:
+    name: 主线/支线层级
+    category: sentiment
+    direction: positive
+    weight: 0.06
+    description: 按实时舆情、事件影响、信源结构和板块资金判断今日主题是否属于主线、强支线、支线或泛相关。
+  popularity_heat:
+    name: 个股人气热度
+    category: sentiment
+    direction: positive
+    weight: 0.09
+    description: 结合百度股市热搜/后续可扩展个股人气榜与实时成交额关注度，补足“市场正在看谁”。
+  fund_flow:
+    name: 资金确认
+    category: moneyflow
+    direction: positive
+    weight: 0.05
+    description: 舆情之后用资金流入做交易确认，不再主导选股。
+  price_confirm:
+    name: 价格确认
+    category: technical
+    direction: neutral
+    weight: 0.05
+    description: 温和确认更优，极端追高、冲高大回落、高开低走降分。
+  volume_confirm:
+    name: 成交确认
+    category: volume
+    direction: neutral
+    weight: 0.04
+    description: 放量确认舆情发酵，放量滞涨或放量回落降分。
+  intraday_confirm:
+    name: 分时确认
+    category: technical
+    direction: positive
+    weight: 0.03
+    description: 观察开盘后承接、日内高点回撤和放量滞涨，强舆情但分时走坏只保留为观察。
+  market_context:
+    name: 市场环境
+    category: market
+    direction: positive
+    weight: 0.02
+    description: 市场环境越强，题材延续概率越高。

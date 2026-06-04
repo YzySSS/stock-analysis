@@ -22,6 +22,7 @@ async function loadSystemPage() {
     const sentimentQuality = data.sentiment_quality || {};
     const taskRuns = data.task_runs || [];
     const schedules = data.scheduled_tasks || [];
+    const marketOpinion = data.market_opinion_update || null;
     const taskMap = Object.fromEntries(taskRuns.map((item) => [item.task_name, item]));
 
     panels.api.innerHTML = renderTopMetricCard({
@@ -59,7 +60,7 @@ async function loadSystemPage() {
     });
 
     renderBaseline(data.data_baseline || {}, panels.baseline, panels.baselineOverall);
-    panels.coverage.innerHTML = renderScheduleGrid(schedules, taskMap, taskRuns);
+    panels.coverage.innerHTML = renderScheduleGrid(schedules, taskMap, taskRuns, marketOpinion);
     if (panels.taskRun) panels.taskRun.innerHTML = '';
     panels.gap.innerHTML = renderGapNote();
     panels.sentiment.innerHTML = renderSentimentQuality(sentimentQuality);
@@ -131,7 +132,7 @@ function baselineIcon(key) {
   return map[key] || '•';
 }
 
-function renderScheduleGrid(schedules = [], taskMap = {}, taskRuns = []) {
+function renderScheduleGrid(schedules = [], taskMap = {}, taskRuns = [], marketOpinion = null) {
   const scheduledNames = new Set(schedules.map((task) => task.task_name));
   const extraTasks = taskRuns
     .filter((run) => run.task_name && !scheduledNames.has(run.task_name))
@@ -152,13 +153,13 @@ function renderScheduleGrid(schedules = [], taskMap = {}, taskRuns = []) {
           <span>开始 ${escapeHtml(run.started_at || '-')}</span>
           <span>结束 ${escapeHtml(run.finished_at || '-')}</span>
         </div>
-        <div class="system-task-result">${renderTaskRunMetrics(run)}</div>
+        <div class="system-task-result">${renderTaskRunMetrics(run, task.task_name === 'market_opinion_update' ? marketOpinion : null)}</div>
       </article>
     `;
   }).join('');
 }
 
-function renderTaskRunMetrics(run = {}) {
+function renderTaskRunMetrics(run = {}, marketOpinion = null) {
   const meta = run.metadata || {};
   const metrics = [
     meta.success_codes != null ? `成功 ${escapeHtml(meta.success_codes)} / ${escapeHtml(meta.requested_codes ?? meta.limit ?? '-')}` : '',
@@ -166,8 +167,17 @@ function renderTaskRunMetrics(run = {}) {
     meta.rows_synced != null ? `写入 ${escapeHtml(meta.rows_synced)} 行` : '',
     meta.failed != null ? `失败 ${escapeHtml(meta.failed)}` : '',
     meta.no_data != null ? `无数据 ${escapeHtml(meta.no_data)}` : '',
+    marketOpinion?.source_count != null ? `源 ${escapeHtml(marketOpinion.source_count)}` : '',
+    marketOpinion?.failed_source_count != null ? `失败源 ${escapeHtml(marketOpinion.failed_source_count)}` : '',
+    marketOpinion?.sector_summary_count != null ? `热点 ${escapeHtml(marketOpinion.sector_summary_count)}` : '',
   ].filter(Boolean);
-  return metrics.length ? metrics.join(' · ') : '暂无额外指标';
+  const summary = metrics.length ? metrics.join(' · ') : '暂无额外指标';
+  if (!marketOpinion || !marketOpinion.failed_source_count) return summary;
+  const failedText = (marketOpinion.failed_sources || [])
+    .slice(0, 3)
+    .map((item) => `${item.source_id}: ${item.error}`)
+    .join('；');
+  return `${summary}<div class="muted">部分源失败：${escapeHtml(failedText || marketOpinion.message || '-')}</div>`;
 }
 
 function renderGapNote() {
@@ -212,6 +222,7 @@ function formatQualityLevel(level) {
 
 function getStatusClass(status) {
   if (status === 'success') return 'status-ok';
+  if (status === 'partial_success') return 'status-warn';
   if (status === 'failed') return 'status-error';
   if (status === 'running') return 'status-warn';
   return 'status-muted';

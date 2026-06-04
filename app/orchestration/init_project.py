@@ -256,11 +256,41 @@ CORE_TABLE_DDL = [
 ]
 
 
+def _ensure_selection_result_unique_key(cursor) -> None:
+    """Keep selection_result persistence scoped by run_id.
+
+    Older deployments created uniq_selection_result on
+    (trade_date, strategy_id, code), which makes a later run overwrite an
+    earlier run for the same stock/date/strategy. The application expects
+    results to be unique only within a run.
+    """
+    cursor.execute("SHOW INDEX FROM selection_result WHERE Key_name = 'uniq_selection_result'")
+    rows = cursor.fetchall() or []
+    columns = [row[4] for row in sorted(rows, key=lambda row: row[3])]
+    if columns == ["run_id", "code"]:
+        return
+
+    cursor.execute(
+        """
+        DELETE newer
+        FROM selection_result newer
+        INNER JOIN selection_result older
+          ON newer.run_id = older.run_id
+         AND newer.code = older.code
+         AND newer.id > older.id
+        """
+    )
+    if rows:
+        cursor.execute("ALTER TABLE selection_result DROP INDEX uniq_selection_result")
+    cursor.execute("ALTER TABLE selection_result ADD UNIQUE KEY uniq_selection_result (run_id, code)")
+
+
 def init_mysql_schema() -> None:
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             for ddl in CORE_TABLE_DDL:
                 cursor.execute(ddl)
+            _ensure_selection_result_unique_key(cursor)
 
 
 if __name__ == "__main__":

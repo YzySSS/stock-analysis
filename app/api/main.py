@@ -11,6 +11,7 @@ from app.api.routes.selection import router as selection_router
 from app.api.routes.stocks import router as stocks_router
 from app.api.routes.strategies import router as strategies_router
 from app.api.routes.system import router as system_router
+from app.api.routes.trade_strategies import router as trade_strategies_router
 from app.api.routes.tracking import router as tracking_router
 from app.api.routes.web import router as web_router
 
@@ -31,5 +32,6 @@ app.include_router(strategies_router, prefix="/api")
 app.include_router(selection_router, prefix="/api")
 app.include_router(tracking_router, prefix="/api")
 app.include_router(backtest_router, prefix="/api")
+app.include_router(trade_strategies_router, prefix="/api")
 app.include_router(stocks_router, prefix="/api")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

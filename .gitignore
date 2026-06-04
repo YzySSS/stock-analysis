@@ -53,3 +53,18 @@ Thumbs.db
 .clawhub/
 .learnings/
 .openclaw/
+
+# Local secrets / credentials / proxy certificates
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+*.zip
+*.exe
+SECRETS_REMEDIATION_PLAN.md
+cron_backfill.sh
+update_pe_pb_tushare.py
+update_roe_tushare.py
+New SSL certifcate - MUST BE USED WITH PORT 33335/
+Old Certficate - DEPRECATED, DONT USE/

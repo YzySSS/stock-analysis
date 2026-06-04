@@ -19,7 +19,8 @@
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
         <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/strategies" data-nav="strategies">选股策略</a>
+        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
@@ -60,6 +61,24 @@
                 <button class="active" type="button" data-instrument-value="stock">全市场</button>
                 <button type="button" data-instrument-value="etf">ETF</button>
                 <button type="button" data-instrument-value="index">指数</button>
+              </div>
+            </div>
+
+            <div class="terminal-form-row board-row">
+              <label for="market-board">市场板块</label>
+              <select id="market-board" class="visually-hidden-select">
+                <option value="all">全市场</option>
+                <option value="main">主板</option>
+                <option value="chinext">创业板</option>
+                <option value="star">科创板</option>
+                <option value="bse">北交所</option>
+              </select>
+              <div class="instrument-segments board-segments" data-board-segments>
+                <button class="active" type="button" data-board-value="all">全市场</button>
+                <button type="button" data-board-value="main">主板</button>
+                <button type="button" data-board-value="chinext">创业板</button>
+                <button type="button" data-board-value="star">科创板</button>
+                <button type="button" data-board-value="bse">北交所</button>
               </div>
             </div>
 
@@ -207,13 +226,13 @@
           </div>
         </div>
         <div class="note-block">
-          <p>选股中心负责展示“这次选了谁、属于哪套策略、后续涨跌和风险如何”；完整因子构成、CI、覆盖率与策略解释链路，统一放到“策略管理”页查看。</p>
+          <p>选股中心负责展示“这次选了谁、属于哪套策略、后续涨跌和风险如何”；完整因子构成、CI、覆盖率与策略解释链路，统一放到“选股策略”页查看。</p>
         </div>
       </section>
     </main>
   </div>
 
   <script src="/static/js/common.js?v=20260428e"></script>
-  <script src="/static/js/selection.js?v=20260510a"></script>
+  <script src="/static/js/selection.js?v=20260525a"></script>
 </body>
 </html>

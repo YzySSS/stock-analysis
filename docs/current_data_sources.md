@@ -52,17 +52,31 @@
 - `stock_sentiment_daily` 已记录过滤前新闻数、有效新闻数、平均可信度与平均质量分
 - 详细实现记录：`docs/news_quality_credibility_2026-05-07.md`
 
+当前热度链路补充（2026-05-22）：
+- `market_opinion_raw` / `market_opinion_stock_match`：新闻热榜、雪球热门、财联社热门等个股直接命中。
+- `sector_opinion_daily`：新闻聚合后的主题/行业热度榜。
+- `market_sector_fund_flow_snapshot`：行业/概念实时资金流热度榜。
+- `stock_realtime_snapshot`：成交额、涨跌幅、量能关注度。
+- `stock_popularity_snapshot`：百度股市热搜个股人气快照；当前已进入 A股舆情选股的 `popularity_heat` 因子。
+
 ### 3. AkShare
 
 用途：
 - A股历史数据
 - 指数数据
 - 涨停池等数据
+- 个股热搜/人气榜候选源
+- 行业/概念板块涨幅榜、资金流候选源
 
 当前状态：
 - 已安装
 - 可正常调用
 - 实测 `stock_zh_a_hist` 成功
+- 2026-05-22 实测：
+  - `stock_hot_search_baidu(symbol="A股")` 可用，已接入 `stock_popularity_snapshot` / `stock_popularity_intraday`，作为 V1 个股人气源。
+  - `stock_board_concept_name_em()` / `stock_board_industry_name_em()` 可用，可作为板块涨幅/热度补充源。
+  - `stock_hot_rank_em()` / `stock_hot_up_em()` 当前容易超时，只作为后续候选源，不进入主链路。
+  - `stock_fund_flow_industry(symbol="即时")` / `stock_fund_flow_concept(symbol="即时")` 已由 `market_sector_fund_flow_snapshot` 承接，作为实时板块资金热度。
 
 ### 4. BaoStock
 
@@ -120,6 +134,7 @@
 ### 2. 东方财富人气榜
 - 页面可访问
 - 当前未完成结构化解析
+- AkShare `stock_hot_rank_em()` 当前实测会超时，暂不纳入主链路，避免拖慢选股。
 
 ---
 
@@ -136,6 +151,7 @@
 ### 3. 同花顺人气榜
 - 当前测试返回 403
 - 直接抓取受限
+- AkShare 的同花顺板块代码表可用，但同花顺人气榜仍不稳定；后续可考虑浏览器会话或第三方镜像，但 V1 不依赖它。
 
 ---
 
@@ -143,9 +159,7 @@
 
 以下数据还没有稳定进入新主线：
 
-- 主力净流入/资金流向
-- 稳定可复用的新闻舆情数据
-- 板块轮动统一表结构
+- 更稳定的东方财富/同花顺个股人气榜结构化接口
 - 基本面统一表结构（Tushare 后续可承接其中一部分）
 
 ---

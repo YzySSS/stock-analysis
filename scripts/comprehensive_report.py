@@ -1689,9 +1689,8 @@ def send_feishu_webhook(content: str, webhook_url: str = None):
     import urllib.request
     import urllib.error
     
-    # 默认 webhook URL
     if webhook_url is None:
-        webhook_url = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+        webhook_url = os.environ.get("FEISHU_WEBHOOK", "")
     
     # 飞书 webhook 格式
     payload = {

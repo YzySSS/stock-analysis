@@ -6,8 +6,9 @@ cd /root/.openclaw/workspace/股票分析项目
 
 # 获取当前进度
 python3 -c "
+import os
 import pymysql
-DB_CONFIG = {'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user', 'password': 'open@2026', 'database': 'stock'}
+DB_CONFIG = {'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user', 'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock'}
 conn = pymysql.connect(**DB_CONFIG)
 cursor = conn.cursor()
 cursor.execute('SELECT COUNT(DISTINCT code) FROM stock_kline WHERE trade_date BETWEEN \"2018-01-01\" AND \"2018-12-31\"')

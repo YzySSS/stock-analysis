@@ -25,7 +25,7 @@ DB_CONFIG = {
     'host': os.getenv('DB_HOST', '10.0.4.8'),
     'port': int(os.getenv('DB_PORT', 3306)),
     'user': os.getenv('DB_USER', 'openclaw_user'),
-    'password': os.getenv('DB_PASSWORD', 'open@2026'),
+    'password': os.getenv('DB_PASSWORD', ''),
     'database': os.getenv('DB_NAME', 'stock'),
     'charset': 'utf8mb4'
 }

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.data_ingestion.intraday_bar_sync import cached_bars, get_or_fetch_intraday_bars
 from app.shared.db import mysql_conn
+from app.shared.sentiment_scoring import enrich_opinion_news_item, score_source
 
 router = APIRouter(tags=["stocks"])
 
@@ -32,6 +33,36 @@ def _rank_percentile(rank: int | None, total: int | None) -> float | None:
     return round((total - rank + 1) / total * 100, 2)
 
 
+def _pe_status(pe: float | None, eps: float | None) -> dict[str, Any]:
+    if pe is not None and pe > 0:
+        return {
+            "pe_status": "valid",
+            "pe_status_label": "PE 正常",
+            "pe_valid": True,
+            "pe_status_reason": "估值源返回正 PE",
+        }
+    if eps is not None and eps <= 0:
+        return {
+            "pe_status": "not_applicable_eps_nonpositive",
+            "pe_status_label": "PE 不适用",
+            "pe_valid": False,
+            "pe_status_reason": "EPS 非正，PE 不具备可比意义",
+        }
+    if eps is None:
+        return {
+            "pe_status": "missing_eps",
+            "pe_status_label": "PE 暂缺",
+            "pe_valid": False,
+            "pe_status_reason": "EPS 缺失，无法判断 PE 口径",
+        }
+    return {
+        "pe_status": "missing_positive_eps",
+        "pe_status_label": "PE 暂缺",
+        "pe_valid": False,
+        "pe_status_reason": "EPS 为正但估值源未返回有效正 PE",
+    }
+
+
 def _market_status(realtime: dict[str, Any] | None, basic: dict[str, Any]) -> dict[str, Any]:
     if basic.get("is_delisted"):
         return {"status": "delisted", "label": "已退市", "quote_time": None}
@@ -50,7 +81,10 @@ def _market_status(realtime: dict[str, Any] | None, basic: dict[str, Any]) -> di
         if quote_clock >= time(15, 0):
             label = "已收盘"
             status = "closed"
-        elif quote_clock < time(9, 25) or time(11, 35) <= quote_clock < time(12, 55):
+        elif time(9, 15) <= quote_clock < time(9, 30):
+            label = "盘前竞价中"
+            status = "pre_open_auction"
+        elif quote_clock < time(9, 15) or time(11, 35) <= quote_clock < time(12, 55):
             label = "非连续交易"
             status = "paused_session"
 
@@ -250,6 +284,8 @@ def stock_overview(code: str) -> dict:
 
     technical = _technical_summary(history, latest_price)
     pe = _to_float(basic.get("pe_tushare"))
+    eps = _to_float(basic.get("eps"))
+    pe_status = _pe_status(pe, eps)
     pb = _to_float(basic.get("pb_tushare"))
     roe = _to_float(basic.get("roe"))
     avg_pe = _to_float(industry_avg.get("avg_pe")) if industry_avg else None
@@ -285,11 +321,15 @@ def stock_overview(code: str) -> dict:
         "technical_summary": technical,
         "fundamental_summary": {
             "pe": pe,
+            "pe_status": pe_status["pe_status"],
+            "pe_status_label": pe_status["pe_status_label"],
+            "pe_valid": pe_status["pe_valid"],
+            "pe_status_reason": pe_status["pe_status_reason"],
             "pb": pb,
             "roe": roe,
             "revenue_yoy": _to_float(basic.get("revenue_yoy")),
             "profit_yoy": _to_float(basic.get("profit_yoy")),
-            "eps": _to_float(basic.get("eps")),
+            "eps": eps,
             "total_mv": _round(total_mv, 2),
             "industry": industry,
             "peer_count": int(industry_avg.get("peer_count") or 0) if industry_avg else 0,
@@ -436,6 +476,8 @@ def stock_detail(
                         created_at
                     FROM stock_news
                     WHERE code = %s
+                      AND published_at IS NOT NULL
+                      AND published_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
                     ORDER BY COALESCE(published_at, created_at) DESC, id DESC
                     LIMIT %s
                     """,
@@ -560,6 +602,7 @@ def stock_detail(
             "created_at": str(row.get("created_at")) if row.get("created_at") else None,
             "sentiment_source": (metadata.get("explain") or {}).get("sentiment_source"),
             "news_count": explain_raw_metrics.get("news_count"),
+            "sentiment_context": metadata.get("sentiment_context"),
             "factor_scores": metadata.get("factors") or {},
             "raw_metrics": {
                 **explain_raw_metrics,
@@ -576,6 +619,9 @@ def stock_detail(
     intraday_change_pct = None
     if latest_open and latest_close:
         intraday_change_pct = round((latest_close - latest_open) / latest_open * 100, 2)
+    pe = _to_float(basic.get("pe_tushare"))
+    eps = _to_float(basic.get("eps"))
+    pe_status = _pe_status(pe, eps)
 
     price_history = [
         {
@@ -588,23 +634,102 @@ def stock_detail(
         for row in reversed(price_history_rows)
     ]
 
-    recent_news = [
-        {
+    def _opinion_news_item(item: dict, reason: str) -> dict:
+        enriched = enrich_opinion_news_item(item, reason)
+        return {
+            "title": item.get("title"),
+            "summary": item.get("summary"),
+            "source": item.get("source_name") or item.get("source_id"),
+            "url": item.get("url"),
+            "published_at": str(item.get("published_at")) if item.get("published_at") else None,
+            "sentiment_score": enriched.get("sentiment_score"),
+            "credibility_score": enriched.get("credibility_score"),
+            "credibility_level": enriched.get("credibility_level"),
+            "credibility_reason": enriched.get("credibility_reason"),
+            "quality_score": enriched.get("quality_score"),
+            "quality_level": enriched.get("quality_level"),
+            "created_at": None,
+        }
+
+    recent_news = []
+    for row in news_rows:
+        source_rating = score_source(row.get("source"))
+        sentiment_score = _to_float(row.get("sentiment_score"))
+        credibility_score = _to_float(row.get("credibility_score"))
+        recent_news.append({
             "title": row.get("title"),
             "summary": row.get("summary"),
             "source": row.get("source"),
             "url": row.get("url"),
             "published_at": str(row.get("published_at")) if row.get("published_at") else None,
-            "sentiment_score": _to_float(row.get("sentiment_score")),
-            "credibility_score": _to_float(row.get("credibility_score")),
-            "credibility_level": row.get("credibility_level"),
-            "credibility_reason": row.get("credibility_reason"),
+            "sentiment_score": sentiment_score,
+            "credibility_score": credibility_score if credibility_score is not None else source_rating.get("credibility_score"),
+            "credibility_level": row.get("credibility_level") or source_rating.get("credibility_level"),
+            "credibility_reason": row.get("credibility_reason") or source_rating.get("credibility_reason"),
             "quality_score": _to_float(row.get("quality_score")),
             "quality_level": row.get("quality_level"),
             "created_at": str(row.get("created_at")) if row.get("created_at") else None,
-        }
-        for row in news_rows
-    ]
+        })
+    sector_opinion_news = []
+    latest_sentiment_context = (latest_selection or {}).get("sentiment_context") or {}
+    if not latest_sentiment_context:
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT sector_type, sector_name, as_of_datetime, sector_score, top_stocks_json, top_news_json
+                    FROM sector_opinion_daily
+                    WHERE as_of_datetime = (SELECT MAX(as_of_datetime) FROM sector_opinion_daily)
+                      AND sector_type = 'theme'
+                    ORDER BY sector_score DESC
+                    LIMIT 40
+                    """
+                )
+                sector_rows = cursor.fetchall() or []
+        for sector_row in sector_rows:
+            try:
+                top_stocks = json.loads(sector_row.get("top_stocks_json") or "[]")
+            except Exception:
+                top_stocks = []
+            if not any(str(stock.get("code") or "") == code for stock in top_stocks):
+                continue
+            try:
+                top_news = json.loads(sector_row.get("top_news_json") or "[]")
+            except Exception:
+                top_news = []
+            latest_sentiment_context = {
+                "sector_name": sector_row.get("sector_name"),
+                "sector_type": sector_row.get("sector_type"),
+                "as_of": str(sector_row.get("as_of_datetime")) if sector_row.get("as_of_datetime") else None,
+                "sector_score": _to_float(sector_row.get("sector_score")),
+                "sector_top_news": top_news,
+            }
+            break
+    if latest_sentiment_context:
+        sector_opinion_news = [
+            {
+                **_opinion_news_item(item, "来自本次舆情选股的关联板块热度新闻"),
+                "sector_name": latest_sentiment_context.get("sector_name"),
+                "sector_type": latest_sentiment_context.get("sector_type"),
+            }
+            for item in (latest_sentiment_context.get("sector_top_news") or [])[:5]
+            if item.get("title")
+        ]
+    if not recent_news and latest_selection:
+        context = latest_sentiment_context
+        opinion_news = context.get("stock_news") or context.get("top_news") or []
+        recent_news = [
+            _opinion_news_item(item, "来自本次舆情选股的个股命中新闻")
+            for item in opinion_news[:5]
+            if item.get("title")
+        ]
+    if sector_opinion_news:
+        seen_titles = {str(item.get("title") or "") for item in recent_news}
+        recent_news.extend(
+            item
+            for item in sector_opinion_news
+            if str(item.get("title") or "") not in seen_titles
+        )
 
     realtime = None
     if realtime_snapshot:
@@ -749,7 +874,11 @@ def stock_detail(
             "is_delisted": bool(basic.get("is_delisted")),
         },
         "valuation": {
-            "pe_tushare": _to_float(basic.get("pe_tushare")),
+            "pe_tushare": pe,
+            "pe_status": pe_status["pe_status"],
+            "pe_status_label": pe_status["pe_status_label"],
+            "pe_valid": pe_status["pe_valid"],
+            "pe_status_reason": pe_status["pe_status_reason"],
             "pb_tushare": _to_float(basic.get("pb_tushare")),
             "valuation_updated_at": str(basic.get("valuation_updated_at")) if basic.get("valuation_updated_at") else None,
         },
@@ -760,7 +889,7 @@ def stock_detail(
             "netprofit_margin": _to_float(basic.get("netprofit_margin")),
             "revenue_yoy": _to_float(basic.get("revenue_yoy")),
             "profit_yoy": _to_float(basic.get("profit_yoy")),
-            "eps": _to_float(basic.get("eps")),
+            "eps": eps,
             "fundamental_period": basic.get("fundamental_period"),
             "fundamental_updated_at": str(basic.get("fundamental_updated_at")) if basic.get("fundamental_updated_at") else None,
         },
@@ -789,5 +918,6 @@ def stock_detail(
         "latest_selection": latest_selection,
         "selection_history": selection_history,
         "recent_news": recent_news,
+        "sector_opinion_news": sector_opinion_news,
         "updated_at": str(basic.get("updated_at")) if basic.get("updated_at") else None,
     }

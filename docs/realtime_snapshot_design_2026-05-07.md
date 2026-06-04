@@ -68,6 +68,7 @@
 - 连续失败达到阈值（默认 3）后，设置 `degraded_until = now + 5min`
 - cron 仍每分钟触发，但脚本在降级窗口内直接 skip
 - 下一次降级窗口结束后再尝试恢复 1 分钟频率
+- 单次 AkShare 实时行情抓取默认重试 2 次，缓解开盘附近源头短暂返回异常内容导致的空窗。
 
 ## 调度
 
@@ -77,7 +78,7 @@
 * 9-15 * * 1-5 cd /root/.openclaw/workspace/stock-analysis && PYTHONPATH=/root/.openclaw/workspace/stock-analysis /root/.openclaw/workspace/stock-analysis/.venv/bin/python scripts/run_realtime_snapshot_update.py --retention-days 1 >> /root/.openclaw/workspace/stock-analysis/logs/stock_realtime_snapshot_update.log 2>&1
 ```
 
-脚本内部会判断真实盘中时段，因此 9:00-9:24、11:36-12:54、15:06-15:59 会自动跳过。
+脚本内部会判断真实行情时段，因此 9:00-9:14、11:36-12:54、15:06-15:59 会自动跳过；9:15-9:29 会尝试捕获盘前集合竞价快照。
 
 ## 实跑验证
 

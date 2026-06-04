@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 IC分析工具 - 增强版 (学术标准)
 =============================
@@ -25,7 +26,7 @@ import json
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4'
 }
 

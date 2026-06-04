@@ -70,7 +70,7 @@ def is_trading_time(now: datetime) -> bool:
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (dtime(9, 25) <= t <= dtime(11, 35)) or (dtime(12, 55) <= t <= dtime(15, 5))
+    return (dtime(9, 15) <= t <= dtime(11, 35)) or (dtime(12, 55) <= t <= dtime(15, 5))
 
 
 def should_skip_for_degrade(now: datetime, state: dict) -> tuple[bool, str | None]:
@@ -131,6 +131,21 @@ def parse_quote_datetime(value: Any, fallback: datetime) -> datetime:
 
 def minute_floor(dt: datetime) -> datetime:
     return dt.replace(second=0, microsecond=0)
+
+
+def fetch_spot_rows(ak_module: Any, attempts: int, retry_seconds: float):
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            return ak_module.stock_zh_a_spot()
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max(1, attempts):
+                raise
+            time.sleep(max(0, retry_seconds))
+    if last_error:
+        raise last_error
+    raise RuntimeError("stock_zh_a_spot returned no data")
 
 
 def convert_rows(df, now: datetime) -> list[RealtimeRow]:
@@ -302,6 +317,8 @@ def main() -> None:
     parser.add_argument("--retention-days", type=int, default=1, help="intraday history retention days; default keeps today only")
     parser.add_argument("--failure-threshold", type=int, default=3)
     parser.add_argument("--degraded-minutes", type=int, default=5)
+    parser.add_argument("--fetch-attempts", type=int, default=2, help="retry AkShare realtime fetch for transient source errors")
+    parser.add_argument("--fetch-retry-seconds", type=float, default=2.0)
     args = parser.parse_args()
 
     ensure_realtime_schema()
@@ -332,7 +349,7 @@ def main() -> None:
     try:
         import akshare as ak
 
-        df = ak.stock_zh_a_spot()
+        df = fetch_spot_rows(ak, args.fetch_attempts, args.fetch_retry_seconds)
         rows = convert_rows(df, datetime.now())
         db_result = save_rows(rows, retention_days=args.retention_days)
         elapsed = round(time.time() - started, 2)

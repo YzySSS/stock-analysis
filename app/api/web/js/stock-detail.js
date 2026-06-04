@@ -128,6 +128,23 @@ function factorLabel(key) {
     lowvol: '低波',
     reversal_score: '反转',
     reversal: '反转',
+    sector_heat: '主题热度',
+    source_credibility: '信源可信度',
+    info_importance: '信息重要度',
+    amplification: '传播热度',
+    stock_match: '个股匹配',
+    fund_flow: '资金确认',
+    price_confirm: '价格确认',
+    volume_confirm: '成交确认',
+    intraday_confirm: '分时确认',
+    market_context: '市场环境',
+    deepseek_sentiment: 'AI舆情精排',
+    divergence: '分歧强度',
+    reversal_strength: '反包强度',
+    recognition: '辨识度',
+    turnover_heat: '换手热度',
+    sentiment_heat: '情绪热度',
+    risk_control: '风险控制',
   };
   return labelMap[key] || String(key || '')
     .replace(/_score$/, '')
@@ -139,6 +156,8 @@ function getDisplayFactorEntries(factorScores) {
   const preferredOrder = [
     'trend', 'momentum', 'quality', 'sentiment', 'value', 'liquidity',
     'turnover_score', 'turnover', 'lowvol_score', 'lowvol', 'reversal_score', 'reversal',
+    'sector_heat', 'source_credibility', 'info_importance', 'amplification', 'stock_match',
+    'fund_flow', 'price_confirm', 'volume_confirm', 'intraday_confirm', 'market_context', 'deepseek_sentiment',
   ];
   const rawMetricKeys = new Set([
     'open', 'high', 'low', 'close', 'volume', 'amount', 'trade_date',
@@ -149,7 +168,8 @@ function getDisplayFactorEntries(factorScores) {
     'chip_his_low', 'chip_his_high', 'chip_cost_5pct', 'chip_cost_15pct', 'chip_cost_50pct',
     'chip_cost_85pct', 'chip_cost_95pct', 'chip_weight_avg', 'chip_winner_rate',
     'raw_news_count', 'filtered_news_count', 'credibility_avg', 'quality_avg',
-    'fundamental_missing_fields',
+    'fundamental_missing_fields', 'source_credibility_level', 'source_credibility_reason',
+    'trade_signal_state', 'trade_signal_label', 'trade_signal_reason',
   ]);
   const scores = factorScores || {};
   const orderedKeys = preferredOrder.filter((key) => Object.prototype.hasOwnProperty.call(scores, key));
@@ -524,14 +544,44 @@ function renderPriceChart(history, period = 'day') {
   showPoint(lastIndex);
 }
 
-function normalizeIntradayBars(bars = []) {
-  return bars.map((item) => ({
+function normalizeIntradayBars(bars = [], meta = {}) {
+  const prevClose = Number(meta.prevClose);
+  const hasPrevClose = Number.isFinite(prevClose) && prevClose > 0;
+  const calcPct = (price) => {
+    const value = Number(price);
+    if (!hasPrevClose || !Number.isFinite(value)) return null;
+    return ((value - prevClose) / prevClose) * 100;
+  };
+  const normalized = bars.map((item) => ({
     quote_minute: item.minute_time,
     latest_price: item.close,
-    pct_chg: null,
+    pct_chg: calcPct(item.close),
     volume: item.volume,
     amount: item.amount,
   }));
+
+  const first = bars[0];
+  const firstOpen = Number(first?.open);
+  const firstClose = Number(first?.close);
+  const firstMinute = String(first?.minute_time || '');
+  if (
+    first
+    && Number.isFinite(firstOpen)
+    && Number.isFinite(firstClose)
+    && Math.abs(firstOpen - firstClose) >= 0.001
+    && /09:31(?::\d{2})?$/.test(firstMinute)
+  ) {
+    normalized.unshift({
+      quote_minute: firstMinute.replace('09:31', '09:30'),
+      latest_price: firstOpen,
+      pct_chg: calcPct(firstOpen),
+      volume: null,
+      amount: null,
+      is_open_reference: true,
+    });
+  }
+
+  return normalized;
 }
 
 function renderIntradayChart(points, meta = {}) {
@@ -561,14 +611,23 @@ function renderIntradayChart(points, meta = {}) {
     return result;
   };
 
+  const prevClose = Number(meta.prevClose);
+  const hasPrevClose = Number.isFinite(prevClose) && prevClose > 0;
+  const pctFromPrice = (price) => {
+    const value = Number(price);
+    if (!hasPrevClose || !Number.isFinite(value)) return null;
+    return ((value - prevClose) / prevClose) * 100;
+  };
   const byMinute = new Map((points || []).map((item) => [minuteKey(item.quote_minute), item]).filter(([key]) => key));
   const timeline = buildTradingTimeline().map((slot) => {
     const item = byMinute.get(slot.label);
     const value = item ? Number(item.latest_price) : null;
+    const rawPct = item?.pct_chg == null ? pctFromPrice(value) : Number(item.pct_chg);
+    const pct = rawPct != null && !Number.isNaN(rawPct) ? rawPct : null;
     return {
       ...slot,
       value: value != null && !Number.isNaN(value) ? value : null,
-      pct: item?.pct_chg == null ? null : Number(item.pct_chg),
+      pct,
       hasData: value != null && !Number.isNaN(value),
       carriedFrom: null,
     };
@@ -613,12 +672,17 @@ function renderIntradayChart(points, meta = {}) {
   const padding = { left: 44, right: 24, top: 30, bottom: 36 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const values = valid.map((item) => item.value);
+  const percentMode = valid.some((item) => item.pct != null && !Number.isNaN(Number(item.pct)));
+  const values = valid.map((item) => percentMode ? Number(item.pct) : item.value).filter((value) => Number.isFinite(value));
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
-  const extra = Math.max((rawMax - rawMin) * 0.16, rawMax * 0.002, 0.01);
-  const min = rawMin - extra;
-  const max = rawMax + extra;
+  const domainMin = percentMode ? Math.min(rawMin, 0) : rawMin;
+  const domainMax = percentMode ? Math.max(rawMax, 0) : rawMax;
+  const extra = percentMode
+    ? Math.max((domainMax - domainMin) * 0.08, 0.18)
+    : Math.max((rawMax - rawMin) * 0.16, rawMax * 0.002, 0.01);
+  const min = domainMin - extra;
+  const max = domainMax + extra;
   const range = max - min || 1;
   const xOf = (index) => padding.left + (index * plotWidth) / (timeline.length - 1);
   const yOf = (value) => padding.top + ((max - value) / range) * plotHeight;
@@ -626,12 +690,13 @@ function renderIntradayChart(points, meta = {}) {
     ...item,
     index,
     x: xOf(index),
-    y: item.hasData ? yOf(item.value) : null,
+    chartValue: percentMode ? item.pct : item.value,
+    y: item.hasData && (percentMode ? item.pct != null : item.value != null) ? yOf(percentMode ? item.pct : item.value) : null,
   }));
   const segments = [];
   let current = [];
   chartPoints.forEach((item) => {
-    if (item.hasData) {
+    if (item.hasData && item.y != null) {
       current.push(`${item.x},${item.y}`);
     } else if (current.length) {
       if (current.length > 1) segments.push(current.join(' '));
@@ -639,8 +704,12 @@ function renderIntradayChart(points, meta = {}) {
     }
   });
   if (current.length > 1) segments.push(current.join(' '));
-  const stroke = valid[valid.length - 1].value >= valid[0].value ? '#ef4444' : '#22c55e';
+  const stroke = percentMode
+    ? (Number(valid[valid.length - 1].pct) >= 0 ? '#ef4444' : '#22c55e')
+    : (valid[valid.length - 1].value >= valid[0].value ? '#ef4444' : '#22c55e');
   const gridYs = [0, 0.25, 0.5, 0.75, 1].map((ratio) => padding.top + ratio * plotHeight);
+  const zeroY = percentMode ? yOf(0) : null;
+  const formatAxisValue = (value) => percentMode ? value.toFixed(2) + '%' : value.toFixed(2);
   const sessionMarks = [
     { label: '09:30', index: 0, anchor: 'start' },
     { label: '11:30 / 13:00', index: 120.5, anchor: 'middle' },
@@ -651,13 +720,15 @@ function renderIntradayChart(points, meta = {}) {
   svg.innerHTML = `
     <g class="chart-grid">
       ${gridYs.map((y) => `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" />`).join('')}
+      ${percentMode ? `<line class="chart-zero-line" x1="${padding.left}" y1="${zeroY}" x2="${width - padding.right}" y2="${zeroY}" />` : ''}
       <line class="chart-session-gap" x1="${xOf(120.5)}" y1="${padding.top}" x2="${xOf(120.5)}" y2="${height - padding.bottom}" />
       <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" />
       <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" />
     </g>
     ${segments.map((segment) => `<polyline class="chart-line" fill="none" stroke="${stroke}" stroke-width="2.4" points="${segment}" />`).join('')}
-    <text class="intraday-axis-label" x="8" y="${padding.top + 4}">${rawMax.toFixed(2)}</text>
-    <text class="intraday-axis-label" x="8" y="${height - padding.bottom}">${rawMin.toFixed(2)}</text>
+    <text class="intraday-axis-label" x="8" y="${padding.top + 4}">${formatAxisValue(rawMax)}</text>
+    <text class="intraday-axis-label" x="8" y="${height - padding.bottom}">${formatAxisValue(rawMin)}</text>
+    ${percentMode ? `<text class="intraday-axis-label intraday-zero-label" x="${width - padding.right + 4}" y="${zeroY + 3}">0%</text>` : ''}
     ${sessionMarks.map((mark) => `<text class="intraday-axis-label intraday-time-label" x="${xOf(mark.index)}" y="${height - 10}" text-anchor="${mark.anchor}">${mark.label}</text>`).join('')}
     <g class="chart-focus" style="display:none">
       <line data-focus-x x1="0" y1="${padding.top}" x2="0" y2="${height - padding.bottom}" />
@@ -683,7 +754,7 @@ function renderIntradayChart(points, meta = {}) {
     focusX.setAttribute('x1', point.x);
     focusX.setAttribute('x2', point.x);
     focusLabel.textContent = point.label;
-    if (!point.hasData) {
+    if (!point.hasData || point.y == null) {
       focusY.setAttribute('y1', height - padding.bottom);
       focusY.setAttribute('y2', height - padding.bottom);
       focusDot.setAttribute('cx', point.x);
@@ -769,35 +840,39 @@ function renderRecentNews(items, latestSelection = {}) {
   }
 
   container.innerHTML = items.map((item) => {
-    const credibilityLevel = item.credibility_level || '-';
-    const credibilityScore = item.credibility_score == null ? '-' : Number(item.credibility_score).toFixed(2);
+    const hasCredibilityScore = item.credibility_score != null;
+    const credibilityLevel = item.credibility_level || (hasCredibilityScore ? '-' : 'C');
+    const credibilityScore = hasCredibilityScore ? Number(item.credibility_score).toFixed(2) : null;
     const qualityScore = item.quality_score == null ? '-' : Number(item.quality_score).toFixed(0);
     const qualityLevel = item.quality_level || '-';
     const sentimentValue = item.sentiment_score == null ? null : Number(item.sentiment_score);
     const sentiment = sentimentValue == null
-      ? '待分析'
+      ? '中性/未明确'
       : Math.abs(sentimentValue) < 0.05
         ? '中性'
         : `${sentimentValue > 0 ? '偏正面' : '偏负面'} ${sentimentValue.toFixed(2)}`;
     const source = item.source || '未知来源';
-    const publishedAt = item.published_at || item.created_at || '-';
+    const publishedAt = item.published_at || '发布时间未知';
     const title = item.title || '(无标题)';
     const url = item.url || '';
     const titleHtml = url
       ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a>`
       : escapeHtml(title);
     const summary = item.summary ? `<div class="muted news-summary">${escapeHtml(String(item.summary).slice(0, 140))}</div>` : '';
+    const credibilityBadge = hasCredibilityScore
+      ? `<span class="badge ${credibilityBadgeClass(credibilityLevel)}">可信度 ${escapeHtml(credibilityLevel)} · ${escapeHtml(credibilityScore)}</span>`
+      : `<span class="badge ${credibilityBadgeClass(credibilityLevel)}">可信度 ${escapeHtml(credibilityLevel)} · 来源评级</span>`;
     return `
       <div class="preview-item stock-news-item">
         <div class="preview-main">
           <div class="status-row news-title-row">
             <strong>${titleHtml}</strong>
-            <span class="badge ${credibilityBadgeClass(credibilityLevel)}">可信度 ${escapeHtml(credibilityLevel)} · ${escapeHtml(credibilityScore)}</span>
+            ${credibilityBadge}
             <span class="badge status-muted">质量 ${escapeHtml(qualityLevel)} · ${escapeHtml(qualityScore)}/100</span>
           </div>
           <div class="muted">${escapeHtml(publishedAt)} · ${escapeHtml(source)}</div>
           ${summary}
-          <div class="muted">情绪 ${escapeHtml(sentiment)} · ${item.credibility_reason ? escapeHtml(item.credibility_reason) : '可信度待评分'}</div>
+          <div class="muted">情绪 ${escapeHtml(sentiment)} · ${item.credibility_reason ? escapeHtml(item.credibility_reason) : '按信源评级表估算'}</div>
         </div>
       </div>
     `;
@@ -858,9 +933,13 @@ async function loadStockDetail() {
       <div>${escapeHtml(realtime.quote_time || '-')}</div>
     `;
 
+    const peStatusLabel = data.valuation?.pe_status_label || '-';
+    const peStatusReason = data.valuation?.pe_status_reason || '';
     qs('#stock-detail-factors').innerHTML = `
       <div><strong>PE</strong></div>
       <div>${formatNumber(data.valuation?.pe_tushare, 2)}</div>
+      <div><strong>PE状态</strong></div>
+      <div>${escapeHtml(peStatusLabel)}${peStatusReason ? ` · ${escapeHtml(peStatusReason)}` : ''}</div>
       <div><strong>PB</strong></div>
       <div>${formatNumber(data.valuation?.pb_tushare, 2)}</div>
       <div><strong>换手率</strong></div>
@@ -893,6 +972,8 @@ async function loadStockDetail() {
     qs('#stock-detail-selection').innerHTML = `
       <div><strong>最近策略</strong></div>
       <div>${escapeHtml(latestSelection.strategy_display_name || latestSelection.strategy_id || '-')}</div>
+      <div><strong>交易状态</strong></div>
+      <div>${escapeHtml((latestSelection.sentiment_context || {}).trade_signal_label || factorScores.trade_signal_label || '-')}</div>
       <div><strong>最近分数</strong></div>
       <div>${formatNumber(latestSelection.score, 4)}</div>
       <div><strong>最近排名</strong></div>
@@ -908,7 +989,9 @@ async function loadStockDetail() {
     const riskTexts = [];
     if (data.fundamentals?.roe == null) riskTexts.push('缺少 ROE 数据');
     if (data.fundamentals?.revenue_yoy == null) riskTexts.push('缺少营收同比数据');
-    if (data.valuation?.pe_tushare == null) riskTexts.push('缺少 PE 数据');
+    if (data.valuation?.pe_status && data.valuation.pe_status !== 'valid') {
+      riskTexts.push(`${data.valuation.pe_status_label || 'PE 状态待确认'}：${data.valuation.pe_status_reason || '估值因子按中性处理'}`);
+    }
     if (data.flags?.is_st) riskTexts.push('股票处于 ST 状态');
     const positiveReasons = [];
     if (data.fundamentals?.roe != null && Number(data.fundamentals.roe) >= 10) positiveReasons.push(`ROE 良好 (${formatNumber(data.fundamentals.roe, 2)})`);
@@ -939,26 +1022,32 @@ async function loadStockDetail() {
     }
 
     setupKlineTabs(data.price_history || []);
+    const intradayChartMeta = {
+      prevClose: realtime.pre_close || data.latest_kline?.prev_close || null,
+    };
     const cachedIntradayBars = data.intraday_bars || {};
     if ((cachedIntradayBars.items || []).length >= 2) {
-      renderIntradayChart(normalizeIntradayBars(cachedIntradayBars.items || []), {
+      renderIntradayChart(normalizeIntradayBars(cachedIntradayBars.items || [], intradayChartMeta), {
+        ...intradayChartMeta,
         label: `完整分钟线 · ${cachedIntradayBars.count || 0} 点 · 数据库缓存`,
       });
     } else {
       renderIntradayChart(data.realtime_intraday || [], {
+        ...intradayChartMeta,
         label: '实时采样线 · 正在按需补全完整分钟线',
       });
       fetchJson(`/api/stocks/${encodeURIComponent(code)}/intraday-bars?trade_date=${encodeURIComponent(realtime.trade_date || data.latest_kline?.trade_date || '')}`)
         .then((intradayBars) => {
           if ((intradayBars.items || []).length >= 2) {
-            renderIntradayChart(normalizeIntradayBars(intradayBars.items || []), {
+            renderIntradayChart(normalizeIntradayBars(intradayBars.items || [], intradayChartMeta), {
+              ...intradayChartMeta,
               label: `完整分钟线 · ${intradayBars.count || 0} 点 · ${intradayBars.source_status === 'cached' ? '数据库缓存' : '已补全并缓存'}`,
             });
           } else {
-            renderIntradayChart(data.realtime_intraday || [], { label: '完整分钟线暂无数据，展示实时采样线' });
+            renderIntradayChart(data.realtime_intraday || [], { ...intradayChartMeta, label: '完整分钟线暂无数据，展示实时采样线' });
           }
         })
-        .catch(() => renderIntradayChart(data.realtime_intraday || [], { label: '完整分钟线补全失败，展示实时采样线' }));
+        .catch(() => renderIntradayChart(data.realtime_intraday || [], { ...intradayChartMeta, label: '完整分钟线补全失败，展示实时采样线' }));
     }
     renderRecentNews(data.recent_news || [], latestSelection);
     renderSelectionHistory(data.selection_history || []);

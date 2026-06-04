@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from fastapi import APIRouter
 
@@ -24,6 +25,7 @@ TRACKED_TASKS = [
     "factor_input_daily_update",
     "market_context_daily_update",
     "stock_sentiment_daily_update",
+    "market_opinion_update",
     "stock_realtime_snapshot_update",
     "market_fund_flow_update",
 ]
@@ -41,6 +43,7 @@ TASK_NAME_LABELS = {
     "factor_input_daily_update": "历史输入层日更",
     "market_context_daily_update": "市场强度日更",
     "stock_sentiment_daily_update": "真实舆情日更",
+    "market_opinion_update": "热点舆情聚合",
     "stock_realtime_snapshot_update": "实时行情分钟快照",
     "market_fund_flow_update": "板块资金流快照",
 }
@@ -739,6 +742,52 @@ def _decode_metadata(value: object) -> dict | None:
     return {"raw": str(value)}
 
 
+def _sanitize_status_text(value: object) -> str:
+    text = str(value or "")
+    text = re.sub(r"(?i)(token|secret|api[_-]?key|password|passwd)=([^&\s]+)", r"\1=***", text)
+    text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+", r"\1***", text)
+    return text[:300]
+
+
+def _market_opinion_update_status(task_runs: list[dict]) -> dict | None:
+    run = next((item for item in task_runs if item.get("task_name") == "market_opinion_update"), None)
+    if not run:
+        return None
+    meta = run.get("metadata") or {}
+    errors = meta.get("errors") if isinstance(meta.get("errors"), dict) else {}
+    failed_sources = [
+        {"source_id": source_id, "error": _sanitize_status_text(error)}
+        for source_id, error in list(errors.items())[:12]
+    ]
+    return {
+        "task_name": "market_opinion_update",
+        "task_label": run.get("task_label"),
+        "run_id": run.get("run_id"),
+        "status": run.get("status"),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "as_of": meta.get("as_of"),
+        "source_count": len(meta.get("sources") or []),
+        "failed_source_count": int(meta.get("failed_sources") or len(failed_sources) or 0),
+        "failed_sources": failed_sources,
+        "fetched_items": meta.get("fetched_items"),
+        "saved_items": meta.get("saved_items"),
+        "sector_summary_count": meta.get("sector_summary_count"),
+        "top_sectors": [
+            {
+                "sector_name": item.get("sector_name"),
+                "sector_type": item.get("sector_type"),
+                "sector_score": item.get("sector_score"),
+                "news_count": item.get("news_count"),
+                "source_count": item.get("source_count"),
+            }
+            for item in (meta.get("top_sectors") or [])[:5]
+            if isinstance(item, dict)
+        ],
+        "message": _sanitize_status_text(run.get("message")),
+    }
+
+
 def _latest_task_runs() -> list[dict]:
     placeholders = ", ".join(["%s"] * len(TRACKED_TASKS))
     sql = f"""
@@ -758,6 +807,14 @@ def _latest_task_runs() -> list[dict]:
             rows = cursor.fetchall() or []
     items = []
     for row in rows:
+        metadata = _decode_metadata(row.get("metadata_json"))
+        if row.get("task_name") == "market_opinion_update" and isinstance(metadata, dict):
+            metadata = dict(metadata)
+            if isinstance(metadata.get("errors"), dict):
+                metadata["errors"] = {
+                    source_id: _sanitize_status_text(error)
+                    for source_id, error in metadata["errors"].items()
+                }
         items.append(
             {
                 "task_name": row.get("task_name"),
@@ -766,8 +823,8 @@ def _latest_task_runs() -> list[dict]:
                 "status": row.get("status"),
                 "started_at": str(row.get("started_at")) if row.get("started_at") else None,
                 "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
-                "message": row.get("message"),
-                "metadata": _decode_metadata(row.get("metadata_json")),
+                "message": _sanitize_status_text(row.get("message")) if row.get("task_name") == "market_opinion_update" else row.get("message"),
+                "metadata": metadata,
             }
         )
     return items
@@ -785,7 +842,8 @@ def _scheduled_tasks() -> list[dict]:
         {"task_name": "factor_input_daily_update", "task_label": "历史输入层日更", "schedule": "每天 03:20"},
         {"task_name": "market_context_daily_update", "task_label": "市场强度日更", "schedule": "每天 03:35"},
         {"task_name": "stock_sentiment_daily_update", "task_label": "真实舆情日更", "schedule": "每天 03:50"},
-        {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内判断盘中时间/失败降级"},
+        {"task_name": "market_opinion_update", "task_label": "热点舆情聚合", "schedule": "交易日 09:00-15:59 每 15 分钟"},
+        {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内 09:15 起尝试盘前竞价/盘中快照"},
         {"task_name": "market_fund_flow_update", "task_label": "板块资金流快照", "schedule": "交易日 09:00-15:59 每 3 分钟"},
     ]
 
@@ -804,6 +862,7 @@ def system_status() -> dict:
         return cached
 
     mysql_info = ping_mysql()
+    task_runs = _latest_task_runs()
     payload = {
         "status": "ok",
         "health": {
@@ -815,7 +874,8 @@ def system_status() -> dict:
         "sentiment_quality": _sentiment_quality_stats(),
         "data_baseline": _data_baseline_summary(),
         "scheduled_tasks": _scheduled_tasks(),
-        "task_runs": _latest_task_runs(),
+        "task_runs": task_runs,
+        "market_opinion_update": _market_opinion_update_status(task_runs),
     }
     _SYSTEM_STATUS_CACHE = dict(payload)
     _SYSTEM_STATUS_CACHE_AT = now

@@ -6,9 +6,12 @@ import json
 import urllib.request
 
 TAVILY_URL = "https://api.tavily.com/search"
-API_KEY = "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"
+API_KEY = os.getenv("TAVILY_API_KEY")
 
 def search(query, max_results=5):
+    if not API_KEY:
+        raise RuntimeError("TAVILY_API_KEY is required")
+
     payload = {
         "api_key": API_KEY,
         "query": query,

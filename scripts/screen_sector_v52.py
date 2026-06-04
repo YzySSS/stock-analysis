@@ -19,7 +19,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # Tushare Token
-os.environ['TUSHARE_TOKEN'] = '0faa52cf4350bede12c0cd302f5015f5a840c22ce3acb905393396a8'
+os.environ['TUSHARE_TOKEN'] = os.getenv('TUSHARE_TOKEN', '')
 ts.set_token(os.environ['TUSHARE_TOKEN'])
 
 

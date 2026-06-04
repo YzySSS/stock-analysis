@@ -6,9 +6,46 @@ from typing import Any, Dict, List, Optional
 
 from app.error_learning.models import SelectionTrackingRecord
 from app.shared.db import mysql_conn
+from app.shared.sentiment_scoring import enrich_opinion_news_item
 
 
 class SelectionResultTracker:
+    @staticmethod
+    def _build_sentiment_context(metadata: Dict[str, Any], factor_scores: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        existing = metadata.get("sentiment_context")
+        if isinstance(existing, dict) and existing.get("sector_name"):
+            return existing
+        sector_name = factor_scores.get("opinion_sector_name")
+        if not sector_name and factor_scores.get("sentiment_mode") != "market_opinion_v2":
+            return None
+        stock_news = factor_scores.get("opinion_stock_news") or []
+        top_news = factor_scores.get("opinion_top_news") or []
+        sector_top_news = factor_scores.get("opinion_sector_top_news") or []
+        return {
+            "sector_name": sector_name,
+            "sector_type": factor_scores.get("opinion_sector_type"),
+            "as_of": factor_scores.get("opinion_as_of_datetime"),
+            "trade_date": factor_scores.get("opinion_trade_date"),
+            "opinion_match_reason": factor_scores.get("opinion_match_reason"),
+            "stock_news": [enrich_opinion_news_item(item, "来自本次舆情选股的个股命中新闻") for item in stock_news],
+            "top_news": [enrich_opinion_news_item(item, "来自本次舆情选股的热点新闻") for item in top_news],
+            "sector_top_news": [enrich_opinion_news_item(item, "来自本次舆情选股的关联板块热度新闻") for item in sector_top_news],
+            "sources": factor_scores.get("opinion_sources") or [],
+            "news_count": factor_scores.get("opinion_news_count"),
+            "source_count": factor_scores.get("opinion_source_count"),
+            "positive": factor_scores.get("opinion_positive_news_count"),
+            "negative": factor_scores.get("opinion_negative_news_count"),
+            "sector_score": factor_scores.get("opinion_sector_score"),
+            "weighted_impact_score": factor_scores.get("opinion_weighted_impact_score"),
+            "sentiment_mode": factor_scores.get("sentiment_mode"),
+            "source_credibility_level": factor_scores.get("source_credibility_level"),
+            "source_credibility_score": factor_scores.get("source_credibility_score"),
+            "source_credibility_reason": factor_scores.get("source_credibility_reason"),
+            "trade_signal_state": factor_scores.get("trade_signal_state"),
+            "trade_signal_label": factor_scores.get("trade_signal_label"),
+            "trade_signal_reason": factor_scores.get("trade_signal_reason"),
+        }
+
     def build_latest_selection_snapshot(
         self,
         limit: int = 20,
@@ -106,6 +143,16 @@ class SelectionResultTracker:
         WHERE sb.instrument_type = %s
         """
         params: List[Any] = [instrument_type]
+        latest_business_key_sql = """
+            AND sr.id IN (
+                SELECT max_id
+                FROM (
+                    SELECT MAX(id) AS max_id
+                    FROM selection_result
+                    GROUP BY code, trade_date, strategy_id
+                ) latest_business_key
+            )
+        """
         if run_id:
             sql += " AND sr.run_id = %s"
             params.append(run_id)
@@ -117,12 +164,14 @@ class SelectionResultTracker:
             if strategy_id:
                 sql += " AND sr.strategy_id = %s"
                 params.append(strategy_id)
+            sql += latest_business_key_sql
             sql += " ORDER BY sr.trade_date DESC, sr.rank_no ASC, sr.id DESC LIMIT %s OFFSET %s"
             params.extend([limit, offset])
         elif not latest_only:
             if strategy_id:
                 sql += " AND sr.strategy_id = %s"
                 params.append(strategy_id)
+            sql += latest_business_key_sql
             sql += " ORDER BY sr.trade_date DESC, sr.rank_no ASC, sr.id DESC LIMIT %s OFFSET %s"
             params.extend([limit, offset])
         else:
@@ -300,22 +349,6 @@ class SelectionResultTracker:
                 trade_day_count = max(int(trade_day_count or 0) + 1, 1)
             except (TypeError, ValueError):
                 trade_day_count = 1
-        base_price = selected_open_price or selected_close_price
-        price_change_pct = None
-        if base_price and current_price:
-            price_change_pct = round((current_price - base_price) / base_price * 100, 2)
-        tracking_days = self._calc_tracking_days(selection_dt, tracking_end_dt, trade_day_count)
-        review_status = "tracking" if tracking_end_dt and selection_dt and tracking_end_dt >= selection_dt else "pending"
-        period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_high_price, prefer_max=True)
-        period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_low_price, prefer_max=False)
-        max_gain_pct = None
-        max_drawdown_pct = None
-        period_base_price = selected_open_price or selected_close_price
-        if period_base_price and period_max_high:
-            max_gain_pct = round((period_max_high - period_base_price) / period_base_price * 100, 2)
-        if period_base_price and period_min_low:
-            max_drawdown_pct = round((period_min_low - period_base_price) / period_base_price * 100, 2)
-
         metadata = row.get("metadata_json")
         if isinstance(metadata, str):
             try:
@@ -324,15 +357,32 @@ class SelectionResultTracker:
                 metadata = {}
         metadata = metadata or {}
         explain = metadata.get("explain", {}) or {}
-        raw_metrics = metadata.get("raw_metrics", {})
-        if selected_open_price is None:
+        raw_metrics = {
+            **(metadata.get("raw_metrics", {}) or {}),
+            **(explain.get("raw_metrics", {}) or {}),
+        }
+        selected_price = self._to_float(
+            raw_metrics.get("selected_price")
+            or metadata.get("selected_price")
+        )
+        if selected_price is not None:
+            selected_open_price = selected_price
+            selected_close_price = self._to_float(raw_metrics.get("close")) or selected_close_price
+        elif selected_open_price is None:
             selected_open_price = self._to_float(raw_metrics.get("open"))
         if selected_close_price is None:
             selected_close_price = self._to_float(raw_metrics.get("close"))
+        tracking_days = self._calc_tracking_days(selection_dt, tracking_end_dt, trade_day_count)
+        review_status = "tracking" if tracking_end_dt and selection_dt and tracking_end_dt >= selection_dt else "pending"
+        period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_high_price, prefer_max=True)
+        period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_low_price, prefer_max=False)
         base_price = selected_open_price or selected_close_price
+        price_change_pct = None
         if base_price and current_price:
             price_change_pct = round((current_price - base_price) / base_price * 100, 2)
         period_base_price = selected_open_price or selected_close_price
+        max_gain_pct = None
+        max_drawdown_pct = None
         if period_base_price and period_max_high:
             max_gain_pct = round((period_max_high - period_base_price) / period_base_price * 100, 2)
         if period_base_price and period_min_low:
@@ -374,6 +424,7 @@ class SelectionResultTracker:
             price_change_pct=price_change_pct,
             reason_summary=explain.get("reasons") or [],
             risk_summary=explain.get("risks") or [],
+            sentiment_context=self._build_sentiment_context(metadata, factor_scores),
             tracking_days=tracking_days,
             review_status=review_status,
             max_gain_pct=max_gain_pct,
@@ -439,6 +490,7 @@ class SelectionResultTracker:
             price_change_pct=price_change_pct,
             reason_summary=[],
             risk_summary=[],
+            sentiment_context=None,
             tracking_days=tracking_days,
             review_status=review_status,
             max_gain_pct=max_gain_pct,
@@ -480,6 +532,7 @@ class SelectionResultTracker:
                 "price_change_pct": item.price_change_pct,
                 "reason_summary": item.reason_summary or [],
                 "risk_summary": item.risk_summary or [],
+                "sentiment_context": item.sentiment_context,
                 "tracking_days": item.tracking_days,
                 "review_status": item.review_status,
                 "max_gain_pct": item.max_gain_pct,

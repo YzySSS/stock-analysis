@@ -38,7 +38,7 @@ report_with_title = f"""══════════════════�
 # 推送飞书
 config = {
     'feishu': {
-        'webhook': 'https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067'
+        'webhook': os.getenv("FEISHU_WEBHOOK", "")
     }
 }
 

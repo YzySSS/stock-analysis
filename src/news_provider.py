@@ -8,6 +8,7 @@
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from html import unescape
 from pathlib import Path
@@ -26,6 +27,34 @@ def source_from_url(url: str, default: str = "") -> str:
         return domain or default
     except Exception:
         return default
+
+
+def extract_date_from_text(*parts: str | None) -> str | None:
+    """Extract an explicit publication/event date from provider text.
+
+    Search APIs often return evergreen stock pages without a publish timestamp.
+    For short-term sentiment, using the crawl/search time would make stale pages
+    look fresh, so only return a date when the text itself contains one.
+    """
+    text = " ".join(str(part or "") for part in parts)
+    patterns = [
+        r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?",
+        r"(\d{1,2})月(\d{1,2})日",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        try:
+            if len(match.groups()) == 3:
+                year, month, day = match.groups()
+            else:
+                year = str(datetime.now().year)
+                month, day = match.groups()
+            return datetime(int(year), int(month), int(day)).strftime("%Y-%m-%d")
+        except Exception:
+            continue
+    return None
 
 try:
     from dotenv import load_dotenv
@@ -126,6 +155,11 @@ class TavilyNewsProvider:
         query = f"{stock_name} {stock_code} 股票 最新 财经 新闻"
         return self._search(query, days)
 
+    def search_query(self, query: str, days: int = 3) -> List[Dict]:
+        if not self.api_key:
+            return []
+        return self._search(query, days)
+
     def _search(self, query: str, days: int = 3) -> List[Dict]:
         try:
             import requests
@@ -158,13 +192,19 @@ class TavilyNewsProvider:
                         pub_date = datetime.fromisoformat(published.replace("Z", "+00:00")).replace(tzinfo=None)
                     except Exception:
                         pass
-                if not pub_date or pub_date >= cutoff_date:
+                inferred_date = extract_date_from_text(item.get("title", ""), item.get("content", ""))
+                if not pub_date and inferred_date:
+                    try:
+                        pub_date = datetime.strptime(inferred_date, "%Y-%m-%d")
+                    except Exception:
+                        pub_date = None
+                if pub_date and pub_date >= cutoff_date:
                     filtered.append({
                         "title": item.get("title", ""),
                         "content": str(item.get("content", ""))[:800],
                         "url": item.get("url", ""),
                         "source": item.get("source") or source_from_url(item.get("url", ""), "Tavily"),
-                        "datetime": published or datetime.now().isoformat(),
+                        "datetime": published or inferred_date,
                     })
             return filtered
         except Exception as e:
@@ -206,7 +246,7 @@ class DuckDuckGoNewsProvider:
                     "content": clean_snippet,
                     "url": unescape(url),
                     "source": "DuckDuckGo",
-                    "datetime": datetime.now().isoformat(),
+                    "datetime": extract_date_from_text(clean_title, clean_snippet),
                 })
             return results
         except Exception as e:

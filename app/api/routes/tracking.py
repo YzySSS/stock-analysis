@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+import requests
 
 from app.shared.db import mysql_conn
 
@@ -14,6 +18,29 @@ router = APIRouter(tags=["tracking"])
 
 class TrackingStatsToggleRequest(BaseModel):
     include_in_stats: bool
+
+
+class TrackingDeepReviewRequest(BaseModel):
+    strategy_id: Optional[str] = None
+    selection_date: Optional[str] = None
+    run_id: Optional[str] = None
+    instrument_type: str = "stock"
+    max_items: int = 80
+
+
+def _load_env_file() -> None:
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def _build_tracking_summary(items: list[dict]) -> dict:
@@ -123,7 +150,7 @@ def _count_tracking_items(
                 return int(row.get("count") or 0)
             if selection_date:
                 sql = """
-                SELECT COUNT(*) AS count
+                SELECT COUNT(DISTINCT sr.trade_date, sr.strategy_id, sr.code) AS count
                 FROM selection_result sr
                 INNER JOIN stock_basic sb ON sr.code = sb.code
                 WHERE sb.instrument_type = %s AND sr.trade_date = %s
@@ -148,7 +175,7 @@ def _count_tracking_items(
                     selection_date=latest_date,
                 )
             sql = """
-            SELECT COUNT(*) AS count
+            SELECT COUNT(DISTINCT sr.trade_date, sr.strategy_id, sr.code) AS count
             FROM selection_result sr
             INNER JOIN stock_basic sb ON sr.code = sb.code
             WHERE sb.instrument_type = %s
@@ -276,6 +303,84 @@ def _set_tracking_include_in_stats(
             return int(cursor.rowcount or 0)
 
 
+def _compact_review_item(item: dict[str, Any]) -> dict[str, Any]:
+    factor_scores = item.get("factor_scores") or {}
+    sentiment_context = item.get("sentiment_context") or {}
+    return {
+        "code": item.get("code"),
+        "name": item.get("name"),
+        "strategy_id": item.get("strategy_id"),
+        "strategy_display_name": item.get("strategy_display_name"),
+        "selection_date": item.get("selection_date"),
+        "score": item.get("score"),
+        "rank_no": item.get("rank_no"),
+        "selected_price": item.get("selected_open_price") or item.get("selected_close_price"),
+        "current_price": item.get("current_price"),
+        "price_change_pct": item.get("price_change_pct"),
+        "max_gain_pct": item.get("max_gain_pct"),
+        "max_drawdown_pct": item.get("max_drawdown_pct"),
+        "tracking_days": item.get("tracking_days"),
+        "review_status": item.get("review_status"),
+        "include_in_stats": item.get("include_in_stats", True),
+        "realtime_pct_chg": item.get("realtime_pct_chg"),
+        "realtime_quote_time": item.get("realtime_quote_time"),
+        "trade_signal": {
+            "state": sentiment_context.get("trade_signal_state") or factor_scores.get("trade_signal_state"),
+            "label": sentiment_context.get("trade_signal_label") or factor_scores.get("trade_signal_label"),
+            "reason": sentiment_context.get("trade_signal_reason") or factor_scores.get("trade_signal_reason"),
+        },
+        "sentiment": {
+            "sector_name": sentiment_context.get("sector_name"),
+            "sector_type": sentiment_context.get("sector_type"),
+            "as_of": sentiment_context.get("as_of"),
+            "match_reason": sentiment_context.get("opinion_match_reason"),
+            "source_credibility": sentiment_context.get("source_credibility_level"),
+            "deepseek": sentiment_context.get("deepseek"),
+        },
+        "price_preference": {
+            "label": factor_scores.get("price_preference_label"),
+            "delta": factor_scores.get("price_preference_delta_applied") or factor_scores.get("price_preference_delta"),
+            "reason": factor_scores.get("price_preference_reason"),
+        },
+        "reasons": item.get("reason_summary") or [],
+        "risks": item.get("risk_summary") or [],
+    }
+
+
+def _render_review_prompt(template: str, *, filters: dict[str, Any], summary: dict[str, Any], items: list[dict[str, Any]], model: str) -> str:
+    replacements = {
+        "{{filters}}": json.dumps(filters, ensure_ascii=False, indent=2, default=str),
+        "{{summary}}": json.dumps(summary, ensure_ascii=False, indent=2, default=str),
+        "{{items}}": json.dumps(items, ensure_ascii=False, indent=2, default=str),
+        "{{model}}": model,
+    }
+    prompt = template
+    for key, value in replacements.items():
+        prompt = prompt.replace(key, value)
+    return prompt
+
+
+def _call_deepseek_review(prompt: str, model: str, timeout_seconds: int = 90) -> str:
+    _load_env_file()
+    api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY is not configured")
+    base_url = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.deepseek.com/v1"
+    response = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        },
+        timeout=timeout_seconds,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
 @router.get("/tracking/latest")
 def get_latest_tracking(
     limit: int = Query(default=10, ge=1, le=200),
@@ -384,6 +489,56 @@ def update_tracking_item_stats(
         "instrument_type": instrument_type,
         "include_in_stats": payload.include_in_stats,
         "updated_count": matched_count,
+    }
+
+
+@router.post("/tracking/deep-review")
+def run_tracking_deep_review(payload: TrackingDeepReviewRequest) -> dict:
+    max_items = max(1, min(int(payload.max_items or 80), 200))
+    data = _tracking_payload(
+        run_id=payload.run_id,
+        strategy_id=payload.strategy_id,
+        selection_date=payload.selection_date,
+        limit=max_items,
+        offset=0,
+        instrument_type=payload.instrument_type or "stock",
+    )
+    items = _stats_items(data.get("items") or [])
+    if not items:
+        raise HTTPException(status_code=400, detail="当前筛选条件下没有可复盘的股票")
+
+    compact_items = [_compact_review_item(item) for item in items[:max_items]]
+    summary = data.get("filtered_summary") or data.get("summary") or _build_tracking_summary(items)
+    filters = {
+        "strategy_id": payload.strategy_id or "全部策略",
+        "selection_date": payload.selection_date or "全部日期",
+        "run_id": payload.run_id,
+        "instrument_type": payload.instrument_type,
+        "item_count": len(compact_items),
+    }
+    _load_env_file()
+    model = os.getenv("DEEPSEEK_REVIEW_MODEL") or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
+    template_path = Path(__file__).resolve().parents[2] / "prompts" / "tracking_deep_review_prompt.md"
+    template = template_path.read_text(encoding="utf-8")
+    prompt = _render_review_prompt(
+        template,
+        filters=filters,
+        summary=summary,
+        items=compact_items,
+        model=model,
+    )
+    try:
+        analysis = _call_deepseek_review(prompt, model=model)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"DeepSeek 复盘调用失败: {str(exc)[:300]}") from exc
+    if f"分析模型：{model}" not in analysis:
+        analysis = f"{analysis.rstrip()}\n\n分析模型：{model}"
+    return {
+        "analysis": analysis,
+        "model": model,
+        "item_count": len(compact_items),
+        "prompt_template": str(template_path),
+        "filters": filters,
     }
 
 

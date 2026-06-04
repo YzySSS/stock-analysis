@@ -284,7 +284,7 @@ class StockReportV10:
     
     def send_to_feishu(self, report_text: str):
         """简化版飞书推送（文字）"""
-        FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+        FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
         
         # 取前3只持仓和前3只推荐做摘要
         message = {

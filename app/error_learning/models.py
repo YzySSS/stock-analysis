@@ -24,6 +24,7 @@ class SelectionTrackingRecord:
     latest_trade_date: Optional[str] = None
     reason_summary: Optional[list[str]] = None
     risk_summary: Optional[list[str]] = None
+    sentiment_context: Optional[Dict[str, Any]] = None
     industry: Optional[str] = None
     tracking_days: Optional[int] = None
     review_status: Optional[str] = None

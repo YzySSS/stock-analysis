@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 IC分析工具 - 直接查询版
 ========================
@@ -11,7 +12,7 @@ from collections import defaultdict
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4'
 }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 修复 V11_IC_2024Q1_001 的90条记录
 ===============================
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 DB_CONFIG = {
     'host': '10.0.4.8', 'port': 3306, 'user': 'openclaw_user',
-    'password': 'open@2026', 'database': 'stock',
+    'password': os.getenv('DB_PASSWORD', ''), 'database': 'stock',
     'charset': 'utf8mb4'
 }
 

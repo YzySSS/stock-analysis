@@ -6,8 +6,9 @@
 
 import requests
 import time
+import os
 
-FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/f70974f2-da1a-47d7-8f48-2bc855dad067"
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
 
 def send_feishu_message(content, title=None):
     """发送单条飞书消息"""

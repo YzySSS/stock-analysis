@@ -10,11 +10,11 @@ export PROJECT_DIR="/root/.openclaw/workspace/股票分析项目"
 export USE_PROXY="true"
 export BRD_PROXY_HOST="brd.superproxy.io"
 export BRD_PROXY_PORT="33335"
-export BRD_PROXY_USER="brd-customer-hl_8abbb7fa-zone-isp_proxy1"
-export BRD_PROXY_PASS="1chayfaf4h24"
+export BRD_PROXY_USER="${BRD_PROXY_USER:-}"
+export BRD_PROXY_PASS="${BRD_PROXY_PASS:-}"
 
 # 飞书推送
-export FEISHU_WEBHOOK="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+export FEISHU_WEBHOOK="${FEISHU_WEBHOOK:-}"
 
 # 报告目录
 export STOCK_REPORTS_DIR="/root/.openclaw/workspace/股票分析项目/daily_reports"

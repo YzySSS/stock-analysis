@@ -94,6 +94,10 @@
 
 **Tushare Token**: 请从 https://tushare.pro/register.html 获取个人 Token
 
+### 舆情数据源设计参考
+
+新版舆情数据源设计借鉴了 [TrendRadar](https://github.com/sansan0/TrendRadar) 的多平台热榜与 RSS 聚合思路。项目不会直接复制或集成 TrendRadar 代码，而是在本项目内独立实现轻量化 NewsNow/RSS 采集模块，用于 A 股舆情热点板块识别与后续选股评分。
+
 ---
 
 ## 🚀 快速开始

@@ -506,7 +506,7 @@ def create_sample_config():
             "secret": "YOUR_SECRET"  # 可选
         },
         "feishu": {
-            "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_TOKEN"
+            "webhook": ""
         }
     }
 

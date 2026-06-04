@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/png" href="/favicon.ico" />
-  <title>股票分析控制台 - 策略管理</title>
+  <title>股票分析控制台 - 选股策略</title>
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
@@ -19,7 +19,8 @@
         <a href="/selection" data-nav="selection">选股中心</a>
         <a href="/tracking" data-nav="tracking">跟踪复盘</a>
         <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">策略管理</a>
+        <a href="/strategies" data-nav="strategies">选股策略</a>
+        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
         <a href="/system" data-nav="system">数据状态</a>
       </nav>
     </aside>
@@ -27,7 +28,7 @@
     <main class="main-content dashboard-main strategies-dashboard strategy-quant-main">
       <section class="strategy-quant-frame">
         <header class="strategy-quant-titlebar">
-          <h1>策略管理</h1>
+          <h1>选股策略</h1>
           <span>策略注册 / 状态 / 权重说明</span>
         </header>
 
@@ -35,7 +36,7 @@
           <div class="strategy-quant-topnav">
             <div>
               <p class="eyebrow">Strategy Registry</p>
-              <h2>策略管理</h2>
+              <h2>选股策略</h2>
               <p>策略注册、版本与执行状态管理</p>
             </div>
             <button id="refresh-strategies-page" class="btn btn-secondary" type="button">刷新数据</button>

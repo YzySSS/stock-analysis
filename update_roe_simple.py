@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """
 使用Tushare fina_indicator接口补充ROE数据 - 简化版
 """
@@ -10,7 +11,7 @@ from config import DB_CONFIG
 import tushare as ts
 import time
 
-token = '0faa52cf4350bede12c0cd302f5015f5a840c22ce3acb905393396a8'
+token = os.getenv('TUSHARE_TOKEN', '')
 pro = ts.pro_api(token)
 
 conn = pymysql.connect(**DB_CONFIG)

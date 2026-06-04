@@ -19,9 +19,12 @@ class BacktestRequest:
     start_date: str
     end_date: str
     return_mode: str = "1d"
+    trade_strategy_id: Optional[str] = None
+    evaluation_mode: str = "research"
     instrument_type: str = "stock"
     use_adjusted_price: bool = False
     commission_bps: float = 0.0
+    stamp_tax_bps: float = 0.0
     slippage_bps: float = 0.0
     apply_execution_constraints: bool = False
     max_picks: Optional[int] = None
@@ -55,7 +58,16 @@ class BacktestService:
     当前暂不开放 V12 回测。
     """
 
-    SUPPORTED_STRATEGIES = {"lowvol_reversal", "v13_three_factor"}
+    SUPPORTED_STRATEGIES = {
+        "lowvol_reversal",
+        "v13_three_factor",
+        "fund_chip_repair",
+        "quality_lowvol",
+        "leader_tactics",
+    }
+    DISABLED_STRATEGIES = {
+        "a_share_sentiment": "A股舆情选股 V2 依赖实时 market_opinion_v2，当前回测未注入历史舆情聚合，P0 阶段暂不支持回测。",
+    }
     MAX_BACKTEST_DAYS = 260
     STALE_RUNNING_SECONDS = 30 * 60
 
@@ -190,15 +202,32 @@ class BacktestService:
         return row
 
     def _validate_request(self, request: BacktestRequest) -> None:
+        if request.strategy_id in self.DISABLED_STRATEGIES:
+            raise ValueError(self.DISABLED_STRATEGIES[request.strategy_id])
         if request.strategy_id not in self.SUPPORTED_STRATEGIES:
             supported = " / ".join(sorted(self.SUPPORTED_STRATEGIES))
             raise ValueError(f"回测中心当前支持 {supported}")
-        if request.return_mode not in {"1d", "3d"}:
-            raise ValueError("return_mode 仅支持 1d / 3d")
+        if request.trade_strategy_id:
+            mapped_mode = {
+                "next_open_1d": "1d",
+                "hold_3d_close": "3d",
+                "triple_barrier_5d": "triple_barrier_5d",
+                "observe_t3_daily": "observe_t3_daily",
+            }.get(request.trade_strategy_id)
+            if not mapped_mode:
+                raise ValueError("trade_strategy_id 当前仅支持 next_open_1d / hold_3d_close / triple_barrier_5d / observe_t3_daily")
+            request.return_mode = mapped_mode
+        else:
+            request.trade_strategy_id = "next_open_1d" if request.return_mode == "1d" else "hold_3d_close"
+        request.evaluation_mode = "realistic" if (request.commission_bps or request.stamp_tax_bps or request.slippage_bps or request.apply_execution_constraints) else "research"
+        if request.return_mode not in {"1d", "3d", "triple_barrier_5d", "observe_t3_daily"}:
+            raise ValueError("return_mode 仅支持 1d / 3d / triple_barrier_5d / observe_t3_daily")
         if request.commission_bps < 0 or request.commission_bps > 100:
             raise ValueError("commission_bps 需在 0~100 之间")
         if request.slippage_bps < 0 or request.slippage_bps > 100:
             raise ValueError("slippage_bps 需在 0~100 之间")
+        if request.stamp_tax_bps < 0 or request.stamp_tax_bps > 100:
+            raise ValueError("stamp_tax_bps 需在 0~100 之间")
         # V2.1 supports adjusted return calculation when adj_factor_daily has
         # coverage for the requested date range.
 
@@ -322,19 +351,40 @@ class BacktestService:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT COUNT(*) AS count
-                    FROM lowvol_reversal_feature_daily
-                    WHERE trade_date = %s
+                    SELECT
+                        (
+                            SELECT COUNT(*)
+                            FROM lowvol_reversal_feature_daily
+                            WHERE trade_date = %s
+                        ) AS cache_count,
+                        (
+                            SELECT COUNT(*)
+                            FROM factor_input_daily f
+                            INNER JOIN daily_kline dk
+                              ON dk.code = f.code AND dk.trade_date = f.trade_date
+                            INNER JOIN stock_basic sb ON sb.code = f.code
+                            WHERE f.trade_date = %s
+                              AND sb.instrument_type = 'stock'
+                              AND sb.is_delisted = 0
+                              AND dk.open IS NOT NULL
+                              AND dk.open > 0
+                        ) AS expected_count
                     """,
-                    (trade_date,),
+                    (trade_date, trade_date),
                 )
-                return int((cursor.fetchone() or {}).get("count") or 0) > 0
+                row = cursor.fetchone() or {}
+        cache_count = int(row.get("cache_count") or 0)
+        expected_count = int(row.get("expected_count") or 0)
+        if expected_count <= 0:
+            return cache_count > 0
+        return cache_count >= max(1000, int(expected_count * 0.9))
 
     def _load_candidates_from_feature_cache(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
         sql = """
         SELECT
             sb.code,
             sb.name,
+            sb.industry,
             sb.instrument_type,
             sb.is_st,
             f.pe_tushare,
@@ -393,7 +443,12 @@ class BacktestService:
         INNER JOIN lowvol_reversal_feature_daily lf ON lf.code = f.code AND lf.trade_date = f.trade_date
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
         LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
-        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code AND ssd.trade_date = f.trade_date
+        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code
+          AND ssd.trade_date = (
+              SELECT MAX(s2.trade_date)
+              FROM stock_sentiment_daily s2
+              WHERE s2.code = f.code AND s2.trade_date <= f.trade_date
+          )
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
           AND sb.instrument_type = %s
@@ -421,10 +476,13 @@ class BacktestService:
         except Exception:
             # Cache table is optional; fall back to point-in-time window SQL.
             pass
+        kline_window_start = self._fetch_window_start_date("daily_kline", trade_date, 90)
+        factor_window_start = self._fetch_window_start_date("factor_input_daily", trade_date, 10)
         sql = """
         SELECT
             sb.code,
             sb.name,
+            sb.industry,
             sb.instrument_type,
             sb.is_st,
             f.pe_tushare,
@@ -504,7 +562,7 @@ class BacktestService:
                     LAG(close) OVER (PARTITION BY code ORDER BY trade_date) AS prev_close,
                     ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
                 FROM daily_kline
-                WHERE trade_date <= %s
+                WHERE trade_date BETWEEN %s AND %s
             ) ranked
             WHERE rn <= 60
             GROUP BY code
@@ -517,7 +575,7 @@ class BacktestService:
                     turnover_rate,
                     ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
                 FROM factor_input_daily
-                WHERE trade_date <= %s
+                WHERE trade_date BETWEEN %s AND %s
                   AND turnover_rate IS NOT NULL
             ) ranked_turnover
             WHERE rn <= 5
@@ -525,7 +583,12 @@ class BacktestService:
         ) tma ON sb.code = tma.code
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
         LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
-        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code AND ssd.trade_date = f.trade_date
+        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code
+          AND ssd.trade_date = (
+              SELECT MAX(s2.trade_date)
+              FROM stock_sentiment_daily s2
+              WHERE s2.code = f.code AND s2.trade_date <= f.trade_date
+          )
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
           AND sb.instrument_type = %s
@@ -536,7 +599,7 @@ class BacktestService:
         """
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, (trade_date, trade_date, trade_date, instrument_type))
+                cursor.execute(sql, (kline_window_start, trade_date, factor_window_start, trade_date, trade_date, instrument_type))
                 rows = cursor.fetchall()
         candidates: List[Dict[str, Any]] = []
         for row in rows:
@@ -545,6 +608,26 @@ class BacktestService:
             item["close"] = _to_float(row.get("close"))
             candidates.append(item)
         return candidates
+
+    @staticmethod
+    def _fetch_window_start_date(table: str, trade_date: str, limit: int) -> str:
+        if table not in {"daily_kline", "factor_input_daily"}:
+            raise ValueError("unsupported history table")
+        sql = f"""
+        SELECT MIN(trade_date) AS start_date
+        FROM (
+            SELECT DISTINCT trade_date
+            FROM {table}
+            WHERE trade_date <= %s
+            ORDER BY trade_date DESC
+            LIMIT %s
+        ) recent_dates
+        """
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (trade_date, int(limit)))
+                row = cursor.fetchone() or {}
+        return str(row.get("start_date") or trade_date)
 
     def _build_pick(self, item: Dict[str, Any], trade_date: str) -> Dict[str, Any]:
         return {
@@ -565,7 +648,7 @@ class BacktestService:
         if not picks:
             return []
         codes = [p["code"] for p in picks if p.get("code")]
-        lookahead = 4 if request.return_mode == "3d" else 2
+        lookahead = 6 if request.return_mode == "triple_barrier_5d" else 4 if request.return_mode in {"3d", "observe_t3_daily"} else 2
         future = self._fetch_future_bars(codes, trade_date, lookahead=lookahead)
         trades: List[Dict[str, Any]] = []
         for pick in picks:
@@ -577,13 +660,30 @@ class BacktestService:
             entry_bar = bars[0] if bars else None
             if request.apply_execution_constraints and self._is_limit_blocked(entry_bar, "buy"):
                 continue
-            one_day_bar = bars[1] if request.return_mode == "1d" and len(bars) > 1 else None
-            three_day_bar = bars[3] if request.return_mode == "3d" and len(bars) > 3 else None
-            exit_price_1d = _to_float(one_day_bar.get("open")) if one_day_bar else None
+            one_day_bar = bars[1] if request.return_mode in {"1d", "observe_t3_daily"} and len(bars) > 1 else None
+            three_day_bar = bars[3] if request.return_mode in {"3d", "observe_t3_daily"} and len(bars) > 3 else None
+            triple_exit_bar = None
+            triple_exit_price = None
+            triple_exit_reason = None
+            triple_exit_factor = None
+            if request.return_mode == "triple_barrier_5d":
+                triple_exit_bar, triple_exit_price, triple_exit_reason, triple_exit_factor = self._resolve_triple_barrier_exit(
+                    bars,
+                    entry_price,
+                    request,
+                    take_profit_pct=6.0,
+                    stop_loss_pct=-3.0,
+                    max_holding_days=5,
+                )
+            exit_price_1d = _to_float(one_day_bar.get("close" if request.return_mode == "observe_t3_daily" else "open")) if one_day_bar else None
             exit_price_3d = _to_float(three_day_bar.get("close")) if three_day_bar else None
             entry_factor = _to_float(entry_bar.get("adj_factor")) if entry_bar else None
             one_day_factor = _to_float(one_day_bar.get("adj_factor")) if one_day_bar else None
             three_day_factor = _to_float(three_day_bar.get("adj_factor")) if three_day_bar else None
+            if request.return_mode == "triple_barrier_5d" and request.apply_execution_constraints and self._is_limit_blocked(triple_exit_bar, "sell"):
+                triple_exit_price = None
+                triple_exit_factor = None
+                triple_exit_reason = "sell_blocked_limit_down"
             if request.apply_execution_constraints and self._is_limit_blocked(one_day_bar, "sell"):
                 exit_price_1d = None
                 one_day_factor = None
@@ -609,15 +709,54 @@ class BacktestService:
                     "entry_price": entry_price,
                     "exit_date_1d": str(one_day_bar.get("trade_date")) if one_day_bar else None,
                     "exit_price_1d": exit_price_1d,
-                    "return_1d_pct": self._pct_return(entry_price, exit_price_1d, entry_factor, one_day_factor, request) if request.return_mode == "1d" else None,
-                    "exit_date_3d": str(three_day_bar.get("trade_date")) if three_day_bar else None,
-                    "exit_price_3d": exit_price_3d,
-                    "return_3d_pct": self._pct_return(entry_price, exit_price_3d, entry_factor, three_day_factor, request) if request.return_mode == "3d" else None,
+                    "return_1d_pct": self._pct_return(entry_price, exit_price_1d, entry_factor, one_day_factor, request) if request.return_mode in {"1d", "observe_t3_daily"} else None,
+                    "exit_date_3d": str((triple_exit_bar or three_day_bar).get("trade_date")) if (triple_exit_bar or three_day_bar) else None,
+                    "exit_price_3d": triple_exit_price if request.return_mode == "triple_barrier_5d" else exit_price_3d,
+                    "return_3d_pct": self._pct_return(entry_price, triple_exit_price, entry_factor, triple_exit_factor, request) if request.return_mode == "triple_barrier_5d" else self._pct_return(entry_price, exit_price_3d, entry_factor, three_day_factor, request) if request.return_mode in {"3d", "observe_t3_daily"} else None,
+                    "trade_strategy_id": request.trade_strategy_id,
+                    "exit_reason": triple_exit_reason if request.return_mode == "triple_barrier_5d" else None,
                     "max_gain_pct": self._pct_return(entry_price, max(high_values) if high_values else None),
                     "max_drawdown_pct": self._pct_return(entry_price, min(low_values) if low_values else None),
                 }
             )
         return trades
+
+    def _resolve_triple_barrier_exit(
+        self,
+        bars: Sequence[Dict[str, Any]],
+        entry_price: float,
+        request: BacktestRequest,
+        take_profit_pct: float,
+        stop_loss_pct: float,
+        max_holding_days: int,
+    ) -> tuple[Dict[str, Any] | None, float | None, str | None, float | None]:
+        """Resolve the first hit among take-profit, stop-loss and time-exit.
+
+        Backtest granularity is daily OHLC, so the trigger price is approximated
+        by the configured barrier price when high/low crosses it; otherwise the
+        final holding day exits at close.
+        """
+        if not bars or entry_price <= 0:
+            return None, None, "missing_entry", None
+        entry_factor = _to_float(bars[0].get("adj_factor")) if bars else None
+        take_profit_price = entry_price * (1 + take_profit_pct / 100)
+        stop_loss_price = entry_price * (1 + stop_loss_pct / 100)
+        future_bars = list(bars[1 : max_holding_days + 1])
+        for bar in future_bars:
+            factor = _to_float(bar.get("adj_factor"))
+            high = _to_float(bar.get("high"))
+            low = _to_float(bar.get("low"))
+            if request.use_adjusted_price and entry_factor:
+                high = self._adjusted_compare_price(high, factor, entry_factor)
+                low = self._adjusted_compare_price(low, factor, entry_factor)
+            if low is not None and low <= stop_loss_price:
+                return bar, stop_loss_price, "stop_loss", factor
+            if high is not None and high >= take_profit_price:
+                return bar, take_profit_price, "take_profit", factor
+        final_bar = future_bars[-1] if future_bars else (bars[-1] if bars else None)
+        if not final_bar:
+            return None, None, "missing_exit", None
+        return final_bar, _to_float(final_bar.get("close")), "time_exit", _to_float(final_bar.get("adj_factor"))
 
     def _fetch_future_bars(self, codes: Sequence[str], trade_date: str, lookahead: int) -> Dict[str, List[Dict[str, Any]]]:
         if not codes:
@@ -684,6 +823,7 @@ class BacktestService:
             return None
         use_adjusted_price = bool(request.use_adjusted_price) if request else False
         commission_rate = max(_to_float(getattr(request, "commission_bps", 0)) or 0, 0) / 10000 if request else 0.0
+        stamp_tax_rate = max(_to_float(getattr(request, "stamp_tax_bps", 0)) or 0, 0) / 10000 if request else 0.0
         slippage_rate = max(_to_float(getattr(request, "slippage_bps", 0)) or 0, 0) / 10000 if request else 0.0
         if use_adjusted_price:
             if entry_factor is None or exit_factor is None or entry_factor <= 0:
@@ -694,7 +834,7 @@ class BacktestService:
             entry_value = entry
             exit_value = exit_price
         effective_entry = entry_value * (1 + commission_rate + slippage_rate)
-        effective_exit = exit_value * (1 - commission_rate - slippage_rate)
+        effective_exit = exit_value * (1 - commission_rate - stamp_tax_rate - slippage_rate)
         if effective_entry <= 0:
             return None
         return round(((effective_exit - effective_entry) / effective_entry) * 100, 4)
@@ -774,10 +914,11 @@ class BacktestService:
     ) -> None:
         sql = """
         INSERT INTO backtest_run (
-            run_id, strategy_id, strategy_version, instrument_type, start_date, end_date,
-            return_mode, use_adjusted_price, status, request_json, started_at,
+            run_id, strategy_id, trade_strategy_id, strategy_version, instrument_type, start_date, end_date,
+            return_mode, evaluation_mode, use_adjusted_price, commission_bps, stamp_tax_bps, slippage_bps,
+            execution_constraints_enabled, status, request_json, started_at,
             progress_total_days, progress_done_days, progress_pct
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0)
         """
         with mysql_conn(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
@@ -786,12 +927,18 @@ class BacktestService:
                     (
                         run_id,
                         request.strategy_id,
+                        request.trade_strategy_id,
                         selector.strategy_meta.get("version"),
                         request.instrument_type,
                         request.start_date,
                         request.end_date,
                         request.return_mode,
+                        request.evaluation_mode,
                         int(request.use_adjusted_price),
+                        request.commission_bps,
+                        request.stamp_tax_bps,
+                        request.slippage_bps,
+                        int(request.apply_execution_constraints),
                         status,
                         _to_json(request.__dict__),
                         started_at.strftime("%Y-%m-%d %H:%M:%S"),
