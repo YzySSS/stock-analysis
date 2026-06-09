@@ -78,6 +78,39 @@ strategies:
     tags: [emotion, limitup, reversal, leader, experimental]
     description: 面向连板/强势票分歧后反包的情绪龙观察池，允许涨停票保留，仅用于高波动短线观察
 
+  - id: low_position_resonance
+    display_name: 低位共振修复
+    entrypoint: app.strategies.active.thematic_strategies.LowPositionResonanceStrategy
+    config_path: app/strategies/registry/configs/low_position_resonance.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [low-position, resonance, reversal, moneyflow, experimental]
+    description: 借鉴低位多指标共振思想，结合20日低位、超卖修复、动能回暖、温和放量和资金回流寻找低位修复候选
+
+  - id: multi_timeframe_resonance
+    display_name: 多周期共振
+    entrypoint: app.strategies.active.thematic_strategies.MultiTimeframeResonanceStrategy
+    config_path: app/strategies/registry/configs/multi_timeframe_resonance.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [multi-timeframe, trend, momentum, moneyflow, experimental]
+    description: 用日线趋势、近20日趋势、近5日触发、资金和市场环境代理多周期共振，后续可接入分钟线升级
+
+  - id: chan_structure_watch
+    display_name: 缠论结构观察
+    entrypoint: app.strategies.active.thematic_strategies.ChanStructureWatchStrategy
+    config_path: app/strategies/registry/configs/chan_structure_watch.yaml
+    version: 0.1.0
+    status: experimental
+    mode: current
+    executable: true
+    tags: [chan, structure, fractal, divergence, experimental]
+    description: 缠论 V1 日线结构观察策略，用底分型、笔转折、中枢支撑、背驰修复和离开确认的可量化代理信号筛选观察池
+
   - id: a_share_sentiment
     display_name: A股舆情选股
     entrypoint: app.strategies.active.thematic_strategies.AShareSentimentStrategy

@@ -20,6 +20,9 @@ class StrategyService:
         "quality_lowvol",
         "leader_tactics",
         "limitup_reversal",
+        "low_position_resonance",
+        "multi_timeframe_resonance",
+        "chan_structure_watch",
         "a_share_sentiment",
     }
     BACKTEST_READY_IDS = {
@@ -28,9 +31,12 @@ class StrategyService:
         "fund_chip_repair",
         "quality_lowvol",
         "leader_tactics",
+        "low_position_resonance",
+        "multi_timeframe_resonance",
     }
     BACKTEST_DISABLED_REASONS = {
         "v12_legacy": "V12 当前选股会触发 Tavily/舆情精排，严格历史回测暂不开放，避免消耗搜索次数并避免伪历史舆情。",
+        "chan_structure_watch": "缠论结构观察 V1 先开放选股与跟踪复盘，回测需补更严格的历史结构识别后再开放。",
         "a_share_sentiment": "A股舆情选股依赖 market_opinion_v2 历史 as_of 快照，已完成前置修复，但正式回测链路尚未接入。",
     }
 

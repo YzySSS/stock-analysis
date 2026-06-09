@@ -8,7 +8,7 @@ import requests
 
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
-BITABLE_APP_TOKEN = os.getenv("FEISHU_BITABLE_TOKEN", "ZRR7bcleZanrLUsSG4zcYGoRnwh")
+BITABLE_APP_TOKEN = os.getenv("FEISHU_BITABLE_TOKEN", "")
 
 # 策略表格配置（启用状态可以通过环境变量覆盖）
 ENABLED_STRATEGIES = os.getenv("ENABLED_STRATEGIES", "V10").split(",")
@@ -45,11 +45,12 @@ def main():
     print("=" * 60)
     
     # 检查环境变量
-    if not FEISHU_APP_ID or not FEISHU_APP_SECRET:
+    if not FEISHU_APP_ID or not FEISHU_APP_SECRET or not BITABLE_APP_TOKEN:
         print("\n❌ 错误：请设置飞书应用凭证")
         print("\n请执行以下命令或添加到 .env 文件：")
         print('  export FEISHU_APP_ID="cli_xxxxxxxx"')
         print('  export FEISHU_APP_SECRET="xxxxxxxx"')
+        print('  export FEISHU_BITABLE_TOKEN="your-bitable-app-token"')
         print("\n从飞书开发者后台获取：https://open.feishu.cn/app")
         sys.exit(1)
     

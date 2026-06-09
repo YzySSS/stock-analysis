@@ -15,6 +15,8 @@ const BACKTEST_STRATEGY_LABELS = {
   fund_chip_repair: '资金筹码修复选股',
   quality_lowvol: '质量低波选股',
   leader_tactics: '龙头战法选股',
+  low_position_resonance: '低位共振修复',
+  multi_timeframe_resonance: '多周期共振',
   a_share_sentiment: 'A股舆情选股',
 };
 
@@ -59,6 +61,14 @@ const BACKTEST_STRATEGY_DEFAULTS = {
     threshold: 60,
     maxPicks: 3,
   },
+  low_position_resonance: {
+    threshold: 60,
+    maxPicks: 3,
+  },
+  multi_timeframe_resonance: {
+    threshold: 60,
+    maxPicks: 3,
+  },
 };
 
 function syncBacktestStrategyDefaults() {
@@ -76,6 +86,53 @@ function pctCell(value) {
   return `<span class="${cls}">${formatPercent(value)}</span>`;
 }
 
+function formatRatio(value) {
+  if (value == null || Number.isNaN(Number(value))) return '-';
+  return Number(value).toFixed(2);
+}
+
+const BACKTEST_REJECTION_LABELS = {
+  missing_entry_price: '缺少入场价',
+  missing_bar: '缺少行情',
+  suspended_or_no_open: '停牌/无开盘价',
+  buy_blocked_limit_up: '涨停买不进',
+  sell_blocked_limit_down: '跌停卖不出',
+};
+
+function renderExecutionSummary(data) {
+  const container = qs('#backtest-execution-summary');
+  if (!container) return;
+  const summary = data?.summary || {};
+  const counts = summary.rejection_counts || {};
+  const rules = summary.execution_rule_summary || {};
+  const entries = Object.entries(counts).filter(([, value]) => Number(value || 0) > 0);
+  if (!entries.length && !rules.a_share_realistic) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+  container.hidden = false;
+  const reasonText = entries.length
+    ? entries.map(([key, value]) => `<span class="badge status-warn">${escapeHtml(BACKTEST_REJECTION_LABELS[key] || key)} ${value}</span>`).join('')
+    : '<span class="badge status-ok">无成交拒绝</span>';
+  container.innerHTML = `
+    <div class="card-header">
+      <div>
+        <p class="card-kicker">Execution</p>
+        <h3>A 股真实化执行摘要</h3>
+      </div>
+    </div>
+    <div class="backtest-execution-chips">
+      <span class="badge ${rules.a_share_realistic ? 'status-ok' : 'status-muted'}">${rules.a_share_realistic ? '真实化已启用' : '研究口径'}</span>
+      <span class="badge status-muted">佣金 ${Number(rules.commission_bps || 0)}bps</span>
+      <span class="badge status-muted">印花 ${Number(rules.stamp_tax_bps || 0)}bps</span>
+      <span class="badge status-muted">滑点 ${Number(rules.slippage_bps || 0)}bps</span>
+      ${reasonText}
+    </div>
+    <p class="muted">${escapeHtml(rules.lot_size_rule || 'A 股整手规则将在仓位模型接入后影响交易数量。')}</p>
+  `;
+}
+
 function setBacktestStats(data) {
   const summary = data?.summary || {};
   const adjustedLabel = data?.request?.use_adjusted_price ? ' · 复权收益' : ' · 不复权';
@@ -90,7 +147,11 @@ function setBacktestStats(data) {
   qs('#backtest-stat-avg-return').innerHTML = pctCell(data?.avg_return_pct ?? summary.avg_return_pct);
   qs('#backtest-stat-max-drawdown').innerHTML = pctCell(data?.max_drawdown_pct ?? summary.max_drawdown_pct);
   qs('#backtest-stat-win-rate').textContent = formatPercent(data?.win_rate_pct ?? summary.win_rate_pct);
+  qs('#backtest-stat-sharpe').textContent = formatRatio(summary.sharpe_ratio);
+  qs('#backtest-stat-sortino').textContent = formatRatio(summary.sortino_ratio);
+  qs('#backtest-stat-calmar').textContent = formatRatio(summary.calmar_ratio);
   qs('#backtest-run-id').textContent = data?.run_id ? `run_id: ${data.run_id}${tradeStrategyLabel}${adjustedLabel}${costLabel}` : '暂无 run';
+  renderExecutionSummary(data);
 }
 
 function formatEta(seconds) {
@@ -629,6 +690,23 @@ async function runBacktest(event) {
   }
 }
 
+function applyAShareRealisticPreset() {
+  const adjusted = qs('#backtest-use-adjusted-price');
+  const constraints = qs('#backtest-execution-constraints');
+  const commission = qs('#backtest-commission-bps');
+  const stamp = qs('#backtest-stamp-tax-bps');
+  const slippage = qs('#backtest-slippage-bps');
+  if (adjusted) adjusted.checked = false;
+  if (constraints) constraints.checked = true;
+  if (commission) commission.value = '2.5';
+  if (stamp) stamp.value = '5';
+  if (slippage) slippage.value = '5';
+  const message = qs('#backtest-form-message');
+  const messageShell = message?.closest('.backtest-terminal-foot');
+  if (messageShell) messageShell.hidden = false;
+  if (message) message.textContent = '已应用 A 股真实化预设：不复权、成交约束、佣金2.5bps、印花5bps、滑点5bps。';
+}
+
 qs('#backtest-form')?.addEventListener('submit', runBacktest);
 qs('#refresh-backtest-page')?.addEventListener('click', refreshBacktestPage);
 qs('#backtest-return-mode')?.addEventListener('change', () => {
@@ -644,6 +722,7 @@ qs('#backtest-trade-strategy-id')?.addEventListener('change', () => {
   loadTrades(currentBacktestRunId, 1);
 });
 qs('#backtest-strategy-id')?.addEventListener('change', syncBacktestStrategyDefaults);
+qs('#backtest-ashare-realistic-preset')?.addEventListener('click', applyAShareRealisticPreset);
 qsa('[data-backtest-chart-mode]').forEach((button) => {
   button.addEventListener('click', () => {
     currentBacktestChartMode = button.dataset.backtestChartMode || 'equity';

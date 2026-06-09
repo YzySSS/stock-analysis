@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 import time
@@ -64,6 +65,8 @@ class BacktestService:
         "fund_chip_repair",
         "quality_lowvol",
         "leader_tactics",
+        "low_position_resonance",
+        "multi_timeframe_resonance",
     }
     DISABLED_STRATEGIES = {
         "a_share_sentiment": "A股舆情选股 V2 依赖实时 market_opinion_v2，当前回测未注入历史舆情聚合，P0 阶段暂不支持回测。",
@@ -257,18 +260,20 @@ class BacktestService:
             all_picks: List[Dict[str, Any]] = []
             all_trades: List[Dict[str, Any]] = []
             daily_summaries: List[Dict[str, Any]] = []
+            rejection_counts: Dict[str, int] = {}
 
             for trade_date in trade_dates:
                 candidates = self._load_candidates(selector, trade_date, request.instrument_type)
                 selected = selector.run({"candidates": candidates})
                 picks = [self._build_pick(row, trade_date) for row in selected]
-                trades = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
+                trades, daily_rejections = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
+                self._merge_counts(rejection_counts, daily_rejections)
                 summary = self._build_daily_summary(run_id, request.strategy_id, trade_date, trades)
                 all_picks.extend(picks)
                 all_trades.extend(trades)
                 daily_summaries.append(summary)
 
-            summary = self._build_run_summary(daily_summaries, all_trades, request.return_mode)
+            summary = self._build_run_summary(daily_summaries, all_trades, request.return_mode, rejection_counts, len(all_picks), request)
             if save:
                 self._save_results(run_id, request.strategy_id, all_picks, all_trades, daily_summaries)
                 self._finish_run(run_id, "success", len(trade_dates), len(all_picks), len(all_trades), summary)
@@ -312,15 +317,17 @@ class BacktestService:
         all_picks: List[Dict[str, Any]] = []
         all_trades: List[Dict[str, Any]] = []
         daily_summaries: List[Dict[str, Any]] = []
+        rejection_counts: Dict[str, int] = {}
 
         for index, trade_date in enumerate(trade_dates, start=1):
             if self._is_cancel_requested(run_id):
-                self._finish_run(run_id, "cancelled", len(trade_dates), len(all_picks), len(all_trades), self._build_run_summary(daily_summaries, all_trades, request.return_mode), "cancel requested")
+                self._finish_run(run_id, "cancelled", len(trade_dates), len(all_picks), len(all_trades), self._build_run_summary(daily_summaries, all_trades, request.return_mode, rejection_counts, len(all_picks), request), "cancel requested")
                 return
             candidates = self._load_candidates(selector, trade_date, request.instrument_type)
             selected = selector.run({"candidates": candidates})
             picks = [self._build_pick(row, trade_date) for row in selected]
-            trades = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
+            trades, daily_rejections = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
+            self._merge_counts(rejection_counts, daily_rejections)
             summary = self._build_daily_summary(run_id, request.strategy_id, trade_date, trades)
             self._save_results(run_id, request.strategy_id, picks, trades, [summary])
             all_picks.extend(picks)
@@ -330,7 +337,7 @@ class BacktestService:
             seconds_left = int((elapsed / index) * (len(trade_dates) - index)) if index else None
             self._update_progress(run_id, index, len(trade_dates), trade_date, seconds_left)
 
-        summary = self._build_run_summary(daily_summaries, all_trades, request.return_mode)
+        summary = self._build_run_summary(daily_summaries, all_trades, request.return_mode, rejection_counts, len(all_picks), request)
         self._finish_run(run_id, "success", len(trade_dates), len(all_picks), len(all_trades), summary)
 
     def _fetch_trade_dates(self, start_date: str, end_date: str) -> List[str]:
@@ -644,21 +651,25 @@ class BacktestService:
             "explain_json": item.get("explain", {}),
         }
 
-    def _build_trades(self, run_id: str, strategy_id: str, trade_date: str, picks: Sequence[Dict[str, Any]], request: BacktestRequest) -> List[Dict[str, Any]]:
+    def _build_trades(self, run_id: str, strategy_id: str, trade_date: str, picks: Sequence[Dict[str, Any]], request: BacktestRequest) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
         if not picks:
-            return []
+            return [], {}
         codes = [p["code"] for p in picks if p.get("code")]
         lookahead = 6 if request.return_mode == "triple_barrier_5d" else 4 if request.return_mode in {"3d", "observe_t3_daily"} else 2
         future = self._fetch_future_bars(codes, trade_date, lookahead=lookahead)
         trades: List[Dict[str, Any]] = []
+        rejection_counts: Dict[str, int] = {}
         for pick in picks:
             code = pick["code"]
             bars = future.get(code, [])
             entry_price = _to_float(pick.get("entry_price"))
             if entry_price is None or entry_price <= 0:
+                self._count_reason(rejection_counts, "missing_entry_price")
                 continue
             entry_bar = bars[0] if bars else None
-            if request.apply_execution_constraints and self._is_limit_blocked(entry_bar, "buy"):
+            buy_block_reason = self._execution_block_reason(entry_bar, "buy") if request.apply_execution_constraints else None
+            if buy_block_reason:
+                self._count_reason(rejection_counts, buy_block_reason)
                 continue
             one_day_bar = bars[1] if request.return_mode in {"1d", "observe_t3_daily"} and len(bars) > 1 else None
             three_day_bar = bars[3] if request.return_mode in {"3d", "observe_t3_daily"} and len(bars) > 3 else None
@@ -684,12 +695,17 @@ class BacktestService:
                 triple_exit_price = None
                 triple_exit_factor = None
                 triple_exit_reason = "sell_blocked_limit_down"
-            if request.apply_execution_constraints and self._is_limit_blocked(one_day_bar, "sell"):
+                self._count_reason(rejection_counts, "sell_blocked_limit_down")
+            one_day_block_reason = self._execution_block_reason(one_day_bar, "sell") if request.apply_execution_constraints and one_day_bar else None
+            if one_day_block_reason:
                 exit_price_1d = None
                 one_day_factor = None
-            if request.apply_execution_constraints and self._is_limit_blocked(three_day_bar, "sell"):
+                self._count_reason(rejection_counts, one_day_block_reason)
+            three_day_block_reason = self._execution_block_reason(three_day_bar, "sell") if request.apply_execution_constraints and three_day_bar else None
+            if three_day_block_reason:
                 exit_price_3d = None
                 three_day_factor = None
+                self._count_reason(rejection_counts, three_day_block_reason)
             price_path = bars[:lookahead]
             if request.use_adjusted_price and entry_factor:
                 high_values = [self._adjusted_compare_price(_to_float(b.get("high")), _to_float(b.get("adj_factor")), entry_factor) for b in price_path]
@@ -719,7 +735,7 @@ class BacktestService:
                     "max_drawdown_pct": self._pct_return(entry_price, min(low_values) if low_values else None),
                 }
             )
-        return trades
+        return trades, rejection_counts
 
     def _resolve_triple_barrier_exit(
         self,
@@ -763,10 +779,11 @@ class BacktestService:
             return {}
         placeholders = ",".join(["%s"] * len(codes))
         sql = f"""
-        SELECT dk.code, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
+        SELECT dk.code, sb.name, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
                prev.close AS prev_close,
                af.adj_factor
         FROM daily_kline dk
+        LEFT JOIN stock_basic sb ON sb.code = dk.code
         LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
         LEFT JOIN daily_kline prev ON prev.code = dk.code
           AND prev.trade_date = (
@@ -796,20 +813,46 @@ class BacktestService:
 
     @staticmethod
     def _is_limit_blocked(bar: Dict[str, Any] | None, side: str) -> bool:
+        return BacktestService._execution_block_reason(bar, side) is not None
+
+    @staticmethod
+    def _execution_block_reason(bar: Dict[str, Any] | None, side: str) -> str | None:
         if not bar:
-            return True
+            return "missing_bar"
         open_price = _to_float(bar.get("open"))
         prev_close = _to_float(bar.get("prev_close"))
         if open_price is None or open_price <= 0:
-            return True
+            return "suspended_or_no_open"
         if prev_close is None or prev_close <= 0:
-            return False
+            return None
         pct = (open_price - prev_close) / prev_close * 100
         if side == "buy":
-            return pct >= 9.8
+            return "buy_blocked_limit_up" if pct >= BacktestService._limit_rate_for_bar(bar) - 0.2 else None
         if side == "sell":
-            return pct <= -9.8
-        return False
+            return "sell_blocked_limit_down" if pct <= -BacktestService._limit_rate_for_bar(bar) + 0.2 else None
+        return None
+
+    @staticmethod
+    def _limit_rate_for_bar(bar: Dict[str, Any] | None) -> float:
+        code = str((bar or {}).get("code") or "")
+        name = str((bar or {}).get("name") or "")
+        if "ST" in name.upper():
+            return 5.0
+        if code.startswith(("sz.300", "sh.688")):
+            return 20.0
+        if code.startswith("bj."):
+            return 30.0
+        return 10.0
+
+    @staticmethod
+    def _count_reason(counts: Dict[str, int], reason: str | None) -> None:
+        if reason:
+            counts[reason] = counts.get(reason, 0) + 1
+
+    @staticmethod
+    def _merge_counts(target: Dict[str, int], incoming: Dict[str, int]) -> None:
+        for key, value in incoming.items():
+            target[key] = target.get(key, 0) + int(value or 0)
 
     @staticmethod
     def _pct_return(
@@ -863,10 +906,19 @@ class BacktestService:
     def _win_rate(values: Sequence[float]) -> float | None:
         return round((len([v for v in values if v > 0]) / len(values)) * 100, 4) if values else None
 
-    def _build_run_summary(self, daily: Sequence[Dict[str, Any]], trades: Sequence[Dict[str, Any]], return_mode: str) -> Dict[str, Any]:
+    def _build_run_summary(
+        self,
+        daily: Sequence[Dict[str, Any]],
+        trades: Sequence[Dict[str, Any]],
+        return_mode: str,
+        rejection_counts: Dict[str, int] | None = None,
+        total_picks: int | None = None,
+        request: BacktestRequest | None = None,
+    ) -> Dict[str, Any]:
         field = "return_1d_pct" if return_mode == "1d" else "return_3d_pct"
         daily_field = "avg_return_1d_pct" if return_mode == "1d" else "avg_return_3d_pct"
         values = [t[field] for t in trades if t.get(field) is not None]
+        daily_values = [row[daily_field] for row in daily if row.get(daily_field) is not None]
         best = max(trades, key=lambda t: t.get(field) if t.get(field) is not None else -999999, default=None)
         worst = min(trades, key=lambda t: t.get(field) if t.get(field) is not None else 999999, default=None)
         equity = 1.0
@@ -893,14 +945,70 @@ class BacktestService:
             "return_mode": return_mode,
             "trade_days": len(daily),
             "trade_count": len(values),
+            "total_picks": total_picks if total_picks is not None else len(trades),
             "total_return_pct": round((equity - 1) * 100, 4),
             "avg_return_pct": self._avg(values),
-            "avg_daily_return_pct": self._avg([row[daily_field] for row in daily if row.get(daily_field) is not None]),
+            "avg_daily_return_pct": self._avg(daily_values),
             "max_drawdown_pct": round(max_drawdown_pct, 4),
             "win_rate_pct": self._win_rate(values),
+            "sharpe_ratio": self._sharpe(daily_values),
+            "sortino_ratio": self._sortino(daily_values),
+            "calmar_ratio": self._calmar(equity, len(daily_values), max_drawdown_pct),
+            "rejection_counts": rejection_counts or {},
+            "rejected_trade_count": sum((rejection_counts or {}).values()),
+            "execution_rule_summary": self._execution_rule_summary(request),
             "best_trade": {"code": best.get("code"), "return_pct": best.get(field)} if best else None,
             "worst_trade": {"code": worst.get("code"), "return_pct": worst.get(field)} if worst else None,
             "equity_curve": equity_curve,
+        }
+
+    @staticmethod
+    def _sharpe(daily_returns_pct: Sequence[float]) -> float | None:
+        if len(daily_returns_pct) < 2:
+            return None
+        values = [float(v) / 100 for v in daily_returns_pct]
+        avg = sum(values) / len(values)
+        variance = sum((v - avg) ** 2 for v in values) / (len(values) - 1)
+        std = math.sqrt(variance)
+        if std <= 0:
+            return None
+        return round((avg / std) * math.sqrt(252), 4)
+
+    @staticmethod
+    def _sortino(daily_returns_pct: Sequence[float]) -> float | None:
+        if len(daily_returns_pct) < 2:
+            return None
+        values = [float(v) / 100 for v in daily_returns_pct]
+        avg = sum(values) / len(values)
+        downside = [min(v, 0.0) for v in values]
+        downside_variance = sum(v * v for v in downside) / len(values)
+        downside_std = math.sqrt(downside_variance)
+        if downside_std <= 0:
+            return None
+        return round((avg / downside_std) * math.sqrt(252), 4)
+
+    @staticmethod
+    def _calmar(equity: float, trade_days: int, max_drawdown_pct: float) -> float | None:
+        if trade_days <= 0 or max_drawdown_pct >= 0:
+            return None
+        annualized_return = equity ** (252 / trade_days) - 1
+        drawdown = abs(max_drawdown_pct) / 100
+        if drawdown <= 0:
+            return None
+        return round(annualized_return / drawdown, 4)
+
+    @staticmethod
+    def _execution_rule_summary(request: BacktestRequest | None) -> Dict[str, Any]:
+        if not request:
+            return {}
+        return {
+            "a_share_realistic": bool(request.apply_execution_constraints or request.commission_bps or request.stamp_tax_bps or request.slippage_bps),
+            "execution_constraints": bool(request.apply_execution_constraints),
+            "commission_bps": request.commission_bps,
+            "stamp_tax_bps": request.stamp_tax_bps,
+            "slippage_bps": request.slippage_bps,
+            "lot_size_rule": "A股默认100股整手；科创板/北交所后续接仓位模型时按200股最小单位处理。",
+            "lot_size_affects_return": False,
         }
 
     def _create_run(

@@ -364,7 +364,7 @@ def _call_deepseek_review(prompt: str, model: str, timeout_seconds: int = 90) ->
     _load_env_file()
     api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY is not configured")
+        raise HTTPException(status_code=400, detail="未配置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY，无法执行 AI 详细复盘")
     base_url = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.deepseek.com/v1"
     response = requests.post(
         f"{base_url.rstrip('/')}/chat/completions",
@@ -379,6 +379,18 @@ def _call_deepseek_review(prompt: str, model: str, timeout_seconds: int = 90) ->
     response.raise_for_status()
     data = response.json()
     return data["choices"][0]["message"]["content"].strip()
+
+
+@router.get("/tracking/deep-review/status")
+def get_tracking_deep_review_status() -> dict:
+    _load_env_file()
+    api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+    model = os.getenv("DEEPSEEK_REVIEW_MODEL") or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
+    return {
+        "available": bool(api_key),
+        "model": model if api_key else None,
+        "message": None if api_key else "未配置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY",
+    }
 
 
 @router.get("/tracking/latest")

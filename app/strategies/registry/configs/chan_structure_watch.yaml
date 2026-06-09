@@ -1,0 +1,48 @@
+selection:
+  max_picks: 5
+  score_threshold: 60
+
+hard_filters:
+  min_price: 3
+  max_price: 160
+  min_amount: 50000000
+  min_kline_count_20: 18
+  max_position_20d: 78
+
+factors:
+  bottom_fractal:
+    name: 底分型代理
+    category: chan
+    direction: positive
+    weight: 0.18
+    description: 以20日低位、日内收离低点和K线实体强度近似底分型/止跌结构。
+  stroke_turn:
+    name: 笔转折代理
+    category: chan
+    direction: positive
+    weight: 0.18
+    description: 用20日弱势后的5日修复、当日确认和MA20偏离衡量下降笔是否可能结束。
+  center_support:
+    name: 中枢支撑代理
+    category: chan
+    direction: positive
+    weight: 0.17
+    description: 用20日区间中部、MA20附近和温和成交代理价格在重叠区获得支撑。
+  divergence_proxy:
+    name: 背驰修复代理
+    category: chan
+    direction: positive
+    weight: 0.19
+    description: 价格仍处低位但短期跌势、波动和成交压力收敛时加分，近似背驰修复。
+  breakout_confirm:
+    name: 离开确认
+    category: chan
+    direction: positive
+    weight: 0.16
+    description: 价格向上离开MA20/中枢区，配合温和放量和资金确认时加分。
+  risk_control:
+    name: 风险约束
+    category: risk
+    direction: positive
+    weight: 0.12
+    description: 降低高位、长上影、过高波动、过热换手和资金偏弱样本的权重。

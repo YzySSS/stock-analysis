@@ -1,0 +1,1216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>新版 UI 预览 - QuantTerminal 股票分析控制台</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0f16;
+      --panel: #151a23;
+      --panel-2: #1b202b;
+      --line: #2d3543;
+      --line-soft: #242b36;
+      --text: #f1f6ff;
+      --muted: #8d9aae;
+      --blue: #91b7ff;
+      --blue-2: #6fa3ff;
+      --green: #31d786;
+      --red: #ff7479;
+      --orange: #ffb071;
+      --violet: #7667ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 1px 1px, rgba(255,255,255,.16) 1px, transparent 0) 0 0 / 16px 16px,
+        linear-gradient(180deg, #191d25 0%, #10141b 58%, #0a0e14 100%);
+    }
+    .page {
+      width: min(1440px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+    .title-block {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(13, 18, 27, .92);
+      padding: 18px 20px;
+      box-shadow: 0 22px 80px rgba(0,0,0,.34);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .style-tags {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(21,26,35,.9);
+      color: #cfe0ff;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 10px;
+    }
+    .terminal {
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      min-height: 830px;
+      border: 2px solid var(--violet);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #111720;
+      box-shadow: 0 0 0 1px rgba(145,183,255,.18), 0 28px 90px rgba(0,0,0,.45);
+    }
+    .preview-card {
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(13,18,27,.94);
+      padding: 14px;
+      box-shadow: 0 22px 80px rgba(0,0,0,.34);
+    }
+    .preview-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid rgba(145,183,255,.22);
+      border-radius: 6px;
+      background: #0d121a;
+    }
+    .side {
+      display: flex;
+      flex-direction: column;
+      background: #171c25;
+      border-right: 1px solid var(--line);
+    }
+    .brand {
+      padding: 22px 22px 18px;
+      min-height: 92px;
+    }
+    .brand strong {
+      display: block;
+      color: #8fb6ff;
+      font-size: 16px;
+      line-height: 1.1;
+    }
+    .brand span {
+      display: block;
+      margin-top: 6px;
+      color: #a1acbd;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      text-transform: uppercase;
+    }
+    .nav {
+      display: grid;
+      gap: 4px;
+      padding: 0 10px;
+    }
+    .nav-item {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      align-items: center;
+      min-height: 42px;
+      border-radius: 4px;
+      color: #d7e4f9;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 0 10px;
+    }
+    .nav-item.active { background: #435269; color: #fff; }
+    .nav-icon {
+      display: block;
+      width: 14px;
+      height: 14px;
+      border: 1px solid #83a9ea;
+      border-radius: 3px;
+      position: relative;
+    }
+    .nav-icon::after {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border-top: 2px solid #83a9ea;
+      border-bottom: 2px solid #83a9ea;
+    }
+    .profile {
+      margin-top: auto;
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: center;
+      min-height: 72px;
+      border-top: 1px solid var(--line);
+      padding: 14px 18px;
+    }
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: linear-gradient(135deg, #233244, #7fa6ee);
+      border: 1px solid #44536a;
+    }
+    .profile strong { display: block; font-size: 12px; }
+    .profile span { color: #a9b4c5; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .main {
+      min-width: 0;
+      background: #0d121a;
+    }
+    .topbar {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 16px;
+      height: 58px;
+      border-bottom: 1px solid var(--line);
+      padding: 0 20px;
+    }
+    .market-title {
+      font-size: 16px;
+      font-weight: 900;
+    }
+    .ticker {
+      display: flex;
+      gap: 20px;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      color: #9fb1ca;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .ticker b { color: #fff; }
+    .ticker .down { color: var(--red); }
+    .ticker .up { color: var(--green); }
+    .tools {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: #d9e6fb;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .tool-dot {
+      width: 24px;
+      height: 24px;
+      border: 1px solid #3a4454;
+      border-radius: 5px;
+      background: #111722;
+    }
+    .content {
+      padding: 18px;
+    }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .kpi, .panel, .task-panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 4px;
+    }
+    .kpi {
+      min-height: 94px;
+      padding: 16px;
+    }
+    .label {
+      color: #c9d4e5;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    .metric {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+    .metric.blue { color: var(--blue); }
+    .metric.red { color: var(--red); }
+    .metric.green { color: var(--green); }
+    .metric.orange { color: var(--orange); }
+    .sub {
+      margin-left: 8px;
+      color: #9fb1ca;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .primary-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(280px, .75fr);
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      min-height: 48px;
+      border-bottom: 1px solid var(--line-soft);
+      padding: 0 16px;
+    }
+    .panel-title { font-size: 15px; font-weight: 900; }
+    .tabs { display: flex; gap: 6px; }
+    .tab {
+      min-width: 36px;
+      border: 1px solid #364052;
+      border-radius: 3px;
+      background: #202838;
+      color: #d7e4f9;
+      padding: 5px 8px;
+      font-size: 11px;
+      font-weight: 900;
+      text-align: center;
+    }
+    .tab.active { background: #6b93da; color: #061120; }
+    .chart {
+      height: 260px;
+      padding: 18px;
+    }
+    .gridlines {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background:
+        linear-gradient(#273246 1px, transparent 1px) 0 0 / 100% 48px,
+        linear-gradient(90deg, #273246 1px, transparent 1px) 0 0 / 48px 100%;
+      overflow: hidden;
+    }
+    .line {
+      position: absolute;
+      inset: 16px 10px 18px;
+    }
+    svg { display: block; width: 100%; height: 100%; }
+    .bars {
+      height: 260px;
+      display: flex;
+      align-items: end;
+      gap: 12px;
+      padding: 36px 22px 26px;
+    }
+    .bar { flex: 1; min-width: 16px; background: #61708b; }
+    .bar.red { background: #73111d; }
+    .bar.blue { background: #8ba2d0; }
+    .table-panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+    .table-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      min-height: 54px;
+      border-bottom: 1px solid var(--line-soft);
+      padding: 0 16px;
+    }
+    .filters { display: flex; gap: 8px; align-items: center; }
+    .search {
+      width: 210px;
+      height: 28px;
+      border: 1px solid #3a4454;
+      background: #111722;
+      color: #7f8da3;
+      border-radius: 3px;
+      padding: 0 10px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .ghost {
+      height: 28px;
+      border: 1px solid #3a4454;
+      border-radius: 3px;
+      background: #111722;
+      color: #c9d4e5;
+      padding: 0 12px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid #222a36;
+      padding: 13px 16px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      color: #b3c4dd;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    td { color: #e9f2ff; font-weight: 800; }
+    .positive { color: #9abaff; }
+    .negative { color: #ff8188; }
+    .status {
+      display: inline-block;
+      min-width: 74px;
+      border-radius: 3px;
+      background: #22385d;
+      color: #a9c7ff;
+      padding: 3px 6px;
+      font-size: 10px;
+      text-align: center;
+    }
+    .status.exit { background: #4c2022; color: #ff9ca0; }
+    .lower-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .mini {
+      min-height: 170px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--panel);
+      padding: 16px;
+    }
+    .mini .metric { font-size: 24px; }
+    .progress {
+      margin-top: 18px;
+      display: grid;
+      gap: 10px;
+    }
+    .track {
+      height: 7px;
+      background: #2a3341;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .track b {
+      display: block;
+      width: var(--w);
+      height: 100%;
+      background: var(--c, #91b7ff);
+    }
+    .timeline {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .log {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-left: 3px solid var(--blue-2);
+      background: #1d2430;
+      padding: 9px 10px;
+      font-size: 11px;
+      color: #cbd7eb;
+    }
+    .log.warn { border-left-color: var(--red); background: #2a171d; }
+    .radar {
+      width: 170px;
+      height: 120px;
+      margin: 12px auto 0;
+      background: radial-gradient(circle, rgba(111,163,255,.22) 0 20%, transparent 21%),
+        conic-gradient(from 45deg, rgba(111,163,255,.28), rgba(111,163,255,.08), rgba(111,163,255,.28));
+      clip-path: polygon(50% 0, 95% 34%, 78% 100%, 22% 100%, 5% 34%);
+      border: 1px solid #6f9fe8;
+    }
+    .footnote {
+      margin-top: 14px;
+      color: #98a6b9;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin: 28px 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(13,18,27,.92);
+      padding: 16px 18px;
+    }
+    .section-title h2 {
+      margin: 0 0 6px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+    .section-title p {
+      max-width: 780px;
+      font-size: 13px;
+    }
+    .coverage {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .coverage span {
+      border: 1px solid #374154;
+      border-radius: 4px;
+      background: #121924;
+      color: #cfe0ff;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .terminal-gallery {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .terminal-shot {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d121a;
+      overflow: hidden;
+      box-shadow: 0 20px 70px rgba(0,0,0,.32);
+    }
+    .shot-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #151a23;
+      padding: 0 14px;
+    }
+    .shot-title {
+      font-size: 14px;
+      font-weight: 900;
+    }
+    .shot-title span {
+      margin-left: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .shot-body {
+      display: grid;
+      gap: 12px;
+      min-height: 420px;
+      padding: 14px;
+      background:
+        linear-gradient(#1f2734 1px, transparent 1px) 0 0 / 100% 44px,
+        linear-gradient(90deg, #1f2734 1px, transparent 1px) 0 0 / 44px 100%,
+        #0d121a;
+    }
+    .shot-kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .shot-kpi, .shot-panel, .state-card {
+      border: 1px solid #2d3543;
+      border-radius: 4px;
+      background: rgba(21,26,35,.96);
+      padding: 12px;
+      min-width: 0;
+    }
+    .shot-kpi strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 19px;
+      line-height: 1.1;
+    }
+    .shot-grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(220px, .75fr);
+      gap: 12px;
+    }
+    .shot-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .shot-chart {
+      position: relative;
+      min-height: 155px;
+      border: 1px solid #273246;
+      border-radius: 4px;
+      overflow: hidden;
+      background:
+        linear-gradient(#273246 1px, transparent 1px) 0 0 / 100% 38px,
+        linear-gradient(90deg, #273246 1px, transparent 1px) 0 0 / 44px 100%;
+    }
+    .shot-chart svg {
+      position: absolute;
+      inset: 12px;
+      width: calc(100% - 24px);
+      height: calc(100% - 24px);
+    }
+    .dense-list {
+      display: grid;
+      gap: 8px;
+    }
+    .dense-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      border-bottom: 1px solid #242b36;
+      padding: 8px 0;
+      color: #dce8fa;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .dense-row small {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .score-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 56px;
+      border: 1px solid #466796;
+      border-radius: 3px;
+      background: #1e314f;
+      color: #b9d1ff;
+      padding: 4px 7px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .score-pill.red {
+      border-color: #65434a;
+      background: #321b23;
+      color: #ff9ca0;
+    }
+    .compact-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    .compact-table th, .compact-table td {
+      padding: 9px 8px;
+    }
+    .reason-stack {
+      display: grid;
+      gap: 8px;
+    }
+    .reason {
+      border-left: 3px solid var(--blue-2);
+      background: #1b2432;
+      padding: 8px 10px;
+      color: #dce8fa;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.45;
+    }
+    .reason.warn {
+      border-left-color: var(--orange);
+      background: #2a2319;
+    }
+    .reason.bad {
+      border-left-color: var(--red);
+      background: #2a171d;
+    }
+    .action-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid #2d3543;
+      border-radius: 4px;
+      background: #111722;
+      padding: 9px 10px;
+      color: #dce8fa;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .action-line button {
+      height: 26px;
+      border: 1px solid #4d6385;
+      border-radius: 3px;
+      background: #22385d;
+      color: #dce8fa;
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .state-card {
+      min-height: 142px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .state-card strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 14px;
+    }
+    .state-card p {
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .phone-preview {
+      width: 230px;
+      min-height: 390px;
+      border: 2px solid #384456;
+      border-radius: 18px;
+      background: #0d121a;
+      padding: 12px;
+      margin: 0 auto;
+    }
+    .phone-preview .shot-kpis {
+      grid-template-columns: 1fr 1fr;
+    }
+    .phone-preview .shot-kpi strong {
+      font-size: 15px;
+    }
+    .phone-line {
+      height: 38px;
+      border: 1px solid #2d3543;
+      border-radius: 4px;
+      background: #151a23;
+      margin-top: 8px;
+    }
+    @media (max-width: 980px) {
+      .page { width: calc(100vw - 24px); padding-top: 12px; }
+      .hero { grid-template-columns: 1fr; }
+      .style-tags { justify-content: flex-start; }
+      .terminal { grid-template-columns: 1fr; min-height: auto; }
+      .side { display: none; }
+      .topbar { grid-template-columns: 1fr; height: auto; padding: 14px; }
+      .ticker, .tools { display: none; }
+      .kpis, .primary-grid, .lower-grid { grid-template-columns: 1fr; }
+      .section-title { align-items: stretch; flex-direction: column; }
+      .coverage { justify-content: flex-start; }
+      .terminal-gallery, .shot-grid-2, .shot-grid-3, .state-grid { grid-template-columns: 1fr; }
+      .shot-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .filters { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="title-block">
+        <p class="eyebrow">New UI Direction · 2026-06-08</p>
+        <h1>QuantTerminal 风格股票分析控制台预览</h1>
+        <p>基于新 UI 图重画的统一方向稿：暗色机构终端、左侧模块导航、紧凑指标面板、曲线/分布/表格并列，适合作为后续真实页面改版参照。</p>
+      </div>
+      <div class="style-tags">
+        <span class="tag">Institutional Dark</span>
+        <span class="tag">Dense Dashboard</span>
+        <span class="tag">Blue Accent</span>
+        <span class="tag">Thin Border Cards</span>
+      </div>
+    </section>
+
+    <section class="preview-card">
+      <img src="/static/assets/ui-preview/quant-terminal-preview-20260608.svg?v=20260608a" alt="QuantTerminal 新版股票分析控制台 UI 预览图" />
+    </section>
+
+    <section class="terminal" aria-label="新版股票分析控制台设计预览">
+      <aside class="side">
+        <div class="brand">
+          <strong>QuantTerminal</strong>
+          <span>Institutional Pro</span>
+        </div>
+        <nav class="nav" aria-label="模块导航">
+          <div class="nav-item"><span class="nav-icon"></span><span>首页</span></div>
+          <div class="nav-item"><span class="nav-icon"></span><span>选股中心</span></div>
+          <div class="nav-item active"><span class="nav-icon"></span><span>跟踪复盘</span></div>
+          <div class="nav-item"><span class="nav-icon"></span><span>回测中心</span></div>
+          <div class="nav-item"><span class="nav-icon"></span><span>策略管理</span></div>
+          <div class="nav-item"><span class="nav-icon"></span><span>数据状态</span></div>
+          <div class="nav-item"><span class="nav-icon"></span><span>个股详情</span></div>
+        </nav>
+        <div class="profile">
+          <span class="avatar"></span>
+          <div><strong>Alpha Quant</strong><span>VIP Member</span></div>
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="market-title">Market Terminal</div>
+          <div class="ticker">
+            <span>上证 <b>3021.5</b> <b class="down">-0.42%</b></span>
+            <span>深证 <b>9234.1</b> <b class="up">+0.15%</b></span>
+            <span>创业 <b>1782.3</b> <b class="up">+0.82%</b></span>
+          </div>
+          <div class="tools"><span>Beijing 14:30:05</span><span class="tab active">Real-time</span><span class="tool-dot"></span><span class="tool-dot"></span><span class="tool-dot"></span></div>
+        </header>
+
+        <div class="content">
+          <section class="kpis">
+            <article class="kpi"><div class="label">Total Tracked / 跟踪总量</div><div class="metric">2,482 <span class="sub">+12 Today</span></div></article>
+            <article class="kpi"><div class="label">Avg Return / 平均收益</div><div class="metric blue">18.4%</div><div class="progress"><div class="track"><b style="--w:64%;--c:#91b7ff"></b></div></div></article>
+            <article class="kpi"><div class="label">Win Rate / 胜率</div><div class="metric blue">64.2% <span class="sub">Target 60%</span></div></article>
+            <article class="kpi"><div class="label">Max DD / 最大回撤</div><div class="metric red">-5.24% <span class="sub">03/12 Peak</span></div></article>
+          </section>
+
+          <section class="primary-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div class="panel-title">Equity Curve / 累计净值曲线</div>
+                <div class="tabs"><span class="tab active">3M</span><span class="tab">6M</span><span class="tab">1Y</span></div>
+              </div>
+              <div class="chart">
+                <div class="gridlines">
+                  <div class="line">
+                    <svg viewBox="0 0 560 220" preserveAspectRatio="none" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
+                          <stop stop-color="#8fb6ff" stop-opacity=".32" />
+                          <stop offset="1" stop-color="#8fb6ff" stop-opacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <path d="M0,165 L48,172 L96,150 L144,132 L192,144 L240,116 L288,126 L336,92 L384,102 L432,72 L480,82 L560,50 L560,220 L0,220 Z" fill="url(#area)" />
+                      <polyline points="0,165 48,172 96,150 144,132 192,144 240,116 288,126 336,92 384,102 432,72 480,82 560,50" fill="none" stroke="#a9c7ff" stroke-width="3" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head"><div class="panel-title">Return Distribution / 收益分布</div></div>
+              <div class="bars" aria-hidden="true">
+                <span class="bar red" style="height:28%"></span>
+                <span class="bar red" style="height:45%"></span>
+                <span class="bar red" style="height:58%"></span>
+                <span class="bar" style="height:52%"></span>
+                <span class="bar blue" style="height:76%"></span>
+                <span class="bar blue" style="height:100%"></span>
+                <span class="bar blue" style="height:64%"></span>
+                <span class="bar" style="height:40%"></span>
+              </div>
+            </article>
+          </section>
+
+          <section class="table-panel">
+            <div class="table-head">
+              <div class="panel-title">Tracked Universe / 跟踪列表</div>
+              <div class="filters"><span class="tab active">All</span><span class="tab">Tracking</span><input class="search" value="Search Symbol..." readonly><button class="ghost">Filter</button></div>
+            </div>
+            <table>
+              <thead>
+                <tr><th>Stock / 代码名称</th><th>Entry / 入场价</th><th>Current / 现价</th><th>Days / 天数</th><th>Return / 收益</th><th>Status / 状态</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>600519.SH<br>贵州茅台</td><td>1,642.50</td><td>1,712.20</td><td>12d</td><td class="positive">+4.24%</td><td><span class="status">Tracking</span></td><td>···</td></tr>
+                <tr><td>300750.SZ<br>宁德时代</td><td>185.30</td><td class="negative">168.45</td><td>45d</td><td class="negative">-9.09%</td><td><span class="status exit">Exited</span></td><td>···</td></tr>
+                <tr><td>000858.SZ<br>五粮液</td><td>152.10</td><td>164.88</td><td>8d</td><td class="positive">+8.40%</td><td><span class="status">Tracking</span></td><td>···</td></tr>
+                <tr><td>002594.SZ<br>比亚迪</td><td>210.05</td><td>212.10</td><td>3d</td><td class="positive">+0.98%</td><td><span class="status">Tracking</span></td><td>···</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="lower-grid">
+            <article class="mini">
+              <div class="label">Backtest Task / 回测任务</div>
+              <div class="metric green">99%</div>
+              <p>策略：多因子增强 · 中证500<br>预计剩余 01:14s</p>
+              <div class="progress"><div class="track"><b style="--w:99%;--c:#9abaff"></b></div></div>
+            </article>
+            <article class="mini">
+              <div class="label">Strategy Risk / 策略风险</div>
+              <div class="metric orange">58.2%</div>
+              <div class="progress">
+                <div class="track"><b style="--w:72%;--c:#ffb071"></b></div>
+                <div class="track"><b style="--w:46%;--c:#91b7ff"></b></div>
+              </div>
+            </article>
+            <article class="mini">
+              <div class="label">Factor Score / 个股多因子</div>
+              <div class="radar" aria-hidden="true"></div>
+            </article>
+            <article class="mini">
+              <div class="label">Data Health / 数据健康度</div>
+              <div class="metric blue">99.8%</div>
+              <p>日线、估值、财务、实时快照同步正常。</p>
+            </article>
+            <article class="mini">
+              <div class="label">Task Logs / 实时任务日志</div>
+              <div class="timeline">
+                <div class="log"><span>[SUCCESS] Data cluster heartbeat sync.</span><b>11:08</b></div>
+                <div class="log"><span>[INFO] New block of trade data received.</span><b>11:06</b></div>
+                <div class="log warn"><span>[WARN] Strategy threshold touched.</span><b>10:58</b></div>
+              </div>
+            </article>
+            <article class="mini">
+              <div class="label">Stock Detail / 个股详情</div>
+              <div class="metric red">1,682.45 <span class="sub">+0.74%</span></div>
+              <p>分时曲线、估值、资金流、新闻舆情保持同一终端视觉语言。</p>
+            </article>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-title">
+      <div>
+        <h2>页面级预览补全</h2>
+        <p>补齐之前缺的产品闭环，同时保留现有页面已经有价值的业务模块：新版只重排信息层级和视觉语言，不砍首页的涨停池、热点主题、板块资金和最近跟踪。</p>
+      </div>
+      <div class="coverage">
+        <span>首页</span><span>涨停池</span><span>热点主题</span><span>板块资金</span><span>选股中心</span><span>个股详情</span><span>数据状态</span><span>策略管理</span><span>回测中心</span><span>空/失败状态</span><span>窄屏</span>
+      </div>
+    </section>
+
+    <section class="terminal-gallery" aria-label="新版页面级预览图册">
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">首页 <span>市场概览 / 热点主题 / 涨停池 / 板块资金 / 最近跟踪</span></div>
+          <span class="tab active">Home</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-kpis">
+            <div class="shot-kpi"><div class="label">市场强度</div><strong class="metric blue">62</strong></div>
+            <div class="shot-kpi"><div class="label">上涨/下跌</div><strong>3128 / 1884</strong></div>
+            <div class="shot-kpi"><div class="label">涨停/跌停</div><strong class="metric red">58 / 4</strong></div>
+            <div class="shot-kpi"><div class="label">行情时间</div><strong>14:30:05</strong></div>
+          </div>
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">今日优先关注</div><span class="status">Actionable</span></div>
+              <div class="dense-list">
+                <div class="dense-row"><div>海尔智家 <small>低波反转 · 入选第 3 天 · 实时收益 +1.86%</small></div><span class="score-pill">82.4</span></div>
+                <div class="dense-row"><div>中际旭创 <small>资金流共振 · 概念热度上行 · 新闻质量 A</small></div><span class="score-pill">79.8</span></div>
+                <div class="dense-row"><div>比亚迪 <small>已跟踪 · 接近止盈观察线 · 需复盘</small></div><span class="score-pill red">风险</span></div>
+              </div>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">热点主题</div><span class="status">15min</span></div>
+              <div class="dense-list">
+                <div class="dense-row"><div>机器人 <small>舆情共振 82 · 同花顺 76 · 关联 34 只</small></div><span class="score-pill">91.2</span></div>
+                <div class="dense-row"><div>电网设备 <small>资金净流入 18.6 亿 · 领涨 平高电气</small></div><span class="score-pill">86.5</span></div>
+                <div class="dense-row"><div>低空经济 <small>新闻 28 · 正 21 / 负 3 · 热度回升</small></div><span class="score-pill">78.9</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">短线情绪观察 · 连板池</div><span class="status exit">非正式策略</span></div>
+              <table class="compact-table">
+                <thead><tr><th>#</th><th>股票</th><th>高度</th><th>状态</th><th>涨幅</th><th>风险</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td>中通客车</td><td>4 连板</td><td>封板</td><td class="positive">+10.02%</td><td>高换手</td></tr>
+                  <tr><td>2</td><td>平高电气</td><td>2 连板</td><td>开板回封</td><td class="positive">+9.98%</td><td>放量</td></tr>
+                  <tr><td>3</td><td>万丰奥威</td><td>首板</td><td>午后封板</td><td class="positive">+10.01%</td><td>题材分歧</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">热点强势观察</div><span class="status">Watch</span></div>
+              <div class="dense-list">
+                <div class="dense-row"><div>冲板潜力 <small>水上强势 / 距板 3.2% / 资金确认</small></div><span class="score-pill">12</span></div>
+                <div class="dense-row"><div>分歧反包 <small>昨日断板但承接良好，观察回封</small></div><span class="score-pill">7</span></div>
+                <div class="dense-row"><div>风险过滤 <small>炸板率升高，避免高位一致性追涨</small></div><span class="score-pill red">偏热</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="shot-grid-3">
+            <div class="shot-panel"><div class="label">资金流入板块</div><div class="metric green">+28.4 亿</div><p>电网设备、机器人、半导体。</p></div>
+            <div class="shot-panel"><div class="label">资金流出板块</div><div class="metric red">-19.7 亿</div><p>白酒、地产链、煤炭。</p></div>
+            <div class="shot-panel"><div class="label">最近跟踪</div><div class="metric blue">18</div><p>默认只展示最需要看的 5 条。</p></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">选股中心 <span>运行策略 / 结果池 / 单条保存</span></div>
+          <span class="tab active">Selection</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">运行参数</div><button class="ghost">Run Preview</button></div>
+              <div class="shot-kpis">
+                <div class="shot-kpi"><div class="label">策略</div><strong>低波反转</strong></div>
+                <div class="shot-kpi"><div class="label">分数底线</div><strong class="metric blue">60</strong></div>
+                <div class="shot-kpi"><div class="label">最大入选</div><strong>3</strong></div>
+                <div class="shot-kpi"><div class="label">候选池</div><strong>全 A</strong></div>
+              </div>
+              <div class="reason-stack">
+                <div class="reason">运行后先进入预览池，不自动保存到跟踪复盘。</div>
+                <div class="reason warn">若 0 只达标，明确展示“无达标股”，不拿低分股票凑数。</div>
+              </div>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">因子解释</div><span class="status">V1</span></div>
+              <div class="dense-list">
+                <div class="dense-row"><div>低波动 <small>波动越低越好，避免追高噪音。</small></div><span>35%</span></div>
+                <div class="dense-row"><div>估值安全 <small>PE/PB 处于行业较低分位。</small></div><span>30%</span></div>
+                <div class="dense-row"><div>短线反转 <small>超跌后出现资金修复信号。</small></div><span>25%</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="shot-panel">
+            <div class="panel-head"><div class="panel-title">今日结果池</div><div class="tabs"><span class="tab active">达标 3</span><span class="tab">风险</span></div></div>
+            <table class="compact-table">
+              <thead><tr><th>排名</th><th>股票</th><th>入选价</th><th>最新价</th><th>总分</th><th>原因/风险</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr><td>#1</td><td>600690.SH 海尔智家</td><td>25.84</td><td>26.32</td><td class="positive">82.4</td><td>低波动、估值安全 / 净利同比承压</td><td><span class="status">保存跟踪</span></td></tr>
+                <tr><td>#2</td><td>000651.SZ 格力电器</td><td>42.10</td><td>42.36</td><td class="positive">76.9</td><td>分红质量、估值低 / 行业弹性弱</td><td><span class="status">保存跟踪</span></td></tr>
+                <tr><td>#3</td><td>601318.SH 中国平安</td><td>46.55</td><td>46.30</td><td>70.2</td><td>回撤充分、资金回流 / 利率敏感</td><td><span class="status">保存跟踪</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">个股详情增强 <span>为什么看 / 入选来源 / 跟踪动作</span></div>
+          <span class="tab active">Stock</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-kpis">
+            <div class="shot-kpi"><div class="label">实时价</div><strong>26.32</strong></div>
+            <div class="shot-kpi"><div class="label">入选价</div><strong>25.84</strong></div>
+            <div class="shot-kpi"><div class="label">区间收益</div><strong class="metric green">+1.86%</strong></div>
+            <div class="shot-kpi"><div class="label">策略分</div><strong class="metric blue">82.4</strong></div>
+          </div>
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">为什么值得看</div><span class="status">Rank #1</span></div>
+              <div class="reason-stack">
+                <div class="reason">低波动分位进入前 20%，适合震荡市防守型观察。</div>
+                <div class="reason">PE/PB 低于行业中位，估值安全边际较好。</div>
+                <div class="reason warn">净利同比仍偏弱，若基本面继续下修需退出跟踪。</div>
+              </div>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">入选来源</div><button class="ghost">进入复盘</button></div>
+              <div class="dense-list">
+                <div class="dense-row"><div>策略</div><span>低波反转</span></div>
+                <div class="dense-row"><div>选股日期</div><span>2026-06-08</span></div>
+                <div class="dense-row"><div>跟踪状态</div><span class="score-pill">已跟踪</span></div>
+                <div class="dense-row"><div>最近舆情</div><span class="score-pill">A / 79</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="shot-chart">
+            <svg viewBox="0 0 680 160" preserveAspectRatio="none" aria-hidden="true">
+              <polyline points="0,104 60,112 120,84 180,92 240,70 300,76 360,52 420,64 480,38 540,48 680,30" fill="none" stroke="#a9c7ff" stroke-width="3"/>
+              <polyline points="0,118 60,122 120,116 180,120 240,108 300,112 360,104 420,110 480,98 540,102 680,94" fill="none" stroke="#ffb071" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">数据状态增强 <span>异常原因 / 可行动建议 / 一键重跑</span></div>
+          <span class="tab active">System</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-kpis">
+            <div class="shot-kpi"><div class="label">日线覆盖</div><strong class="metric green">99.98%</strong></div>
+            <div class="shot-kpi"><div class="label">估值待处理</div><strong class="metric orange">33</strong></div>
+            <div class="shot-kpi"><div class="label">上游缺口</div><strong>1317</strong></div>
+            <div class="shot-kpi"><div class="label">任务失败</div><strong class="metric red">2</strong></div>
+          </div>
+          <div class="shot-panel">
+            <div class="panel-head"><div class="panel-title">需要处理的异常</div><span class="status exit">Needs Action</span></div>
+            <div class="action-line"><span>实时资金流列数变化，最近一次同步失败。</span><button>查看日志</button><button>重跑任务</button></div>
+            <div class="action-line"><span>同花顺概念热度字段名变更：缺少“日期”。</span><button>打开详情</button><button>标记观察</button></div>
+            <div class="action-line"><span>sh.600355 暂停上市，属于业务正常缺口。</span><button>查看快照</button><button>无需处理</button></div>
+          </div>
+          <div class="shot-grid-3">
+            <div class="shot-panel"><div class="label">数据源问题</div><div class="metric orange">上游</div><p>AkShare 返回 HTML 或空数据时进入缓存兜底。</p></div>
+            <div class="shot-panel"><div class="label">任务问题</div><div class="metric red">失败</div><p>展示脚本名、错误摘要、最近成功时间。</p></div>
+            <div class="shot-panel"><div class="label">业务正常</div><div class="metric green">忽略</div><p>停牌、暂停上市、EPS 不适用不算系统故障。</p></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">策略管理增强 <span>解释层 / 可执行状态 / 历史表现</span></div>
+          <span class="tab active">Strategies</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">低波反转</div><span class="status">可执行</span></div>
+              <div class="reason-stack">
+                <div class="reason">适合震荡和弱反弹市场，优先找低波、低估值、短期回撤充分的股票。</div>
+                <div class="reason warn">趋势单边下跌时容易过早入场，需要配合止损或跟踪复盘。</div>
+              </div>
+              <table class="compact-table">
+                <tbody>
+                  <tr><td>最近一次运行</td><td>2026-06-08 · 达标 3</td></tr>
+                  <tr><td>最近回测胜率</td><td class="positive">64.2%</td></tr>
+                  <tr><td>最大回撤</td><td class="negative">-5.24%</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">因子权重</div></div>
+              <div class="bars" style="height:220px;padding:24px 12px 18px">
+                <span class="bar blue" style="height:92%"></span>
+                <span class="bar blue" style="height:78%"></span>
+                <span class="bar" style="height:62%"></span>
+                <span class="bar" style="height:52%"></span>
+                <span class="bar red" style="height:35%"></span>
+              </div>
+            </div>
+          </div>
+          <div class="shot-grid-3">
+            <div class="shot-panel"><div class="label">可执行</div><div class="metric green">4</div><p>可直接运行并产出候选池。</p></div>
+            <div class="shot-panel"><div class="label">实验中</div><div class="metric orange">3</div><p>可看配置，不作为主入口。</p></div>
+            <div class="shot-panel"><div class="label">仅展示</div><div class="metric">2</div><p>保留说明，避免误运行。</p></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">回测中心增强 <span>任务队列 / 失败原因 / 交易明细</span></div>
+          <span class="tab active">Backtest</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-kpis">
+            <div class="shot-kpi"><div class="label">总收益</div><strong class="metric blue">18.4%</strong></div>
+            <div class="shot-kpi"><div class="label">胜率</div><strong>64.2%</strong></div>
+            <div class="shot-kpi"><div class="label">最大回撤</div><strong class="metric red">-5.24%</strong></div>
+            <div class="shot-kpi"><div class="label">交易数</div><strong>2482</strong></div>
+          </div>
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">任务历史</div><button class="ghost">New Run</button></div>
+              <div class="dense-list">
+                <div class="dense-row"><div>backtest_lowvol_20260609_001 <small>running · 68% · 预计 02:10</small></div><span class="score-pill">取消</span></div>
+                <div class="dense-row"><div>backtest_lowvol_20260608_003 <small>success · 2024-01-01 至 2026-06-08</small></div><span class="score-pill">查看</span></div>
+                <div class="dense-row"><div>backtest_theme_20260608_002 <small>failed · 数据输入层缺失 2026-06-07</small></div><span class="score-pill red">重试</span></div>
+              </div>
+            </div>
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">参数快照</div><span class="status">Reproducible</span></div>
+              <table class="compact-table">
+                <tbody><tr><td>策略</td><td>lowvol_reversal</td></tr><tr><td>持有期</td><td>3d</td></tr><tr><td>复权</td><td>不复权</td></tr><tr><td>基准</td><td>沪深300</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="shot-chart">
+            <svg viewBox="0 0 680 160" preserveAspectRatio="none" aria-hidden="true">
+              <polyline points="0,118 80,104 160,108 240,82 320,88 400,58 480,62 560,40 680,28" fill="none" stroke="#a9c7ff" stroke-width="3"/>
+              <polyline points="0,122 80,120 160,116 240,110 320,104 400,96 480,90 560,82 680,78" fill="none" stroke="#8d9aae" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">空状态与失败状态 <span>真实 V1 必备</span></div>
+          <span class="tab active">States</span>
+        </div>
+        <div class="shot-body">
+          <div class="state-grid">
+            <div class="state-card">
+              <div><strong>选股无达标股</strong><p>当前阈值 60，今日 0 只达标。可以降低阈值重新预览，但不会自动保存。</p></div>
+              <button class="ghost">调整阈值</button>
+            </div>
+            <div class="state-card">
+              <div><strong>暂无历史结果</strong><p>该策略还没有历史 run，先运行一次或切换到已有结果的策略。</p></div>
+              <button class="ghost">运行策略</button>
+            </div>
+            <div class="state-card">
+              <div><strong>AI 复盘不可用</strong><p>当前未配置 AI Key，详细复盘按钮置灰，普通跟踪数据仍可查看。</p></div>
+              <button class="ghost">查看配置</button>
+            </div>
+          </div>
+          <div class="state-grid">
+            <div class="state-card">
+              <div><strong>数据同步失败</strong><p>显示脚本名、失败时间、错误摘要，提供重跑入口。</p></div>
+              <button class="ghost">重跑任务</button>
+            </div>
+            <div class="state-card">
+              <div><strong>回测任务失败</strong><p>保留参数快照与失败原因，支持复制 run_id 和重试。</p></div>
+              <button class="ghost">重试</button>
+            </div>
+            <div class="state-card">
+              <div><strong>合法缺口</strong><p>停牌、暂停上市、PE 不适用等单独标记，不混进系统故障。</p></div>
+              <button class="ghost">查看说明</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="terminal-shot">
+        <div class="shot-head">
+          <div class="shot-title">窄屏适配 <span>笔记本 / 移动端信息压缩</span></div>
+          <span class="tab active">Responsive</span>
+        </div>
+        <div class="shot-body">
+          <div class="shot-grid-2">
+            <div class="shot-panel">
+              <div class="panel-head"><div class="panel-title">桌面端压缩策略</div></div>
+              <div class="reason-stack">
+                <div class="reason">左侧导航可折叠成图标栏，顶部行情条横向滚动。</div>
+                <div class="reason">大表格保留关键列：股票、分数、收益、状态、操作；明细进抽屉。</div>
+                <div class="reason warn">图表和右侧解释面板上下堆叠，避免 1280 宽横向爆炸。</div>
+              </div>
+            </div>
+            <div class="phone-preview" aria-hidden="true">
+              <div class="label">Mobile Preview</div>
+              <div class="shot-kpis">
+                <div class="shot-kpi"><div class="label">市场</div><strong>62</strong></div>
+                <div class="shot-kpi"><div class="label">提醒</div><strong class="metric orange">3</strong></div>
+              </div>
+              <div class="phone-line"></div><div class="phone-line"></div><div class="phone-line"></div><div class="phone-line"></div>
+              <div class="shot-chart" style="min-height:120px;margin-top:10px">
+                <svg viewBox="0 0 200 120" preserveAspectRatio="none"><polyline points="0,92 40,74 80,82 120,52 160,58 200,36" fill="none" stroke="#a9c7ff" stroke-width="3"/></svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+    <p class="footnote">预览稿只用于视觉方向讨论，数值为示例。后续落地时应先改公共布局、导航和卡片系统，再逐页接真实接口。</p>
+  </main>
+</body>
+</html>

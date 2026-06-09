@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.error_learning.tracker import SelectionResultTracker
+from app.market_timing.service import build_market_timing_signal
 from app.shared.db import mysql_conn
 
 router = APIRouter(tags=["dashboard"])
@@ -1312,9 +1313,12 @@ def dashboard_summary(limit: Annotated[int, Query(ge=1, le=20)] = 5) -> dict:
             ],
         }
 
+    market_overview = _dashboard_market_overview()
+
     return {
         "latest_trade_date": latest_trade_date,
-        "market_overview": _dashboard_market_overview(),
+        "market_overview": market_overview,
+        "market_timing": build_market_timing_signal(market_overview),
         "hot_themes": _dashboard_hot_themes(limit=8),
         "emotion_board": _dashboard_emotion_board(limit=10),
         "latest_tracking_count": len(preview_items),

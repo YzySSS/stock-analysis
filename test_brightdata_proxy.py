@@ -12,13 +12,16 @@ import time
 # Bright Data 代理配置
 PROXY_HOST = "brd.superproxy.io"
 PROXY_PORT = "33335"
-PROXY_USER = "brd-customer-hl_8abbb7fa-zone-isp_proxy1"
-PROXY_PASS = "1chayfaf4h24"
+PROXY_USER = os.getenv("BRD_PROXY_USER", "")
+PROXY_PASS = os.getenv("BRD_PROXY_PASS", "")
 
 # SSL 证书路径
 CERT_PATH = os.path.join(os.path.dirname(__file__), "brightdata_ca.crt")
 
 # 构建代理 URL
+if not PROXY_USER or not PROXY_PASS:
+    raise SystemExit("请先设置 BRD_PROXY_USER 和 BRD_PROXY_PASS")
+
 PROXY_URL = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}:{PROXY_PORT}"
 
 # 设置环境变量代理

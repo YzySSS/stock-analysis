@@ -35,8 +35,8 @@ export FEISHU_APP_SECRET="xxxxxxxx"
 # 启用的策略版本（逗号分隔）
 export ENABLED_STRATEGIES="V10"
 
-# 多维表格 Token（默认已配置）
-export FEISHU_BITABLE_TOKEN="ZRR7bcleZanrLUsSG4zcYGoRnwh"
+# 多维表格 Token
+export FEISHU_BITABLE_TOKEN="your-bitable-app-token"
 ```
 
 ### 2. 初始化数据表
@@ -189,7 +189,7 @@ update_stock_prices('V10', '2025-03-31', '000001',
 
 ### 分享多维表格给应用
 
-1. 打开多维表格：https://my.feishu.cn/base/ZRR7bcleZanrLUsSG4zcYGoRnwh
+1. 打开你的飞书多维表格
 2. 点击右上角「分享」
 3. 添加应用为「可编辑」权限
 

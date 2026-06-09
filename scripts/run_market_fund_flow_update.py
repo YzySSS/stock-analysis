@@ -76,6 +76,14 @@ def clean_text(value: Any, limit: int = 128) -> str | None:
     return text[:limit] if text else None
 
 
+def row_value(item: Any, candidates: list[str]) -> Any:
+    for key in candidates:
+        value = item.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def acquire_lock() -> bool:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -96,14 +104,23 @@ def fetch_rows(now: datetime, include_concept: bool = True) -> list[FundFlowRow]
     quote_minute = minute_floor(now).strftime("%Y-%m-%d %H:%M:%S")
     quote_time = now.strftime("%Y-%m-%d %H:%M:%S")
     trade_date = now.date().isoformat()
-    sources: list[tuple[str, Any]] = [("industry", ak.stock_fund_flow_industry(symbol="即时"))]
+    fetchers: list[tuple[str, Any]] = [("industry", ak.stock_fund_flow_industry)]
     if include_concept:
-        sources.append(("concept", ak.stock_fund_flow_concept(symbol="即时")))
+        fetchers.append(("concept", ak.stock_fund_flow_concept))
 
     rows: list[FundFlowRow] = []
-    for sector_type, df in sources:
+    errors: list[str] = []
+    for sector_type, fetcher in fetchers:
+        try:
+            df = fetcher(symbol="即时")
+        except Exception as exc:
+            errors.append(f"{sector_type}: {type(exc).__name__}: {str(exc)[:160]}")
+            continue
+        if df is None or getattr(df, "empty", False):
+            errors.append(f"{sector_type}: empty response")
+            continue
         for _, item in df.iterrows():
-            name = clean_text(item.get("行业"))
+            name = clean_text(row_value(item, ["行业", "概念", "板块", "名称"]))
             if not name:
                 continue
             rows.append(
@@ -113,18 +130,22 @@ def fetch_rows(now: datetime, include_concept: bool = True) -> list[FundFlowRow]
                     trade_date=trade_date,
                     quote_time=quote_time,
                     quote_minute=quote_minute,
-                    rank_no=to_int(item.get("序号")),
-                    sector_index=to_float(item.get("行业指数")),
-                    pct_chg=to_float(item.get("行业-涨跌幅")),
-                    inflow_amount=to_float(item.get("流入资金")),
-                    outflow_amount=to_float(item.get("流出资金")),
-                    net_amount=to_float(item.get("净额")),
-                    company_count=to_int(item.get("公司家数")),
-                    leading_stock=clean_text(item.get("领涨股"), 64),
-                    leading_stock_pct_chg=to_float(item.get("领涨股-涨跌幅")),
-                    leading_stock_price=to_float(item.get("当前价")),
+                    rank_no=to_int(row_value(item, ["序号", "排名"])),
+                    sector_index=to_float(row_value(item, ["行业指数", "板块指数", "指数"])),
+                    pct_chg=to_float(row_value(item, ["行业-涨跌幅", "涨跌幅", "板块涨跌幅"])),
+                    inflow_amount=to_float(row_value(item, ["流入资金", "主力流入", "净流入"])),
+                    outflow_amount=to_float(row_value(item, ["流出资金", "主力流出"])),
+                    net_amount=to_float(row_value(item, ["净额", "净流入", "主力净流入"])),
+                    company_count=to_int(row_value(item, ["公司家数", "股票家数", "成分股数量"])),
+                    leading_stock=clean_text(row_value(item, ["领涨股", "龙头股"]), 64),
+                    leading_stock_pct_chg=to_float(row_value(item, ["领涨股-涨跌幅", "领涨股涨跌幅"])),
+                    leading_stock_price=to_float(row_value(item, ["当前价", "领涨股最新价"])),
                 )
             )
+    if not rows and errors:
+        raise RuntimeError("; ".join(errors))
+    if errors:
+        print(json.dumps({"status": "partial_source_warning", "errors": errors}, ensure_ascii=False), file=sys.stderr)
     return rows
 
 

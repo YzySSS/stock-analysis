@@ -148,12 +148,14 @@ function renderReviewNotes(filteredSummary = {}, strategySummaries = [], pageIte
 }
 
 let lastTrackingState = {
+  runId: '',
   strategyId: '',
   limit: 10,
   instrumentType: 'stock',
   selectionDate: '',
   offset: 0,
   deepReview: null,
+  deepReviewAvailable: false,
 };
 
 function renderDeepReviewAnalysis(result) {
@@ -170,6 +172,25 @@ function renderDeepReviewAnalysis(result) {
       <pre class="deep-review-text">${escapeHtml(analysis)}</pre>
     </article>
   `;
+}
+
+async function loadDeepReviewStatus() {
+  const button = qs('#tracking-deep-review');
+  if (!button) return;
+  try {
+    const status = await fetchJson('/api/tracking/deep-review/status');
+    lastTrackingState.deepReviewAvailable = Boolean(status.available);
+    button.disabled = !status.available;
+    button.textContent = status.available ? '详细复盘' : 'AI复盘未配置';
+    button.title = status.available
+      ? `使用 ${status.model || 'DeepSeek'} 生成详细复盘`
+      : (status.message || '未配置 AI 复盘密钥');
+  } catch (error) {
+    lastTrackingState.deepReviewAvailable = false;
+    button.disabled = true;
+    button.textContent = 'AI复盘不可用';
+    button.title = error.message;
+  }
 }
 
 function renderTrackingTable(items, summary = {}) {
@@ -327,7 +348,7 @@ async function loadTrackingFilters(strategyId, instrumentType = 'stock') {
   return fetchJson(`/api/tracking/filters?${query.toString()}`);
 }
 
-async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 'stock', selectionDate = '', offset = 0 } = {}) {
+async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instrumentType = 'stock', selectionDate = '', offset = 0 } = {}) {
   const summaryText = qs('#tracking-summary-text');
   if (summaryText) summaryText.textContent = '加载中...';
 
@@ -340,6 +361,7 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
   renderSelectionDateOptions(selectionDates, effectiveSelectionDate);
 
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset), instrument_type: instrumentType });
+  if (runId) query.set('run_id', runId);
   if (strategyId) query.set('strategy_id', strategyId);
   if (effectiveSelectionDate) query.set('selection_date', effectiveSelectionDate);
 
@@ -349,13 +371,24 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
   const pageSummary = data.summary || {};
   const strategySummaries = data.strategy_summaries || [];
   const pagination = data.pagination || {};
-  lastTrackingState = { strategyId, limit, instrumentType, selectionDate: effectiveSelectionDate, offset, deepReview: null };
+  lastTrackingState = {
+    runId,
+    strategyId,
+    limit,
+    instrumentType,
+    selectionDate: effectiveSelectionDate,
+    offset,
+    deepReview: null,
+    deepReviewAvailable: lastTrackingState.deepReviewAvailable,
+  };
   renderTrackingTable(items, filteredSummary);
   updateTrackingStats(filteredSummary, items);
   renderReviewSummary(filteredSummary, strategySummaries, items);
   renderReviewNotes(filteredSummary, strategySummaries, items);
   renderPagination(pagination, limit);
-  const modeText = effectiveSelectionDate
+  const modeText = runId
+      ? '当前显示该轮选股的复盘结果'
+      : effectiveSelectionDate
       ? `当前显示 ${effectiveSelectionDate} 的复盘结果`
       : strategyId
         ? '当前显示该策略全部历史复盘列表'
@@ -367,6 +400,10 @@ async function loadTrackingData({ strategyId = '', limit = 10, instrumentType = 
 async function runDeepReview() {
   const button = qs('#tracking-deep-review');
   const summaryText = qs('#tracking-summary-text');
+  if (!lastTrackingState.deepReviewAvailable) {
+    if (summaryText) summaryText.textContent = '详细复盘不可用：未配置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY';
+    return;
+  }
   if (button) {
     button.disabled = true;
     button.textContent = '复盘中...';
@@ -379,6 +416,7 @@ async function runDeepReview() {
       body: JSON.stringify({
         strategy_id: lastTrackingState.strategyId || null,
         selection_date: lastTrackingState.selectionDate || null,
+        run_id: lastTrackingState.runId || null,
         instrument_type: lastTrackingState.instrumentType || 'stock',
         max_items: 80,
       }),
@@ -421,6 +459,7 @@ async function toggleTrackingStats(button) {
       : `已将 ${code} 标记为不统计`;
     await loadTrackingData({
       strategyId: lastTrackingState.strategyId,
+      runId: lastTrackingState.runId,
       limit: lastTrackingState.limit,
       instrumentType,
       selectionDate: lastTrackingState.selectionDate,
@@ -452,6 +491,7 @@ async function deleteTrackingItem(button) {
     qs('#tracking-summary-text').textContent = `已删除 ${code} 的复盘记录`;
     await loadTrackingData({
       strategyId: lastTrackingState.strategyId,
+      runId: lastTrackingState.runId,
       limit: lastTrackingState.limit,
       instrumentType,
       selectionDate: lastTrackingState.selectionDate,
@@ -485,6 +525,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   strategySelect?.addEventListener('change', async () => {
     await loadTrackingData({
       strategyId: strategySelect.value || '',
+      runId: '',
       limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: dateSelect?.value || lastTrackingState.selectionDate || '',
@@ -496,6 +537,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncDateInputShell();
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
+      runId: '',
       limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: dateSelect.value || '',
@@ -507,6 +549,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   pageSizeSelect?.addEventListener('change', async () => {
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
+      runId: '',
       limit: Number(pageSizeSelect.value || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: dateSelect?.value || '',
@@ -517,6 +560,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   refreshBtn?.addEventListener('click', async () => {
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
+      runId: lastTrackingState.runId,
       limit: Number(pageSizeSelect?.value || lastTrackingState.limit || 10),
       instrumentType: lastTrackingState.instrumentType,
       selectionDate: dateSelect?.value || '',
@@ -537,7 +581,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     if (pageSizeSelect) pageSizeSelect.value = '10';
-    await loadTrackingData({ limit: 10, offset: 0 });
+    await loadDeepReviewStatus();
+    const params = new URLSearchParams(window.location.search);
+    await loadTrackingData({
+      runId: params.get('run_id') || '',
+      strategyId: params.get('strategy_id') || '',
+      selectionDate: params.get('selection_date') || '',
+      limit: 10,
+      offset: 0,
+    });
   } catch (error) {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
     qs('#tracking-results-body').innerHTML = renderEmptyRow(13, error.message);

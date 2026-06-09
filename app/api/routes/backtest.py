@@ -91,6 +91,8 @@ def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str
         "fund_chip_repair": "资金筹码修复选股",
         "quality_lowvol": "质量低波选股",
         "leader_tactics": "龙头战法选股",
+        "low_position_resonance": "低位共振修复",
+        "multi_timeframe_resonance": "多周期共振",
         "a_share_sentiment": "A股舆情选股",
     }
     base = base_names.get(strategy_id or "", strategy_id or "-")

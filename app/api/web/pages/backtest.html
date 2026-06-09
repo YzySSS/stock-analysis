@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260513d" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260605a" />
 </head>
 <body data-page="backtest">
   <div class="app-shell dashboard-shell">
@@ -46,6 +46,8 @@
               <option value="fund_chip_repair">资金筹码修复选股</option>
               <option value="quality_lowvol">质量低波选股</option>
               <option value="leader_tactics">龙头战法选股</option>
+              <option value="low_position_resonance">低位共振修复</option>
+              <option value="multi_timeframe_resonance">多周期共振</option>
             </select>
           </div>
           <div class="terminal-form-field return-field">
@@ -81,6 +83,9 @@
           <details class="backtest-advanced-settings">
             <summary>高级设置</summary>
             <div class="backtest-advanced-grid">
+              <button id="backtest-ashare-realistic-preset" class="btn btn-secondary backtest-preset-button wide" type="button">
+                应用 A 股真实化预设
+              </button>
               <label class="inline-checkbox backtest-adjusted-toggle wide" for="backtest-use-adjusted-price">
                 <input id="backtest-use-adjusted-price" type="checkbox" />
                 <span>
@@ -156,7 +161,21 @@
             <div class="stat-label">胜率</div>
             <div id="backtest-stat-win-rate" class="stat-value">-</div>
           </article>
+          <article class="stat-card">
+            <div class="stat-label">Sharpe</div>
+            <div id="backtest-stat-sharpe" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Sortino</div>
+            <div id="backtest-stat-sortino" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Calmar</div>
+            <div id="backtest-stat-calmar" class="stat-value">-</div>
+          </article>
         </section>
+
+        <section id="backtest-execution-summary" class="card backtest-execution-summary" hidden></section>
 
         <div class="backtest-analysis-grid">
           <article class="card backtest-equity-card">
@@ -243,6 +262,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/backtest.js?v=20260513d"></script>
+  <script src="/static/js/backtest.js?v=20260605a"></script>
 </body>
 </html>

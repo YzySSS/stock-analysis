@@ -801,7 +801,6 @@ function renderSelectionHistory(items) {
             <th>策略</th>
             <th>分数</th>
             <th>排名</th>
-            <th>run_id</th>
           </tr>
         </thead>
         <tbody>
@@ -811,7 +810,6 @@ function renderSelectionHistory(items) {
               <td>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')}</td>
               <td>${formatNumber(item.score, 4)}</td>
               <td>${escapeHtml(item.rank_no ?? '-')}</td>
-              <td>${escapeHtml(item.run_id || '-')}</td>
             </tr>
           `).join('')}
         </tbody>

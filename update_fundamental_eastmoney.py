@@ -2,6 +2,7 @@
 """
 使用Bright Data代理重新获取东方财富PE/PB数据
 """
+import os
 import sys
 sys.path.insert(0, '/root/.openclaw/workspace/股票分析项目/src')
 
@@ -12,10 +13,12 @@ import time
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-# Bright Data代理配置
-PROXY_URL = "http://brd-customer-hl_8abbb7fa-zone-isp_proxy1:1chayfaf4h24@brd.superproxy.io:33335"
+# Bright Data代理配置：从环境变量读取，避免把代理凭据写进仓库。
+PROXY_URL = os.getenv("BRD_PROXY_URL") or os.getenv("BRIGHTDATA_PROXY_URL") or ""
 
 def get_proxy():
+    if not PROXY_URL:
+        return None
     return {
         'http': PROXY_URL,
         'https': PROXY_URL

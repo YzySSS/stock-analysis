@@ -60,6 +60,14 @@ def clean_text(value: Any, limit: int = 512) -> str | None:
     return text[:limit] if text else None
 
 
+def row_value(item: Any, candidates: list[str]) -> Any:
+    for key in candidates:
+        value = item.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def parse_date(value: Any) -> str | None:
     text = clean_text(value, 32)
     if not text:
@@ -112,23 +120,29 @@ def release_lock() -> None:
 def fetch_rows(now: datetime) -> list[ThsConceptHotRow]:
     import akshare as ak
 
-    summary_df = ak.stock_board_concept_summary_ths()
+    summary_error: str | None = None
+    try:
+        summary_df = ak.stock_board_concept_summary_ths()
+    except Exception as exc:
+        summary_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        summary_df = None
     name_df = ak.stock_board_concept_name_ths()
     code_by_name = {
-        clean_text(item.get("name"), 128): clean_text(item.get("code"), 32)
+        clean_text(row_value(item, ["name", "概念名称", "板块名称", "名称"]), 128): clean_text(row_value(item, ["code", "概念代码", "代码"]), 32)
         for _, item in name_df.iterrows()
-        if clean_text(item.get("name"), 128)
+        if clean_text(row_value(item, ["name", "概念名称", "板块名称", "名称"]), 128)
     }
     quote_time = now.strftime("%Y-%m-%d %H:%M:%S")
     rows: list[ThsConceptHotRow] = []
-    for _, item in summary_df.iterrows():
-        name = clean_text(item.get("概念名称"), 128)
+    source_df = summary_df if summary_df is not None and not getattr(summary_df, "empty", False) else name_df
+    for _, item in source_df.iterrows():
+        name = clean_text(row_value(item, ["概念名称", "name", "板块名称", "名称"]), 128)
         if not name:
             continue
-        summary_date = parse_date(item.get("日期"))
-        driver_event = clean_text(item.get("驱动事件"), 512)
-        leading_stock = clean_text(item.get("龙头股"), 128)
-        member_count = to_int(item.get("成分股数量"))
+        summary_date = parse_date(row_value(item, ["日期", "summary_date", "更新时间", "时间"]))
+        driver_event = clean_text(row_value(item, ["驱动事件", "事件", "原因"]), 512)
+        leading_stock = clean_text(row_value(item, ["龙头股", "领涨股"]), 128)
+        member_count = to_int(row_value(item, ["成分股数量", "成份股数量", "股票数量", "公司家数"]))
         rows.append(
             ThsConceptHotRow(
                 concept_name=name,
@@ -141,6 +155,8 @@ def fetch_rows(now: datetime) -> list[ThsConceptHotRow]:
                 ths_score=score_row(summary_date, driver_event, leading_stock, member_count, now),
             )
         )
+    if summary_error:
+        print(json.dumps({"status": "summary_source_warning", "error": summary_error}, ensure_ascii=False), file=sys.stderr)
     return rows
 
 

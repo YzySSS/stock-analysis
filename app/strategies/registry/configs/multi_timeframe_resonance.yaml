@@ -1,0 +1,46 @@
+selection:
+  max_picks: 3
+  score_threshold: 60
+
+hard_filters:
+  min_price: 3
+  max_price: 180
+  min_amount: 80000000
+
+factors:
+  daily_trend:
+    name: 日线方向
+    category: trend
+    direction: positive
+    weight: 0.22
+    description: 用收盘价相对MA20/MA60以及MA20-MA60强弱判断日线主方向。
+  medium_cycle:
+    name: 中周期结构
+    category: trend
+    direction: positive
+    weight: 0.18
+    description: 用近20日收益和相对MA20位置代理中周期是否处于健康上行或修复。
+  short_cycle_trigger:
+    name: 短周期触发
+    category: momentum
+    direction: positive
+    weight: 0.18
+    description: 用近5日收益、当日涨跌和温和放量代理短周期入场触发。
+  fund_flow:
+    name: 资金确认
+    category: moneyflow
+    direction: positive
+    weight: 0.18
+    description: 日级与实时资金净流入增强多周期共振的可信度。
+  market_context:
+    name: 市场环境
+    category: market
+    direction: positive
+    weight: 0.10
+    description: 市场强度越高，多周期趋势延续的胜率越好。
+  risk_control:
+    name: 风险约束
+    category: risk
+    direction: positive
+    weight: 0.14
+    description: 控制过度偏离、过高波动和异常换手，避免共振变成追高。

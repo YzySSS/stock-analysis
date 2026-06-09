@@ -69,6 +69,21 @@ def pages_image2_ui_reference_page() -> FileResponse:
     return serve_page("ui-pages-preview.html")
 
 
+@router.get("/ui-reference/terminal", include_in_schema=False)
+def terminal_ui_reference_page() -> FileResponse:
+    return serve_page("ui-terminal-preview.html")
+
+
+@router.api_route("/preview", methods=["GET", "HEAD"], include_in_schema=False)
+def preview_page() -> FileResponse:
+    return serve_page("ui-terminal-preview.html")
+
+
+@router.api_route("/ui-preview", methods=["GET", "HEAD"], include_in_schema=False)
+def ui_preview_page() -> FileResponse:
+    return serve_page("ui-terminal-preview.html")
+
+
 @router.get("/ui-reference/simple", include_in_schema=False)
 def simple_image2_ui_reference_page() -> FileResponse:
     return serve_page("ui-simple-preview.html")

@@ -117,7 +117,22 @@ def release_lock() -> None:
 def fetch_rows(now: datetime) -> list[RealtimeMoneyflowRow]:
     import akshare as ak
 
-    df = ak.stock_fund_flow_individual(symbol="即时")
+    try:
+        df = ak.stock_fund_flow_individual(symbol="即时")
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "source_unavailable",
+                    "source": SOURCE,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:300],
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return []
     quote_time = now.strftime("%Y-%m-%d %H:%M:%S")
     quote_minute = minute_floor(now).strftime("%Y-%m-%d %H:%M:%S")
     trade_date = now.date().isoformat()

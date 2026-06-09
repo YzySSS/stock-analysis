@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260526f" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260609b" />
 </head>
 <body data-page="home">
   <div class="app-shell dashboard-shell">
@@ -86,6 +86,28 @@
               </div>
               <small id="home-market-countdown" class="market-time-countdown">距离早盘 --:--:--</small>
             </article>
+          </section>
+
+          <section class="home-market-timing-section">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Market Timing</p>
+                <h2>市场择时</h2>
+              </div>
+              <span id="home-market-timing-summary" class="muted">加载中...</span>
+            </div>
+            <div class="home-market-timing-grid">
+              <article class="home-market-timing-main" id="home-market-timing-main">
+                <span>仓位上限</span>
+                <strong id="home-market-timing-position">-</strong>
+                <b id="home-market-timing-state">加载中...</b>
+                <small id="home-market-timing-action">等待市场快照</small>
+              </article>
+              <div id="home-market-timing-signals" class="home-market-timing-signals">
+                <div class="empty-state">加载中...</div>
+              </div>
+            </div>
+            <div id="home-market-timing-reasons" class="home-market-timing-reasons"></div>
           </section>
 
           <section class="home-hot-theme-section">
@@ -170,6 +192,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/home.js?v=20260526f"></script>
+  <script src="/static/js/home.js?v=20260609c"></script>
 </body>
 </html>

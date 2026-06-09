@@ -13,7 +13,7 @@ from typing import List, Dict, Optional
 # ============ 配置 ============
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
-BITABLE_APP_TOKEN = "ZRR7bcleZanrLUsSG4zcYGoRnwh"
+BITABLE_APP_TOKEN = os.getenv("FEISHU_BITABLE_TOKEN", "")
 
 class FeishuBitable:
     def __init__(self, app_id: str, app_secret: str):
@@ -298,10 +298,11 @@ def main():
     app_id = os.getenv("FEISHU_APP_ID")
     app_secret = os.getenv("FEISHU_APP_SECRET")
     
-    if not app_id or not app_secret:
-        print("请设置环境变量 FEISHU_APP_ID 和 FEISHU_APP_SECRET")
+    if not app_id or not app_secret or not BITABLE_APP_TOKEN:
+        print("请设置环境变量 FEISHU_APP_ID、FEISHU_APP_SECRET 和 FEISHU_BITABLE_TOKEN")
         print("示例: export FEISHU_APP_ID=cli_xxx")
         print("       export FEISHU_APP_SECRET=xxx")
+        print("       export FEISHU_BITABLE_TOKEN=your-bitable-app-token")
         return
     
     # 初始化

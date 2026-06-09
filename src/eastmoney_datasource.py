@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 # 支持通过环境变量配置代理
 BRD_PROXY_HOST = os.getenv('BRD_PROXY_HOST', 'brd.superproxy.io')
 BRD_PROXY_PORT = os.getenv('BRD_PROXY_PORT', '33335')
-BRD_PROXY_USER = os.getenv('BRD_PROXY_USER', 'brd-customer-hl_8abbb7fa-zone-isp_proxy1')
-BRD_PROXY_PASS = os.getenv('BRD_PROXY_PASS', '1chayfaf4h24')
+BRD_PROXY_USER = os.getenv('BRD_PROXY_USER', '')
+BRD_PROXY_PASS = os.getenv('BRD_PROXY_PASS', '')
 USE_PROXY = os.getenv('USE_PROXY', 'false').lower() == 'true'
 
-PROXY_URL = f"http://{BRD_PROXY_USER}:{BRD_PROXY_PASS}@{BRD_PROXY_HOST}:{BRD_PROXY_PORT}"
+PROXY_URL = f"http://{BRD_PROXY_USER}:{BRD_PROXY_PASS}@{BRD_PROXY_HOST}:{BRD_PROXY_PORT}" if BRD_PROXY_USER and BRD_PROXY_PASS else ""
 
 # 创建全局 session
 _session = requests.Session()
@@ -40,8 +40,11 @@ _session.headers.update({
 
 # 如果使用代理，设置代理
 if USE_PROXY:
-    _session.proxies = {'http': PROXY_URL, 'https': PROXY_URL}
-    logger.info("✅ 已启用 Bright Data 代理")
+    if PROXY_URL:
+        _session.proxies = {'http': PROXY_URL, 'https': PROXY_URL}
+        logger.info("✅ 已启用 Bright Data 代理")
+    else:
+        logger.warning("USE_PROXY=true 但未设置 BRD_PROXY_USER/BRD_PROXY_PASS，代理未启用")
 else:
     logger.info("ℹ️ 未使用代理")
 

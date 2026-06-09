@@ -19,7 +19,7 @@ except ImportError:
 # 配置
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
-BITABLE_APP_TOKEN = os.getenv("FEISHU_BITABLE_TOKEN", "ZRR7bcleZanrLUsSG4zcYGoRnwh")
+BITABLE_APP_TOKEN = os.getenv("FEISHU_BITABLE_TOKEN", "")
 
 # 策略配置：名称和启用状态
 # 可以通过环境变量覆盖，如：ENABLED_STRATEGIES=V9,V10
@@ -78,6 +78,8 @@ class FeishuBitableClient:
         self.app_id = FEISHU_APP_ID
         self.app_secret = FEISHU_APP_SECRET
         self.app_token = BITABLE_APP_TOKEN
+        if not self.app_token:
+            raise RuntimeError("FEISHU_BITABLE_TOKEN is required")
         self._token = None
         self._tables_cache = {}
     

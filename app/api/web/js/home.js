@@ -243,6 +243,89 @@ function renderMarketOverview(overview) {
   renderSectorList('#home-weak-sectors', overview.weak_sectors, '暂无弱势板块统计');
 }
 
+function timingSignalClass(signal) {
+  const n = Number(signal || 0);
+  if (n > 0) return 'positive';
+  if (n < 0) return 'negative';
+  return 'neutral';
+}
+
+function formatTimingValue(signal) {
+  if (!signal) return '-';
+  if (signal.value_label != null) return signal.value_label;
+  const value = signal.value;
+  if (value == null) return '-';
+  if (typeof value === 'object') {
+    if (value.limit_up != null && value.limit_down != null) return `${value.limit_up}/${value.limit_down}`;
+    return '-';
+  }
+  if (signal.dimension === 'capital') return `${(Number(value) * 100).toFixed(1)}%`;
+  return Number(value).toFixed(signal.dimension === 'trend' ? 1 : 1);
+}
+
+function renderFactorCoverage(items = []) {
+  if (!items.length) return '';
+  const statusClass = (status) => {
+    if (status === '已接入') return 'ready';
+    if (status === '待接入' || status === '待数据' || status === '待权限') return 'pending';
+    if (String(status || '').startsWith('V2')) return 'future';
+    return 'missing';
+  };
+  return `
+    <div class="home-market-timing-coverage">
+      ${items.slice(0, 8).map((item) => `
+        <span class="${statusClass(item.status)}"
+          title="${escapeHtml(item.reason || '')}">
+          ${escapeHtml(item.factor || '-')}：${escapeHtml(item.status || '-')}
+        </span>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderMarketTiming(timing) {
+  const summary = qs('#home-market-timing-summary');
+  const main = qs('#home-market-timing-main');
+  const signals = qs('#home-market-timing-signals');
+  const reasons = qs('#home-market-timing-reasons');
+  if (!timing) {
+    if (summary) summary.textContent = '暂无择时信号';
+    if (signals) signals.innerHTML = '<div class="empty-state">暂无择时信号</div>';
+    return;
+  }
+
+  const stateClass = timing.state || 'cautious';
+  if (summary) summary.textContent = `${timing.model_name || '市场择时'} · ${timing.as_of || '-'}`;
+  if (main) main.className = `home-market-timing-main ${stateClass}`;
+  setText('#home-market-timing-position', timing.position_upper_pct == null ? '-' : `${Number(timing.position_upper_pct).toFixed(0)}%`);
+  setText('#home-market-timing-state', `${timing.state_label || '-'} · ${formatNumber(timing.timing_score, 1)}分`);
+  setText('#home-market-timing-action', timing.action_label || '-');
+
+  if (signals) {
+    const items = timing.signals || [];
+    signals.innerHTML = items.length ? items.map((item) => `
+      <article class="home-market-timing-signal ${timingSignalClass(item.signal)}">
+        <span>${escapeHtml(item.label || item.dimension || '-')}</span>
+        <strong>${formatNumber(item.score, 1)}</strong>
+        <b>${escapeHtml(item.signal_label || '-')}</b>
+        <small>${escapeHtml(item.article_dimension || '')} · 原始值 ${escapeHtml(formatTimingValue(item))} · ${escapeHtml(item.source_status || '已接入')}</small>
+      </article>
+    `).join('') : '<div class="empty-state">暂无维度信号</div>';
+  }
+
+  if (reasons) {
+    const reasonList = (timing.reasons || []).slice(0, 4);
+    const riskList = (timing.risk_notes || []).slice(0, 2);
+    reasons.innerHTML = `
+      <div class="home-market-timing-reason-list">
+        ${reasonList.map((item) => `<span>${escapeHtml(item)}</span>`).join('') || '<span>暂无解释</span>'}
+      </div>
+      ${renderFactorCoverage(timing.article_factor_coverage || [])}
+      ${riskList.length ? `<div class="home-market-timing-risk">${riskList.map(escapeHtml).join('；')}</div>` : ''}
+    `;
+  }
+}
+
 function renderTrackingCards(items = []) {
   if (!items.length) return '<div class="empty-state">暂无跟踪数据。可以先去选股中心运行一次策略。</div>';
   return items.map((item) => {
@@ -464,6 +547,7 @@ async function loadHomePage() {
     const data = await fetchJson('/api/dashboard/summary?limit=8');
     const items = data.latest_tracking_preview || [];
     renderMarketOverview(data.market_overview);
+    renderMarketTiming(data.market_timing);
     renderHotThemes(data.hot_themes || {});
     renderEmotionBoard(data.emotion_board || {});
 
@@ -477,6 +561,9 @@ async function loadHomePage() {
     trackingPreview.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     setText('#home-emotion-summary', '加载失败');
     setText('#home-hot-theme-summary', '加载失败');
+    setText('#home-market-timing-summary', '加载失败');
+    const timingSignals = qs('#home-market-timing-signals');
+    if (timingSignals) timingSignals.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     const hotThemeContainer = qs('#home-hot-themes');
     if (hotThemeContainer) hotThemeContainer.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     const limitContainer = qs('#home-limit-up-pool');

@@ -1,0 +1,48 @@
+selection:
+  max_picks: 3
+  score_threshold: 60
+
+hard_filters:
+  min_price: 3
+  max_price: 120
+  min_amount: 40000000
+  max_20d_position: 42
+  min_kline_count_20: 15
+
+factors:
+  low_position:
+    name: 低位位置
+    category: technical
+    direction: positive
+    weight: 0.22
+    description: 以20日价格区间位置衡量是否处在相对低位，避免已经脱离底部区域的追高。
+  oversold_repair:
+    name: 超卖修复
+    category: reversal
+    direction: neutral
+    weight: 0.18
+    description: 结合5日/20日涨跌和MA20偏离，寻找不是继续破位而是开始修复的低位结构。
+  momentum_repair:
+    name: 动能回暖
+    category: momentum
+    direction: positive
+    weight: 0.16
+    description: 用当日涨跌、短期跌幅收敛和均线修复代理动能从弱转强。
+  band_reversion:
+    name: 区间回归
+    category: technical
+    direction: neutral
+    weight: 0.14
+    description: 近似布林下轨/区间下沿回归思想，偏好低位但不继续塌陷的形态。
+  fund_flow:
+    name: 资金回流
+    category: moneyflow
+    direction: positive
+    weight: 0.18
+    description: 日级与实时资金流共同确认，资金净流入越强，低位修复可信度越高。
+  volume_confirm:
+    name: 温和放量
+    category: volume
+    direction: neutral
+    weight: 0.12
+    description: 偏好温和放量确认，避免无量弱反弹或极端爆量。
