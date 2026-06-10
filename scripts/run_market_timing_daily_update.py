@@ -870,9 +870,74 @@ def _save_iv_skew(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _load_recent_option_pcr_rows(trade_date: str) -> list[dict[str, Any]]:
+    sql = """
+    SELECT *
+    FROM market_option_pcr_daily
+    WHERE trade_date = (
+        SELECT MAX(trade_date)
+        FROM market_option_pcr_daily
+        WHERE trade_date <= %s
+    )
+    ORDER BY exchange
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, (trade_date,))
+            return cursor.fetchall() or []
+
+
+def _load_recent_futures_holding_rows(trade_date: str) -> list[dict[str, Any]]:
+    sql = """
+    SELECT *
+    FROM market_futures_holding_daily
+    WHERE trade_date = (
+        SELECT MAX(trade_date)
+        FROM market_futures_holding_daily
+        WHERE trade_date <= %s
+    )
+    ORDER BY symbol_family
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, (trade_date,))
+            return cursor.fetchall() or []
+
+
+def _load_recent_iv_skew_rows(trade_date: str) -> list[dict[str, Any]]:
+    sql = """
+    SELECT *
+    FROM market_option_iv_skew_daily
+    WHERE trade_date = (
+        SELECT MAX(trade_date)
+        FROM market_option_iv_skew_daily
+        WHERE trade_date <= %s
+    )
+    ORDER BY underlying_code
+    """
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, (trade_date,))
+            return cursor.fetchall() or []
+
+
 def _latest_by_date(rows: list[dict[str, Any]], trade_date: str) -> dict[str, Any] | None:
     eligible = [row for row in rows if (_iso_date(row.get("trade_date")) or "") <= trade_date]
     return eligible[-1] if eligible else None
+
+
+def _source_status_for_row(row: dict[str, Any] | None, trade_date: str) -> str:
+    if not row:
+        return "待数据"
+    source_date = _iso_date(row.get("trade_date"))
+    return "已接入" if source_date == trade_date else "沿用最近收盘"
+
+
+def _source_date_meta(row: dict[str, Any] | None, trade_date: str) -> dict[str, Any]:
+    source_date = _iso_date((row or {}).get("trade_date"))
+    if not source_date or source_date == trade_date:
+        return {}
+    return {"source_trade_date": source_date, "target_trade_date": trade_date, "fallback": "latest_close"}
 
 
 def _build_indicators(
@@ -975,6 +1040,7 @@ def _build_indicators(
             pcr_component = _clamp(50 - (volume_pcr - 0.9) * 70)
             oi_component = _clamp(50 - ((oi_pcr or 0.9) - 0.9) * 45) if oi_pcr is not None else pcr_component
             score = pcr_component * 0.7 + oi_component * 0.3
+            status = _source_status_for_row(latest_option_pcr, trade_date)
             add(
                 "sentiment",
                 "option_pcr",
@@ -989,7 +1055,9 @@ def _build_indicators(
                     "call_oi": latest_option_pcr.get("call_oi"),
                     "put_oi": latest_option_pcr.get("put_oi"),
                     "contract_count": latest_option_pcr.get("contract_count"),
+                    **_source_date_meta(latest_option_pcr, trade_date),
                 },
+                status,
             )
         else:
             add("sentiment", "option_pcr", "期权 PCR", None, "-", None, "tushare.opt_daily+opt_basic", {"reason": "认购成交量为空"}, "待数据")
@@ -1041,6 +1109,7 @@ def _build_indicators(
         call_iv = _float(latest_iv_skew.get("call_iv"))
         if skew_value is not None:
             score = _clamp(50 - skew_value * 220)
+            status = _source_status_for_row(latest_iv_skew, trade_date)
             add(
                 "sentiment",
                 "iv_skew",
@@ -1054,7 +1123,9 @@ def _build_indicators(
                     "call_iv": call_iv,
                     "atm_iv": latest_iv_skew.get("atm_iv"),
                     "sample_count": latest_iv_skew.get("sample_count"),
+                    **_source_date_meta(latest_iv_skew, trade_date),
                 },
+                status,
             )
         else:
             add("sentiment", "iv_skew", "IV 偏斜", None, "-", None, "tushare.opt_daily+opt_basic+self_calc", {"reason": "IV skew 为空"}, "待数据")
@@ -1070,6 +1141,7 @@ def _build_indicators(
         net_change_ratio = net_change / change_base if net_change is not None and change_base else None
         if net_ratio is not None:
             score = _clamp(50 + net_ratio * 220 + (net_change_ratio or 0) * 800)
+            status = _source_status_for_row(latest_futures_holding, trade_date)
             add(
                 "sentiment",
                 "futures_holding_net",
@@ -1085,7 +1157,9 @@ def _build_indicators(
                     "net_change": net_change,
                     "net_change_ratio": net_change_ratio,
                     "row_count": latest_futures_holding.get("row_count"),
+                    **_source_date_meta(latest_futures_holding, trade_date),
                 },
+                status,
             )
         else:
             add("sentiment", "futures_holding_net", "股指期货多空持仓", None, "-", None, "tushare.fut_holding", {"reason": "多空持仓为空"}, "待数据")
@@ -1103,10 +1177,10 @@ def _build_indicators(
         "index_daily": "已接入" if latest_index else "待数据",
         "index_dailybasic": "已接入" if latest_val else "待数据",
         "margin": "已接入" if latest_margin else "待数据",
-        "option_pcr": "已接入" if latest_option_pcr else "待数据",
+        "option_pcr": _source_status_for_row(latest_option_pcr, trade_date),
         "qvix": "已接入" if qvix_valid else "待数据",
-        "iv_skew": "已接入" if latest_iv_skew else "待数据",
-        "fut_holding": "已接入" if latest_futures_holding else "待数据",
+        "iv_skew": _source_status_for_row(latest_iv_skew, trade_date),
+        "fut_holding": _source_status_for_row(latest_futures_holding, trade_date),
         "yc_cb": "已接入" if bond_yield is not None else "待权限",
         "bond_yield_10y": "已接入" if bond_yield is not None else "待数据",
         "local_amount_pressure": "已接入" if amount_pressure is not None else "待数据",
@@ -1314,6 +1388,12 @@ def main() -> None:
         iv_skew_rows = _save_iv_skew(
             _build_iv_skew_rows(trade_date, option_rows, cffex_option_basic_rows, underlying_prices, bond_yield)
         )
+        if not option_pcr_rows:
+            option_pcr_rows = _load_recent_option_pcr_rows(trade_date)
+        if not futures_holding_rows:
+            futures_holding_rows = _load_recent_futures_holding_rows(trade_date)
+        if not iv_skew_rows:
+            iv_skew_rows = _load_recent_iv_skew_rows(trade_date)
         indicators, coverage = _build_indicators(
             trade_date,
             args.index_code,

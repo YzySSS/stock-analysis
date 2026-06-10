@@ -55,8 +55,8 @@ class BacktestService:
     - 1d：当日开盘买入，下一交易日开盘卖出
     - 3d：当日开盘买入，第三个后续交易日收盘卖出
 
-    注意：V12 选股依赖 Tavily 舆情精排；为避免历史回测消耗大量 Tavily 次数，
-    当前暂不开放 V12 回测。
+    注意：多因子舆情选股依赖 Tavily 精排；为避免历史回测消耗大量 Tavily 次数，
+    当前暂不开放严格复刻回测。
     """
 
     SUPPORTED_STRATEGIES = {

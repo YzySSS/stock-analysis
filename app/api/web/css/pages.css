@@ -6616,6 +6616,7 @@ body[data-page="home"] .hot-theme-metrics {
   display: grid;
   justify-items: end;
   gap: 2px;
+  max-width: 150px;
   white-space: nowrap;
 }
 

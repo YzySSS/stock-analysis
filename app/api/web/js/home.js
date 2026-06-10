@@ -368,6 +368,9 @@ function renderLimitUpPool(items = []) {
   if (!items.length) return '<div class="empty-state">暂无涨停/连板观察数据</div>';
   const rows = items.slice(0, 10).map((item, index) => {
     const detailUrl = `/stocks/${encodeURIComponent(item.code || '')}`;
+    const openBoardLine = item.open_board_count
+      ? `${item.open_board_label || `开板${item.open_board_count}次`}${item.last_open_time ? ` · 末次 ${splitDateTime(item.last_open_time).time || item.last_open_time}` : ''}`
+      : '';
     return `
       <tr>
         <td><span class="emotion-rank">${index + 1}</span></td>
@@ -381,6 +384,7 @@ function renderLimitUpPool(items = []) {
         </td>
         <td>
           <div>${escapeHtml(item.status_label || '-')}</div>
+          ${openBoardLine ? `<div class="muted">${escapeHtml(openBoardLine)}</div>` : ''}
           <div class="muted">${formatCompactAmount(item.amount)}</div>
         </td>
         <td class="up">${formatPercent(item.pct_chg)}</td>

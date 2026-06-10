@@ -58,11 +58,11 @@ cd /root/.openclaw/workspace/stock-analysis
 export PYTHONPATH=/root/.openclaw/workspace/stock-analysis:$PYTHONPATH
 ```
 
-方式二：使用脚本
+线上服务由 systemd 托管：
 
 ```bash
-cd /root/.openclaw/workspace/stock-analysis
-bash run_api.sh
+systemctl status stock-analysis-api.service
+systemctl restart stock-analysis-api.service
 ```
 
 ## 4. 接口访问

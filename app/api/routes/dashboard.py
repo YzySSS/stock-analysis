@@ -71,6 +71,58 @@ def _is_limit_up(price: float | None, pre_close: float | None, code: str | None,
     return price >= limit_price
 
 
+def _limit_open_board_stats(cursor, codes: list[str]) -> dict[str, dict]:
+    codes = [code for code in codes if code]
+    if not codes:
+        return {}
+    placeholders = ",".join(["%s"] * len(codes))
+    cursor.execute(
+        f"""
+        SELECT code, name, trade_date, quote_minute, latest_price, pre_close
+        FROM stock_realtime_intraday
+        WHERE code IN ({placeholders})
+          AND trade_date = (SELECT MAX(trade_date) FROM stock_realtime_intraday)
+          AND latest_price IS NOT NULL
+          AND pre_close IS NOT NULL
+        ORDER BY code, quote_minute
+        """,
+        tuple(codes),
+    )
+    rows = cursor.fetchall() or []
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row.get("code"), []).append(row)
+
+    stats: dict[str, dict] = {}
+    for code, items in grouped.items():
+        was_sealed = False
+        ever_sealed = False
+        open_count = 0
+        first_limit_time = None
+        last_open_time = None
+        trade_date = None
+        for row in items:
+            price = _to_float(row.get("latest_price"))
+            pre_close = _to_float(row.get("pre_close"))
+            is_sealed = _is_limit_up(price, pre_close, code, row.get("name"))
+            if is_sealed and not ever_sealed:
+                first_limit_time = row.get("quote_minute")
+            if ever_sealed and was_sealed and not is_sealed:
+                open_count += 1
+                last_open_time = row.get("quote_minute")
+            ever_sealed = ever_sealed or is_sealed
+            was_sealed = is_sealed
+            trade_date = row.get("trade_date")
+        stats[code] = {
+            "open_board_count": open_count,
+            "open_board_label": f"开板{open_count}次" if open_count else None,
+            "first_limit_time": str(first_limit_time) if first_limit_time else None,
+            "last_open_time": str(last_open_time) if last_open_time else None,
+            "intraday_trade_date": str(trade_date) if trade_date else None,
+        }
+    return stats
+
+
 def _dashboard_data_stats() -> dict:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -477,10 +529,12 @@ def _dashboard_emotion_board(limit: int = 8) -> dict:
                 reversal_rows = cursor.fetchall() or []
 
             limit_pool = []
+            open_board_stats = _limit_open_board_stats(cursor, [row.get("code") for row in limit_rows])
             for row in limit_rows:
                 code = row.get("code")
                 name = row.get("name")
                 history = _limit_board_history(cursor, code, name, window_days=5) if code else {}
+                open_board = open_board_stats.get(code or "", {})
                 board_height = int(history.get("latest_streak") or 0) + 1
                 recent_window_days = int(history.get("recent_window_days") or 0) + 1
                 recent_limit_count = int(history.get("recent_limit_count") or 0) + 1
@@ -500,6 +554,10 @@ def _dashboard_emotion_board(limit: int = 8) -> dict:
                     "recent_window_days": recent_window_days,
                     "recent_pattern_label": recent_pattern_label,
                     "status_label": "封板/涨停",
+                    "open_board_count": int(open_board.get("open_board_count") or 0),
+                    "open_board_label": open_board.get("open_board_label"),
+                    "first_limit_time": open_board.get("first_limit_time"),
+                    "last_open_time": open_board.get("last_open_time"),
                     "latest_price": _to_float(row.get("latest_price")),
                     "pct_chg": round(_to_float(row.get("pct_chg")) or 0, 2),
                     "amount": _to_float(row.get("realtime_amount")),
@@ -1098,7 +1156,6 @@ def _dashboard_hot_themes(limit: int = 8) -> dict:
                 """
             )
             ths_rows = cursor.fetchall() or []
-
     def parse_json(value) -> list:
         if not value:
             return []
@@ -1278,6 +1335,7 @@ def _dashboard_hot_themes(limit: int = 8) -> dict:
     return {
         "source": "sector_opinion_daily(theme only) + market_sector_fund_flow_snapshot(concept) + ths_concept_hot_snapshot",
         "schedule": "舆情主题每 15 分钟，概念资金每 3 分钟，同花顺概念每 30 分钟",
+        "method": "热点排序按舆情热度、概念资金和同花顺概念事件综合展示；RRG/扩散过滤仍在讨论中，暂不参与",
         "items": themes,
         "as_of": themes[0].get("as_of") if themes else None,
     }

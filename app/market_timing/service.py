@@ -55,6 +55,13 @@ def _sector_net_amount_score(overview: dict[str, Any]) -> tuple[int, float | Non
     }
 
 
+def _amount_pressure_score(pressure: float | None) -> tuple[int, float | None, str]:
+    if pressure is None:
+        return 0, None, "-"
+    score = _clamp(50 + pressure * 90)
+    return _score_signal(score, 60, 40), round(score, 1), f"{pressure * 100:.1f}%"
+
+
 def _signal_score_from_signal(signal: int, neutral_score: float = 50) -> float:
     return {1: 75.0, 0: neutral_score, -1: 25.0}.get(signal, neutral_score)
 
@@ -191,6 +198,146 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
     }
 
 
+def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overview: dict[str, Any] | None) -> dict[str, Any]:
+    overview = overview or {}
+    realtime_trade_date = str(overview.get("trade_date") or "") or None
+    quote_time = str(overview.get("latest_quote_time") or "") or None
+    pressure = _to_float(overview.get("amount_pressure"))
+    total_amount = _to_float(overview.get("total_amount"))
+    if pressure is None or not realtime_trade_date or not quote_time or not total_amount:
+        return stored_signal
+
+    stored_trade_date = str(stored_signal.get("trade_date") or "") or None
+    if stored_trade_date and realtime_trade_date < stored_trade_date:
+        return stored_signal
+
+    signal_value, score, value_label = _amount_pressure_score(pressure)
+    signals = []
+    replaced = False
+    for item in stored_signal.get("signals") or []:
+        item = dict(item)
+        if item.get("indicator_id") == "up_down_amount_pressure":
+            meta = dict(item.get("meta") or {})
+            meta.update(
+                {
+                    "up_amount": _to_float(overview.get("up_amount")) or 0,
+                    "down_amount": _to_float(overview.get("down_amount")) or 0,
+                    "total_amount": total_amount,
+                    "total_count": overview.get("total"),
+                    "quote_time": quote_time,
+                    "source": "stock_realtime_snapshot",
+                    "daily_model_trade_date": stored_trade_date,
+                }
+            )
+            item.update(
+                {
+                    "signal": signal_value,
+                    "signal_label": _signal_label(signal_value),
+                    "score": score,
+                    "value": round(pressure, 6),
+                    "value_label": value_label,
+                    "source_status": "盘中实时",
+                    "source": "stock_realtime_snapshot",
+                    "meta": meta,
+                }
+            )
+            replaced = True
+        signals.append(item)
+    if not replaced:
+        signals.append(
+            {
+                "dimension": "sentiment",
+                "label": "上涨/下跌成交额差",
+                "article_dimension": "情绪/上涨下跌成交额差",
+                "indicator_id": "up_down_amount_pressure",
+                "signal": signal_value,
+                "signal_label": _signal_label(signal_value),
+                "score": score,
+                "value": round(pressure, 6),
+                "value_label": value_label,
+                "source_status": "盘中实时",
+                "source": "stock_realtime_snapshot",
+                "meta": {
+                    "up_amount": _to_float(overview.get("up_amount")) or 0,
+                    "down_amount": _to_float(overview.get("down_amount")) or 0,
+                    "total_amount": total_amount,
+                    "total_count": overview.get("total"),
+                    "quote_time": quote_time,
+                    "daily_model_trade_date": stored_trade_date,
+                },
+            }
+        )
+
+    weights = {
+        "index_bollinger": 0.16,
+        "index_pe_percentile": 0.14,
+        "erp": 0.14,
+        "margin_buy_ratio": 0.14,
+        "option_pcr": 0.08,
+        "qvix_volatility": 0.08,
+        "iv_skew": 0.08,
+        "futures_holding_net": 0.08,
+        "up_down_amount_pressure": 0.10,
+    }
+    valid = [item for item in signals if item.get("score") is not None]
+    total_weight = sum(weights.get(item.get("indicator_id"), 0) for item in valid)
+    timing_score = (
+        sum((_to_float(item.get("score")) or 50) * weights.get(item.get("indicator_id"), 0) for item in valid) / total_weight
+        if total_weight
+        else stored_signal.get("timing_score")
+    )
+    vote_sum = sum(int(item.get("signal") or 0) for item in valid)
+    if timing_score is not None and timing_score >= 63 and vote_sum >= 1:
+        state = "risk_on"
+        state_label = "正常开仓"
+        position_upper = 0.8
+    elif timing_score is not None and (timing_score <= 42 or vote_sum <= -2):
+        state = "defensive"
+        state_label = "防守观望"
+        position_upper = 0.15
+    else:
+        state = "cautious"
+        state_label = "谨慎试探"
+        position_upper = 0.45
+
+    action_label = {
+        "risk_on": "选股可正常执行，回测可按标准仓位观察",
+        "defensive": "不建议新增重仓，选股结果以观察为主",
+        "cautious": "可小仓验证，等待市场扩散或回踩确认",
+    }[state]
+    reasons = list(stored_signal.get("reasons") or [])
+    realtime_reason = f"盘中上涨/下跌成交额差 {value_label}，{_signal_label(signal_value)}"
+    reasons = [item for item in reasons if "上涨/下跌成交额差" not in item]
+    reasons.insert(0, realtime_reason)
+    risk_notes = list(stored_signal.get("risk_notes") or [])
+    if realtime_trade_date != stored_trade_date:
+        risk_notes.append(f"盘中成交额因子已更新至 {realtime_trade_date}，其余日频因子沿用 {stored_trade_date or '最近交易日'}")
+
+    refreshed = dict(stored_signal)
+    refreshed.update(
+        {
+            "source": f"{stored_signal.get('source') or 'market_timing_v18_sources'} + stock_realtime_snapshot",
+            "as_of": quote_time,
+            "trade_date": realtime_trade_date,
+            "state": state,
+            "state_label": state_label,
+            "timing_score": round(float(timing_score), 2) if timing_score is not None else None,
+            "combined_signal": 1 if state == "risk_on" else -1 if state == "defensive" else 0,
+            "position_upper": position_upper,
+            "position_upper_pct": round(position_upper * 100, 0),
+            "action_label": action_label,
+            "signals": signals,
+            "reasons": reasons[:8],
+            "risk_notes": risk_notes[:4],
+        }
+    )
+    for item in refreshed.get("article_factor_coverage") or []:
+        if item.get("factor") == "上涨/下跌股票成交额差":
+            item["status"] = "盘中实时"
+            item["reason"] = "盘中由 stock_realtime_snapshot 刷新，收盘后由 daily_kline 确认"
+    return refreshed
+
+
 def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any]:
     """Build a lightweight market timing signal from existing homepage snapshots.
 
@@ -201,7 +348,7 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
 
     stored_signal = _latest_stored_timing_signal()
     if stored_signal:
-        return stored_signal
+        return _refresh_stored_with_realtime_overview(stored_signal, overview)
 
     overview = overview or {}
     market_strength = _to_float(overview.get("market_strength"))

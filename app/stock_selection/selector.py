@@ -71,6 +71,12 @@ class StockSelector:
         return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     def _requested_market_opinion_as_of(self) -> Optional[datetime]:
+        generic_as_of = self.strategy.config.get("as_of_datetime")
+        if generic_as_of:
+            try:
+                return datetime.fromisoformat(str(generic_as_of).replace("T", " ").replace("Z", "+00:00"))
+            except ValueError:
+                return None
         if self.strategy_id != "a_share_sentiment":
             return None
         market_opinion_config = self.strategy.config.get("market_opinion", {}) or {}

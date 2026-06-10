@@ -26,14 +26,14 @@ python -m app.stock_selection.run_selection
 指定策略运行：
 
 ```bash
-python -m app.stock_selection.run_selection --strategy v13_three_factor
+python -m app.stock_selection.run_selection --strategy lowvol_reversal
 ```
 
 指定日期和股票池：
 
 ```bash
 python -m app.stock_selection.run_selection \
-  --strategy v13_three_factor \
+  --strategy lowvol_reversal \
   --date 2026-04-24 \
   --universe 000001.SZ,000002.SZ,600519.SH
 ```

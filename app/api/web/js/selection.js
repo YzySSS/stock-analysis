@@ -529,9 +529,9 @@ function renderSelectionResults(data) {
   const v13Filter = diagnostics.v13_filter_summary || null;
   const v12Filter = diagnostics.v12_filter_summary || null;
   const filterSummary = v13Filter
-    ? ` · V13硬过滤：${v13Filter.before ?? '-'} → ${v13Filter.after ?? '-'}，剔除 ${v13Filter.removed ?? '-'}`
+    ? ` · 三因子硬过滤：${v13Filter.before ?? '-'} → ${v13Filter.after ?? '-'}，剔除 ${v13Filter.removed ?? '-'}`
     : v12Filter
-      ? ` · V12硬过滤：${v12Filter.before ?? '-'} → ${v12Filter.after ?? '-'}，剔除 ${v12Filter.removed ?? '-'}`
+      ? ` · 多因子硬过滤：${v12Filter.before ?? '-'} → ${v12Filter.after ?? '-'}，剔除 ${v12Filter.removed ?? '-'}`
       : '';
   const sentimentSummary = data.sentiment_prefetch
     ? ` · 舆情精排：Tavily ${data.sentiment_prefetch.tavily_runs ?? 0}/${data.sentiment_prefetch.requested ?? '-'}`

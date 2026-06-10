@@ -830,7 +830,7 @@ function renderRecentNews(items, latestSelection = {}) {
     container.innerHTML = `
       <div class="empty-state sentiment-empty-state">
         <strong>暂无最近舆情新闻</strong>
-        <div class="muted">当前新闻库没有该股可展示新闻；V12 情绪因子已使用${escapeHtml(source === 'fallback_price_volume' ? '价格/成交量回退信号' : source)}计算。</div>
+        <div class="muted">当前新闻库没有该股可展示新闻；多因子情绪分已使用${escapeHtml(source === 'fallback_price_volume' ? '价格/成交量回退信号' : source)}计算。</div>
         <div class="muted">情绪因子：${formatNumber(sentimentScore, 2)} · 新闻数：${escapeHtml(newsCount)}</div>
       </div>
     `;

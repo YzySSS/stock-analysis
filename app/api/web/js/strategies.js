@@ -98,6 +98,7 @@ function renderStrategyDetail(strategy = null) {
       <span>平均 CI <b>${formatNumber(avgCi, 4)}</b></span>
       <span>平均覆盖 <b>${avgCoverage == null ? '-' : formatPercent(avgCoverage)}</b></span>
       <span>样本 <b>${strategy.factor_sample_size ?? '-'}</b></span>
+      <span>统计日 <b>${escapeHtml(strategy.factor_ci_date || '-')}</b></span>
     </div>
   `;
 
@@ -145,7 +146,7 @@ function renderStrategyFactors(strategy = null) {
 
   if (summary) {
     summary.textContent = strategy.runtime_ready === true
-      ? `样本统计基于最近 ${strategy.factor_sample_size || '-'} 条候选样本。`
+      ? `CI 基于 ${strategy.factor_ci_date || '-'} 的全量候选样本与 T+${strategy.factor_ci_horizon_days || 1} 收盘收益计算。`
       : '当前未接通 V1 执行链路，因子分析以配置说明为主。';
   }
 
@@ -180,7 +181,7 @@ function renderStrategyFactorCards(items = []) {
           <span>CI <b>${ci == null || Number.isNaN(ci) ? '-' : formatNumber(ci, 4)}</b></span>
           <span>覆盖 <b>${coverage == null || Number.isNaN(coverage) ? '-' : formatPercent(coverage)}</b></span>
           <span>缺失 <b>${missing == null || Number.isNaN(missing) ? '-' : formatPercent(missing)}</b></span>
-          <span>样本 <b>${item.sample_size ?? '-'}</b></span>
+          <span>有效样本 <b>${item.valid_sample_size ?? item.sample_size ?? '-'}</b></span>
         </div>
       </div>
     `;

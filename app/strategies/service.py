@@ -35,7 +35,7 @@ class StrategyService:
         "multi_timeframe_resonance",
     }
     BACKTEST_DISABLED_REASONS = {
-        "v12_legacy": "V12 当前选股会触发 Tavily/舆情精排，严格历史回测暂不开放，避免消耗搜索次数并避免伪历史舆情。",
+        "v12_legacy": "多因子策略当前选股会触发 Tavily/舆情精排，严格历史回测暂不开放，避免消耗搜索次数并避免伪历史舆情。",
         "chan_structure_watch": "缠论结构观察 V1 先开放选股与跟踪复盘，回测需补更严格的历史结构识别后再开放。",
         "a_share_sentiment": "A股舆情选股依赖 market_opinion_v2 历史 as_of 快照，已完成前置修复，但正式回测链路尚未接入。",
     }
@@ -101,6 +101,50 @@ class StrategyService:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         return self.loader.get_strategy_meta(final_strategy_id)
 
+    def _load_daily_factor_stats(
+        self,
+        strategy_id: str,
+        instrument_type: str = "stock",
+        horizon_days: int = 1,
+    ) -> Dict[str, Dict[str, Any]]:
+        sql = """
+        SELECT sf.*
+        FROM strategy_factor_ci_daily sf
+        INNER JOIN (
+            SELECT MAX(trade_date) AS trade_date
+            FROM strategy_factor_ci_daily
+            WHERE strategy_id = %s
+              AND instrument_type = %s
+              AND horizon_days = %s
+        ) latest ON sf.trade_date = latest.trade_date
+        WHERE sf.strategy_id = %s
+          AND sf.instrument_type = %s
+          AND sf.horizon_days = %s
+        """
+        try:
+            with mysql_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql, (strategy_id, instrument_type, horizon_days, strategy_id, instrument_type, horizon_days))
+                    rows = cursor.fetchall() or []
+        except Exception:
+            return {}
+        stats: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            stats[str(row.get("factor_key"))] = {
+                "ci": row.get("ci"),
+                "ic": row.get("ic"),
+                "rank_ic": row.get("rank_ic"),
+                "coverage": row.get("coverage"),
+                "missing_rate": row.get("missing_rate"),
+                "sample_size": row.get("sample_size"),
+                "valid_sample_size": row.get("valid_sample_size"),
+                "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+                "horizon_days": row.get("horizon_days"),
+                "source": row.get("source"),
+                "computed_at": str(row.get("computed_at")) if row.get("computed_at") else None,
+            }
+        return stats
+
     def get_strategy_detail(self, strategy_id: Optional[str] = None, instrument_type: str = "stock", sample_limit: int = 200) -> Dict[str, Any]:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         meta = self.get_strategy_meta(final_strategy_id)
@@ -109,10 +153,9 @@ class StrategyService:
         factor_configs = config.get("factors", {}) or {}
         executable = bool(meta.get("executable", True))
         runtime_ready = serialized_meta.get("runtime_ready", False)
-        factor_stats = {}
+        factor_stats = self._load_daily_factor_stats(final_strategy_id, instrument_type=instrument_type)
         if runtime_ready:
-            selector = StockSelector(strategy_id=final_strategy_id)
-            factor_stats = selector.build_factor_analysis(instrument_type=instrument_type, limit=sample_limit)
+            factor_stats = factor_stats or {}
 
         factor_items = []
         for key, factor_meta in factor_configs.items():
@@ -127,12 +170,25 @@ class StrategyService:
                     "weight": factor_meta.get("weight", 0),
                     "enabled": factor_meta.get("enabled", True),
                     "ci": stat.get("ci", factor_meta.get("ci_hint")),
+                    "ic": stat.get("ic"),
+                    "rank_ic": stat.get("rank_ic"),
                     "coverage": stat.get("coverage"),
                     "missing_rate": stat.get("missing_rate"),
                     "sample_size": stat.get("sample_size") if stat else None,
+                    "valid_sample_size": stat.get("valid_sample_size") if stat else None,
+                    "ci_trade_date": stat.get("trade_date") if stat else None,
+                    "ci_horizon_days": stat.get("horizon_days") if stat else None,
+                    "ci_source": stat.get("source") if stat else "config_hint",
+                    "ci_computed_at": stat.get("computed_at") if stat else None,
                     "is_placeholder": not bool(stat),
                 }
             )
+        factor_stat_values = [item for item in factor_items if not item.get("is_placeholder")]
+        latest_ci_date = next((item.get("ci_trade_date") for item in factor_stat_values if item.get("ci_trade_date")), None)
+        factor_sample_size = max(
+            [int(item.get("sample_size") or 0) for item in factor_stat_values],
+            default=None,
+        )
 
         return {
             "id": meta.get("id"),
@@ -149,7 +205,10 @@ class StrategyService:
             "tags": meta.get("tags", []),
             "score_threshold": config.get("selection", {}).get("score_threshold"),
             "max_picks": config.get("selection", {}).get("max_picks"),
-            "factor_sample_size": sample_limit if runtime_ready else None,
+            "factor_sample_size": factor_sample_size,
+            "factor_ci_date": latest_ci_date,
+            "factor_ci_horizon_days": 1 if latest_ci_date else None,
+            "factor_ci_source": "daily_full_sample" if latest_ci_date else "config_hint",
             "factors": factor_items,
         }
 
@@ -218,7 +277,7 @@ class StrategyService:
             }
             enriched["explain"] = {
                 **selector._enhance_explain(enriched),
-                "selection_phase": "V12 初筛 Top40 后，按 V12 初筛分 + Tavily 舆情分加权精排",
+                "selection_phase": "多因子初筛 Top40 后，按初筛分 + Tavily 舆情分加权精排",
                 "v12_preliminary_score": preliminary_score,
                 "sentiment_score_0_100": sentiment_score,
                 "weighted_score": final_score,
