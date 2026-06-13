@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional
 
 from app.error_learning.models import SelectionTrackingRecord
 from app.shared.db import mysql_conn
 from app.shared.sentiment_scoring import enrich_opinion_news_item
+from app.stock_selection.trade_plan import build_selection_trade_plan
 
 
 class SelectionResultTracker:
@@ -86,6 +87,7 @@ class SelectionResultTracker:
             sr.run_id AS latest_run_id,
             sr.rank_no,
             sr.trade_date AS selection_date,
+            sr.created_at AS selection_datetime,
             sr.strategy_id,
             sr.code,
             sr.score,
@@ -130,15 +132,39 @@ class SelectionResultTracker:
         LEFT JOIN stock_realtime_snapshot realtime ON sr.code = realtime.code
         LEFT JOIN (
             SELECT
-                sr_inner.id AS selection_result_id,
-                MAX(dk.high) AS max_high,
-                MIN(dk.low) AS min_low,
-                GREATEST(COUNT(DISTINCT dk.trade_date) - 1, 0) AS trade_day_count
-            FROM selection_result sr_inner
-            INNER JOIN daily_kline dk
-              ON dk.code = sr_inner.code
-             AND dk.trade_date BETWEEN sr_inner.trade_date AND (SELECT MAX(trade_date) FROM daily_kline)
-            GROUP BY sr_inner.id
+                period_price.selection_result_id,
+                MAX(period_price.high_price) AS max_high,
+                MIN(period_price.low_price) AS min_low,
+                COUNT(DISTINCT period_price.trade_date) AS trade_day_count
+            FROM (
+                SELECT
+                    sr_inner.id AS selection_result_id,
+                    dk.trade_date,
+                    MAX(dk.high) AS high_price,
+                    MIN(dk.low) AS low_price
+                FROM selection_result sr_inner
+                INNER JOIN daily_kline dk
+                 ON dk.code = sr_inner.code
+                 AND dk.trade_date > DATE(sr_inner.created_at)
+                 AND dk.trade_date <= (SELECT MAX(trade_date) FROM daily_kline)
+                 AND dk.high > 0
+                 AND dk.low > 0
+                GROUP BY sr_inner.id, dk.trade_date
+                UNION ALL
+                SELECT
+                    sr_inner.id AS selection_result_id,
+                    ri.trade_date,
+                    MAX(ri.latest_price) AS high_price,
+                    MIN(ri.latest_price) AS low_price
+                FROM selection_result sr_inner
+                INNER JOIN stock_realtime_intraday ri
+                 ON ri.code = sr_inner.code
+                 AND ri.quote_time >= sr_inner.created_at
+                 AND ri.latest_price IS NOT NULL
+                 AND ri.latest_price > 0
+                GROUP BY sr_inner.id, ri.trade_date
+            ) period_price
+            GROUP BY period_price.selection_result_id
         ) period_dk ON sr.id = period_dk.selection_result_id
         WHERE sb.instrument_type = %s
         """
@@ -186,6 +212,7 @@ class SelectionResultTracker:
                 sr.run_id AS latest_run_id,
                 sr.rank_no,
                 sr.trade_date AS selection_date,
+                sr.created_at AS selection_datetime,
                 sr.strategy_id,
                 sr.code,
                 sr.score,
@@ -226,7 +253,7 @@ class SelectionResultTracker:
             sql += " LEFT JOIN daily_kline metadata_selected_dk ON sr.code = metadata_selected_dk.code AND metadata_selected_dk.trade_date = CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d') END "
             sql += " LEFT JOIN ( SELECT d1.code, d1.trade_date, d1.close FROM daily_kline d1 INNER JOIN ( SELECT code, MAX(trade_date) AS max_date FROM daily_kline GROUP BY code ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date ) latest_dk ON sr.code = latest_dk.code "
             sql += " LEFT JOIN stock_realtime_snapshot realtime ON sr.code = realtime.code "
-            sql += " LEFT JOIN ( SELECT sr_inner.id AS selection_result_id, MAX(dk.high) AS max_high, MIN(dk.low) AS min_low, GREATEST(COUNT(DISTINCT dk.trade_date) - 1, 0) AS trade_day_count FROM selection_result sr_inner INNER JOIN daily_kline dk ON dk.code = sr_inner.code AND dk.trade_date BETWEEN sr_inner.trade_date AND (SELECT MAX(trade_date) FROM daily_kline) GROUP BY sr_inner.id ) period_dk ON sr.id = period_dk.selection_result_id "
+            sql += " LEFT JOIN ( SELECT period_price.selection_result_id, MAX(period_price.high_price) AS max_high, MIN(period_price.low_price) AS min_low, COUNT(DISTINCT period_price.trade_date) AS trade_day_count FROM ( SELECT sr_inner.id AS selection_result_id, dk.trade_date, MAX(dk.high) AS high_price, MIN(dk.low) AS low_price FROM selection_result sr_inner INNER JOIN daily_kline dk ON dk.code = sr_inner.code AND dk.trade_date > DATE(sr_inner.created_at) AND dk.trade_date <= (SELECT MAX(trade_date) FROM daily_kline) AND dk.high > 0 AND dk.low > 0 GROUP BY sr_inner.id, dk.trade_date UNION ALL SELECT sr_inner.id AS selection_result_id, ri.trade_date, MAX(ri.latest_price) AS high_price, MIN(ri.latest_price) AS low_price FROM selection_result sr_inner INNER JOIN stock_realtime_intraday ri ON ri.code = sr_inner.code AND ri.quote_time >= sr_inner.created_at AND ri.latest_price IS NOT NULL AND ri.latest_price > 0 GROUP BY sr_inner.id, ri.trade_date ) period_price GROUP BY period_price.selection_result_id ) period_dk ON sr.id = period_dk.selection_result_id "
             sql += " WHERE sb.instrument_type = %s "
             params.append(instrument_type)
             sql += " ORDER BY sr.rank_no ASC, sr.id DESC LIMIT %s"
@@ -309,6 +336,22 @@ class SelectionResultTracker:
             return None
 
     @staticmethod
+    def _to_datetime(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, time.min)
+        raw = str(value).strip()
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
+
+    @staticmethod
     def _calc_tracking_days(start: date | None, end: date | None, trade_day_count: Any = None) -> int | None:
         if trade_day_count is not None:
             try:
@@ -326,6 +369,93 @@ class SelectionResultTracker:
             return None
         return max(values) if prefer_max else min(values)
 
+    @staticmethod
+    def _extract_take_profit_levels(trade_plan: Dict[str, Any]) -> list[Dict[str, Any]]:
+        levels = trade_plan.get("take_profit") or []
+        if isinstance(levels, dict):
+            levels = [levels]
+        normalized = []
+        for item in levels:
+            if not isinstance(item, dict):
+                continue
+            price = SelectionResultTracker._to_float(item.get("price"))
+            if price is None:
+                continue
+            normalized.append({**item, "price": price})
+        normalized.sort(key=lambda item: item.get("price") or 0)
+        return normalized
+
+    def _evaluate_trade_plan(
+        self,
+        trade_plan: Dict[str, Any] | None,
+        *,
+        entry_price: float | None,
+        period_max_high: float | None,
+        period_min_low: float | None,
+        current_price: float | None,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(trade_plan, dict) or not trade_plan:
+            return None
+        plan_entry_price = self._to_float(trade_plan.get("entry_price")) or entry_price
+        if plan_entry_price is None:
+            return None
+
+        stop_loss = trade_plan.get("stop_loss") or {}
+        stop_price = self._to_float(stop_loss.get("price")) if isinstance(stop_loss, dict) else None
+        take_profit_levels = self._extract_take_profit_levels(trade_plan)
+        first_take_profit = take_profit_levels[0] if take_profit_levels else None
+        highest_take_profit = take_profit_levels[-1] if take_profit_levels else None
+        high_watermark = self._combine_period_extreme(period_max_high, current_price, prefer_max=True)
+        low_watermark = self._combine_period_extreme(period_min_low, current_price, prefer_max=False)
+
+        hit_stop = stop_price is not None and low_watermark is not None and low_watermark <= stop_price
+        hit_take_profit = first_take_profit is not None and high_watermark is not None and high_watermark >= first_take_profit["price"]
+        hit_second_take_profit = highest_take_profit is not None and high_watermark is not None and high_watermark >= highest_take_profit["price"]
+
+        status = {
+            "status": "tracking",
+            "status_label": "计划跟踪中",
+            "entry_status": "entered",
+            "entry_price": round(plan_entry_price, 3),
+            "completed": False,
+            "completion_price": None,
+            "completion_return_pct": None,
+            "completion_reason": None,
+            "high_watermark": round(high_watermark, 3) if high_watermark is not None else None,
+            "low_watermark": round(low_watermark, 3) if low_watermark is not None else None,
+        }
+
+        completion_price = None
+        completion_reason = None
+        if hit_stop and hit_take_profit:
+            completion_price = stop_price
+            completion_reason = "same_period_stop_and_take_profit"
+            status["status"] = "completed_ambiguous"
+            status["status_label"] = "同周期双触发，按止损冻结"
+        elif hit_stop:
+            completion_price = stop_price
+            completion_reason = "stop_loss"
+            status["status"] = "completed_stop_loss"
+            status["status_label"] = "已触发止损"
+        elif hit_second_take_profit:
+            completion_price = highest_take_profit["price"]
+            completion_reason = "take_profit_2"
+            status["status"] = "completed_take_profit_2"
+            status["status_label"] = "已触发第二止盈"
+        elif hit_take_profit:
+            completion_price = first_take_profit["price"]
+            completion_reason = "take_profit_1"
+            status["status"] = "completed_take_profit_1"
+            status["status_label"] = "已触发第一止盈"
+
+        if completion_price is not None:
+            status["completed"] = True
+            status["completion_price"] = round(completion_price, 3)
+            status["completion_reason"] = completion_reason
+            status["completion_return_pct"] = round((completion_price - plan_entry_price) / plan_entry_price * 100, 2)
+
+        return status
+
     def _build_record_from_selection_result(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
         selected_open_price = self._to_float(row.get("selected_open_price"))
         selected_close_price = self._to_float(row.get("selected_close_price"))
@@ -334,12 +464,12 @@ class SelectionResultTracker:
         realtime_price = self._to_float(row.get("realtime_price"))
         realtime_pct_chg = self._to_float(row.get("realtime_pct_chg"))
         realtime_quote_time = str(row["realtime_quote_time"]) if row.get("realtime_quote_time") else None
-        realtime_high_price = self._to_float(row.get("realtime_high_price"))
-        realtime_low_price = self._to_float(row.get("realtime_low_price"))
         latest_trade_date = str(row["latest_trade_date"]) if row.get("latest_trade_date") else None
         realtime_trade_date = str(row["realtime_trade_date"]) if row.get("realtime_trade_date") else None
         metric_trade_date = str(row["metric_trade_date"]) if row.get("metric_trade_date") else latest_trade_date
-        selection_dt = self._to_date(row.get("selection_date"))
+        selection_datetime = self._to_datetime(row.get("selection_datetime"))
+        realtime_quote_dt = self._to_datetime(row.get("realtime_quote_time"))
+        selection_dt = selection_datetime.date() if selection_datetime else self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
         realtime_dt = self._to_date(row.get("realtime_trade_date"))
         tracking_end_dt = max([dt for dt in [latest_dt, realtime_dt] if dt], default=None)
@@ -374,19 +504,66 @@ class SelectionResultTracker:
             selected_close_price = self._to_float(raw_metrics.get("close"))
         tracking_days = self._calc_tracking_days(selection_dt, tracking_end_dt, trade_day_count)
         review_status = "tracking" if tracking_end_dt and selection_dt and tracking_end_dt >= selection_dt else "pending"
-        period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_high_price, prefer_max=True)
-        period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_low_price, prefer_max=False)
         base_price = selected_open_price or selected_close_price
+        current_price_for_return = current_price
+        if selection_datetime:
+            has_realtime_after_selection = realtime_quote_dt is not None and realtime_quote_dt >= selection_datetime
+            has_daily_after_selection = latest_dt is not None and latest_dt > selection_datetime.date()
+            if has_realtime_after_selection and realtime_price is not None:
+                current_price_for_return = realtime_price
+            elif has_daily_after_selection and daily_current_price is not None:
+                current_price_for_return = daily_current_price
+            else:
+                current_price_for_return = None
         price_change_pct = None
-        if base_price and current_price:
-            price_change_pct = round((current_price - base_price) / base_price * 100, 2)
+        if base_price and current_price_for_return:
+            price_change_pct = round((current_price_for_return - base_price) / base_price * 100, 2)
         period_base_price = selected_open_price or selected_close_price
         max_gain_pct = None
         max_drawdown_pct = None
+        realtime_price_after_selection = realtime_price if (
+            not selection_datetime or (realtime_quote_dt is not None and realtime_quote_dt >= selection_datetime)
+        ) else None
+        period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_price_after_selection, prefer_max=True)
+        period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_price_after_selection, prefer_max=False)
         if period_base_price and period_max_high:
-            max_gain_pct = round((period_max_high - period_base_price) / period_base_price * 100, 2)
+            max_gain_pct = max(round((period_max_high - period_base_price) / period_base_price * 100, 2), 0.0)
         if period_base_price and period_min_low:
-            max_drawdown_pct = round((period_min_low - period_base_price) / period_base_price * 100, 2)
+            max_drawdown_pct = min(round((period_min_low - period_base_price) / period_base_price * 100, 2), 0.0)
+        trade_plan = metadata.get("trade_plan") if isinstance(metadata.get("trade_plan"), dict) else None
+        if trade_plan is None or str(trade_plan.get("version") or "") == "selection_trade_plan_v1":
+            trade_plan = build_selection_trade_plan(
+                {
+                    "code": row.get("code"),
+                    "name": row.get("name"),
+                    "strategy_id": row.get("strategy_id"),
+                    "selected_price": period_base_price,
+                    "realtime_price": realtime_price,
+                    "close": selected_close_price,
+                },
+                strategy_id=row.get("strategy_id") or "",
+                raw_metrics=raw_metrics,
+            )
+        trade_plan_status = self._evaluate_trade_plan(
+            trade_plan,
+            entry_price=period_base_price,
+            period_max_high=period_max_high,
+            period_min_low=period_min_low,
+            current_price=current_price_for_return,
+        )
+        if trade_plan_status and trade_plan_status.get("completed"):
+            frozen_price = self._to_float(trade_plan_status.get("completion_price"))
+            frozen_return = self._to_float(trade_plan_status.get("completion_return_pct"))
+            if frozen_price is not None:
+                current_price = frozen_price
+                current_price_for_return = frozen_price
+            if frozen_return is not None:
+                price_change_pct = frozen_return
+                if trade_plan_status.get("completion_reason") == "stop_loss":
+                    max_drawdown_pct = min(max_drawdown_pct if max_drawdown_pct is not None else frozen_return, frozen_return)
+                elif str(trade_plan_status.get("completion_reason") or "").startswith("take_profit"):
+                    max_gain_pct = max(max_gain_pct if max_gain_pct is not None else frozen_return, frozen_return)
+            review_status = "completed"
         summary = explain.get("summary", {}) or {}
         factor_scores = {
             **raw_metrics,
@@ -410,6 +587,7 @@ class SelectionResultTracker:
             code=row["code"],
             name=row["name"],
             selection_date=str(row["selection_date"]) if row.get("selection_date") else "",
+            selection_datetime=str(row["selection_datetime"]) if row.get("selection_datetime") else None,
             strategy_id=row.get("strategy_id") or "",
             strategy_display_name=metadata.get("strategy_display_name"),
             strategy_version=metadata.get("strategy_version"),
@@ -434,6 +612,8 @@ class SelectionResultTracker:
             realtime_pct_chg=realtime_pct_chg,
             realtime_quote_time=realtime_quote_time,
             realtime_price_change_pct=price_change_pct if realtime_price is not None else None,
+            trade_plan=trade_plan,
+            trade_plan_status=trade_plan_status,
         )
 
     def _build_record_from_snapshot(self, row: Dict[str, Any]) -> SelectionTrackingRecord:
@@ -477,6 +657,7 @@ class SelectionResultTracker:
             code=row["code"],
             name=row["name"],
             selection_date=str(row["selection_date"]) if row.get("selection_date") else "",
+            selection_datetime=None,
             strategy_id="lowvol_reversal",
             strategy_display_name="低波动反转策略",
             strategy_version="v1",
@@ -512,6 +693,7 @@ class SelectionResultTracker:
                 "code": item.code,
                 "name": item.name,
                 "selection_date": item.selection_date,
+                "selection_datetime": item.selection_datetime,
                 "strategy_id": item.strategy_id,
                 "score": item.score,
                 "include_in_stats": item.include_in_stats,
@@ -537,6 +719,8 @@ class SelectionResultTracker:
                 "review_status": item.review_status,
                 "max_gain_pct": item.max_gain_pct,
                 "max_drawdown_pct": item.max_drawdown_pct,
+                "trade_plan": item.trade_plan,
+                "trade_plan_status": item.trade_plan_status,
             }
             for item in records
         ]

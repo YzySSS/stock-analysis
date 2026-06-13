@@ -12,6 +12,7 @@ from app.orchestration.market_sentiment_schema import ensure_market_sentiment_sc
 from app.orchestration.market_opinion_schema import ensure_market_opinion_schema
 from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflow_schema
 from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
+from app.stock_selection.trade_plan import build_selection_trade_plan
 
 
 THEME_INDUSTRY_HINTS: Dict[str, set[str]] = {
@@ -1512,6 +1513,13 @@ class StockSelector:
             sentiment_context = self._build_sentiment_context(enriched, explain)
             if sentiment_context:
                 enriched["sentiment_context"] = sentiment_context
+            trade_plan = build_selection_trade_plan(
+                enriched,
+                strategy_id=enriched.get("strategy_id") or self.strategy_id,
+                raw_metrics=self._build_raw_metrics(enriched),
+            )
+            if trade_plan:
+                enriched["trade_plan"] = trade_plan
             results.append(enriched)
         return results
 
@@ -1558,6 +1566,11 @@ class StockSelector:
         for index, (item, price_snapshot) in enumerate(zip(results, price_snapshots), start=1):
             raw_metrics = self._build_raw_metrics(item)
             raw_metrics.update(price_snapshot)
+            trade_plan = item.get("trade_plan") or build_selection_trade_plan(
+                item,
+                strategy_id=item.get("strategy_id") or self.strategy_id,
+                raw_metrics=raw_metrics,
+            )
             metadata = {
                 "name": item.get("name"),
                 "instrument_type": item.get("instrument_type"),
@@ -1570,6 +1583,7 @@ class StockSelector:
                 "explain": item.get("explain", {}),
                 "sentiment_context": item.get("sentiment_context"),
                 "raw_metrics": raw_metrics,
+                "trade_plan": trade_plan,
             }
             payload.append(
                 (

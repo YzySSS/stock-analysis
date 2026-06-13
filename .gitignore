@@ -53,6 +53,7 @@ Thumbs.db
 .clawhub/
 .learnings/
 .openclaw/
+.restore-safety/
 
 # Local secrets / credentials / proxy certificates
 *.crt

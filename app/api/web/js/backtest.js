@@ -390,7 +390,7 @@ function renderTradeHorizonDays(days = []) {
             <span>${escapeHtml(day.trade_date || '-')}</span>
           </div>
           <div class="backtest-horizon-metrics">
-            <div><span>收盘</span><b>${formatNumber(day.close_price, 4)}</b><em>${pctCell(day.close_return_pct)}</em></div>
+            <div><span>收盘</span><b>${formatPrice(day.close_price)}</b><em>${pctCell(day.close_return_pct)}</em></div>
             <div><span>最大浮盈</span><b>${pctCell(day.max_gain_pct)}</b></div>
             <div><span>最大回撤</span><b>${pctCell(day.max_drawdown_pct)}</b></div>
           </div>
@@ -420,8 +420,8 @@ function renderTrades(items = [], returnMode = currentBacktestReturnMode, meta =
         <span>${formatNumber(item.entry_score, 2)}</span>
         <button class="icon-help backtest-score-help" type="button" data-tooltip="${escapeHtml(buildBacktestFactorTooltip(item))}">!</button>
       </td>
-      <td>${formatNumber(item.entry_price, 4)}</td>
-      <td>${formatNumber(is3d ? item.exit_price_3d : item.exit_price_1d, 4)}</td>
+      <td>${formatPrice(item.entry_price)}</td>
+      <td>${formatPrice(is3d ? item.exit_price_3d : item.exit_price_1d)}</td>
       <td>${escapeHtml((is3d ? item.exit_date_3d : item.exit_date_1d) || '-')} / ${pctCell(is3d ? item.return_3d_pct : item.return_1d_pct)}</td>
       <td>${pctCell(item.max_gain_pct)}</td>
       <td>${pctCell(item.max_drawdown_pct)}</td>

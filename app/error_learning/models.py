@@ -9,6 +9,7 @@ class SelectionTrackingRecord:
     code: str
     name: str
     selection_date: str
+    selection_datetime: Optional[str]
     strategy_id: str
     strategy_display_name: Optional[str]
     strategy_version: Optional[str]
@@ -36,3 +37,5 @@ class SelectionTrackingRecord:
     realtime_quote_time: Optional[str] = None
     realtime_price_change_pct: Optional[float] = None
     include_in_stats: bool = True
+    trade_plan: Optional[Dict[str, Any]] = None
+    trade_plan_status: Optional[Dict[str, Any]] = None

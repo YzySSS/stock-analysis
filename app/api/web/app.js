@@ -6,6 +6,11 @@ async function fetchJson(url, options) {
   return res.json();
 }
 
+function formatPrice(value) {
+  if (value == null || Number.isNaN(Number(value))) return '';
+  return Number(value).toFixed(3);
+}
+
 async function loadStrategies() {
   const data = await fetchJson('/api/strategies');
   const container = document.getElementById('strategies');
@@ -72,8 +77,8 @@ async function loadTracking() {
       <td>${item.selection_date || ''}</td>
       <td>${item.strategy_display_name || item.strategy_id || ''}</td>
       <td>${item.score ?? ''}</td>
-      <td>${item.selected_open_price ?? ''}</td>
-      <td>${item.current_price ?? ''}</td>
+      <td>${formatPrice(item.selected_open_price)}</td>
+      <td>${formatPrice(item.current_price)}</td>
       <td class="${pctClass}">${pct == null ? '' : pct + '%'}</td>
     `;
     body.appendChild(tr);

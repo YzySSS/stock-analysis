@@ -312,6 +312,7 @@ def _compact_review_item(item: dict[str, Any]) -> dict[str, Any]:
         "strategy_id": item.get("strategy_id"),
         "strategy_display_name": item.get("strategy_display_name"),
         "selection_date": item.get("selection_date"),
+        "selection_datetime": item.get("selection_datetime"),
         "score": item.get("score"),
         "rank_no": item.get("rank_no"),
         "selected_price": item.get("selected_open_price") or item.get("selected_close_price"),

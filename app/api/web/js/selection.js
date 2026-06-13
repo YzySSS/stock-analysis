@@ -346,6 +346,28 @@ function renderSentimentContextBlock(context) {
   `;
 }
 
+function formatTradePlanInline(plan = null, status = null) {
+  if (!plan) return '';
+  const entryZone = plan.entry_zone || {};
+  const stopLoss = plan.stop_loss || {};
+  const takeProfit = Array.isArray(plan.take_profit) ? plan.take_profit : [];
+  const firstTakeProfit = takeProfit[0] || {};
+  const statusText = status?.status_label ? ` · ${status.status_label}` : '';
+  return `买入 ${formatNumber(entryZone.low ?? plan.entry_price, 3)}-${formatNumber(entryZone.high ?? plan.entry_price, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${statusText}`;
+}
+
+function renderTradePlanBlock(plan = null, status = null) {
+  const text = formatTradePlanInline(plan, status);
+  if (!text) return '';
+  const reasons = Array.isArray(plan.reasons) ? plan.reasons.slice(0, 2).join('；') : '';
+  return `
+    <div class="trade-plan-block">
+      <div>${escapeHtml(text)}</div>
+      ${reasons ? `<div class="muted">${escapeHtml(reasons)}</div>` : ''}
+    </div>
+  `;
+}
+
 function renderSelectionResultCards(items = []) {
   const container = qs('#selection-result-cards');
   if (!container) return;
@@ -364,6 +386,7 @@ function renderSelectionResultCards(items = []) {
     const tradeState = sentimentContext?.trade_signal_state || item.factor_scores?.trade_signal_state || '';
     const tradeBadgeClass = tradeState === 'tradable' ? 'status-ok' : tradeState === 'weak' ? 'status-error' : tradeState === 'watch' ? 'status-warn' : 'status-muted';
     const pctClass = getPctClass(item.price_change_pct) || '';
+    const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     return `
       <article class="selection-stock-card">
         <div class="selection-stock-head">
@@ -383,9 +406,10 @@ function renderSelectionResultCards(items = []) {
           <span>${escapeHtml(item.selection_date || '-')}</span>
         </div>
         <div class="selection-stock-prices">
-          <span>入选 ${formatNumber(item.selected_price ?? item.selected_open_price ?? item.selected_close_price, 2)}</span>
-          <span>最新 ${formatNumber(item.current_price, 2)}</span>
+          <span>入选 ${formatPrice(item.selected_price ?? item.selected_open_price ?? item.selected_close_price)}</span>
+          <span>最新 ${formatPrice(item.current_price)}</span>
         </div>
+        ${tradePlanText ? `<div class="selection-card-note">${escapeHtml(tradePlanText)}</div>` : ''}
         <div class="selection-factor-mini">${escapeHtml(factorSummary)}</div>
         ${sentimentContext ? `<div class="selection-card-note">${escapeHtml(renderSentimentContextInline(sentimentContext))}</div>` : ''}
         <div class="selection-card-note">${escapeHtml(reasons)}</div>
@@ -476,6 +500,8 @@ function normalizeRunResponse(result) {
       trade_signal_state: item.strategy_raw_metrics?.trade_signal_state || explain.raw_metrics?.trade_signal_state || null,
       trade_signal_label: item.strategy_raw_metrics?.trade_signal_label || explain.raw_metrics?.trade_signal_label || null,
       trade_signal_reason: item.strategy_raw_metrics?.trade_signal_reason || explain.raw_metrics?.trade_signal_reason || null,
+      trade_plan: item.trade_plan || null,
+      trade_plan_status: item.trade_plan_status || null,
     };
   });
 
@@ -578,6 +604,7 @@ function renderSelectionResults(data) {
     const fundamentalHint = fundamentalMissingFields.length
       ? `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 缺失 ${fundamentalMissingFields.join(', ')}`
       : `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 关键字段齐全`;
+    const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     const peStatusHint = item.pe_status_label
       ? `PE状态：${item.pe_status_label}${item.pe_status_reason ? `（${item.pe_status_reason}）` : ''}`
       : null;
@@ -586,16 +613,17 @@ function renderSelectionResults(data) {
       `策略版本：${item.strategy_version || '-'}`,
       `最新交易日：${item.latest_trade_date || '-'}`,
       `跟踪状态：${item.review_status || '-'}`,
-      `执行入选价：${item.selected_price ?? item.selected_open_price ?? '-'}`,
+      `执行入选价：${formatPrice(item.selected_price ?? item.selected_open_price)}`,
       `入选价来源：${item.selected_price_type === 'realtime' ? '盘中实时价' : '日线收盘价'}${item.selected_price_quote_time ? `（${item.selected_price_quote_time}）` : ''}`,
-      `日线收盘价：${item.selected_close_price ?? '-'}`,
-      `最新价：${item.current_price ?? '-'}`,
+      `日线收盘价：${formatPrice(item.selected_close_price)}`,
+      `最新价：${formatPrice(item.current_price)}`,
       `区间涨跌幅：${item.price_change_pct ?? '-'}%`,
       `最大浮盈：${item.max_gain_pct ?? '-'}%`,
       `最大回撤：${item.max_drawdown_pct ?? '-'}%`,
       `因子得分：${factorSummary}`,
       renderSentimentContextInline(sentimentContext),
       `交易状态：${tradeLabel || '-'}${sentimentContext?.trade_signal_reason ? `，${sentimentContext.trade_signal_reason}` : ''}`,
+      `买卖计划：${tradePlanText || '-'}`,
       `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
       peStatusHint,
       `基本面：${fundamentalHint}`,
@@ -614,8 +642,8 @@ function renderSelectionResults(data) {
         </td>
         <td>${escapeHtml(item.industry_display || '暂无行业')}</td>
         <td>${escapeHtml(item.selection_date || '-')}</td>
-        <td>${formatNumber(item.selected_price ?? item.selected_open_price ?? item.selected_close_price, 2)}</td>
-        <td>${formatNumber(item.current_price, 2)}</td>
+        <td>${formatPrice(item.selected_price ?? item.selected_open_price ?? item.selected_close_price)}</td>
+        <td>${formatPrice(item.current_price)}</td>
         <td class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</td>
         <td>
           <div>${formatNumber(item.score, 2)}</div>
@@ -630,6 +658,7 @@ function renderSelectionResults(data) {
         <td>
           <div>${escapeHtml(reasons)}</div>
           <div class="muted">共 ${reasonsList.length} 条</div>
+          ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
         </td>
         <td>
           <div>${escapeHtml(risks)}</div>
@@ -646,7 +675,8 @@ function renderSelectionResults(data) {
         <td colspan="14">
           <div class="muted">策略：${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · 版本：${escapeHtml(item.strategy_version || '-')} · 最新交易日：${escapeHtml(item.latest_trade_date || '-')} · 跟踪状态：${escapeHtml(item.review_status || '-')}</div>
           <div class="muted">行业：${escapeHtml(item.industry_display || '暂无行业')} · 排名：第 ${escapeHtml(String(item.rank_no ?? '-'))} 名 · 总分：${escapeHtml(String(formatNumber(item.score, 2)))}</div>
-          <div class="muted">价格跟踪：最新价 ${formatNumber(item.current_price, 2)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
+          <div class="muted">价格跟踪：最新价 ${formatPrice(item.current_price)} · 涨跌幅 <span class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</span> · 最大浮盈 <span class="up">${formatPercent(item.max_gain_pct)}</span> · 最大回撤 <span class="down">${formatPercent(item.max_drawdown_pct)}</span></div>
+          ${renderTradePlanBlock(item.trade_plan, item.trade_plan_status)}
           <div class="muted">因子得分：${escapeHtml(factorSummary)}</div>
           ${peStatusHint ? `<div class="muted">${escapeHtml(peStatusHint)}</div>` : ''}
           ${renderSentimentContextBlock(sentimentContext)}

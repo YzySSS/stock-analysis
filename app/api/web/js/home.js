@@ -344,12 +344,12 @@ function renderTrackingCards(items = []) {
           </div>
           <div class="home-tracking-return ${pctClass}">${formatPercent(pct)}</div>
           <div class="home-tracking-meta">
-            <span>入选 ${escapeHtml(item.selection_date || '-')}</span>
+            <span>入选 ${escapeHtml(item.selection_datetime || item.selection_date || '-')}</span>
             <span>跟踪 ${escapeHtml(item.tracking_days ?? '-')} 日</span>
           </div>
           <div class="home-tracking-price-row">
-            <span>入选价 <b>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</b></span>
-            <span>实时价 <b>${formatNumber(item.current_price, 2)}</b></span>
+            <span>入选价 <b>${formatPrice(item.selected_open_price ?? item.selected_close_price)}</b></span>
+            <span>实时价 <b>${formatPrice(item.current_price)}</b></span>
             <span>分数 <b>${formatNumber(item.score, 2)}</b></span>
           </div>
           <small>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · ${escapeHtml(item.realtime_quote_time || '暂无实时快照')}</small>

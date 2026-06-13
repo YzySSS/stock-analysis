@@ -34,6 +34,11 @@ def tracking_page() -> FileResponse:
     return serve_page("tracking.html")
 
 
+@router.get("/portfolio", include_in_schema=False)
+def portfolio_page() -> FileResponse:
+    return serve_page("portfolio.html")
+
+
 @router.get("/strategies", include_in_schema=False)
 def strategies_page() -> FileResponse:
     return serve_page("strategies.html")

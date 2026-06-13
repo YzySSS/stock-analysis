@@ -37,9 +37,9 @@ function renderOverviewConsole(overview) {
   const peVs = fundamental.valuation_position?.pe_vs_industry_pct;
 
   qs('#stock-overview-status').textContent = status.label || '-';
-  qs('#stock-overview-open').textContent = formatNumber(quote.open_price, 2);
-  qs('#stock-overview-high').textContent = formatNumber(quote.high_price, 2);
-  qs('#stock-overview-low').textContent = formatNumber(quote.low_price, 2);
+  qs('#stock-overview-open').textContent = formatPrice(quote.open_price);
+  qs('#stock-overview-high').textContent = formatPrice(quote.high_price);
+  qs('#stock-overview-low').textContent = formatPrice(quote.low_price);
   qs('#stock-overview-amount').textContent = formatMoneyCN(quote.amount);
   qs('#stock-overview-amount-rank').textContent = formatRank(rankings.amount_rank, rankings.amount_percentile);
   qs('#stock-overview-pct-rank').textContent = formatRank(rankings.pct_chg_rank, rankings.pct_chg_percentile);
@@ -71,13 +71,13 @@ function renderChipPanel(chip) {
     <div><strong>获利比例</strong></div>
     <div>${formatPercent(chip.winner_rate)}</div>
     <div><strong>加权平均成本</strong></div>
-    <div>${formatNumber(chip.weight_avg, 2)}</div>
+    <div>${formatPrice(chip.weight_avg)}</div>
     <div><strong>价格偏离成本</strong></div>
     <div>${formatPercent(chip.price_vs_weight_avg_pct)}</div>
     <div><strong>中位成本</strong></div>
-    <div>${formatNumber(chip.cost_50pct, 2)}</div>
+    <div>${formatPrice(chip.cost_50pct)}</div>
     <div><strong>成本集中带</strong></div>
-    <div>${formatNumber(chip.cost_15pct, 2)} ~ ${formatNumber(chip.cost_85pct, 2)}</div>
+    <div>${formatPrice(chip.cost_15pct)} ~ ${formatPrice(chip.cost_85pct)}</div>
     <div><strong>集中带宽度</strong></div>
     <div>${formatPercent(chip.cost_band_width_pct)}</div>
     <div><strong>数据日期</strong></div>
@@ -257,8 +257,8 @@ function renderInteractiveLineChart(svgSelector, rawPoints, options) {
       <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" />
     </g>
     <polyline class="chart-line" fill="none" stroke="${stroke}" stroke-width="2.4" points="${polyline}" />
-    <text x="8" y="${padding.top + 4}" fill="#94a3b8" font-size="11">${rawMax.toFixed(2)}</text>
-    <text x="8" y="${height - padding.bottom}" fill="#94a3b8" font-size="11">${rawMin.toFixed(2)}</text>
+    <text x="8" y="${padding.top + 4}" fill="#94a3b8" font-size="11">${formatPrice(rawMax)}</text>
+    <text x="8" y="${height - padding.bottom}" fill="#94a3b8" font-size="11">${formatPrice(rawMin)}</text>
     <text x="${padding.left}" y="${height - 6}" fill="#94a3b8" font-size="11">${escapeHtml(formatChartTime(points[0].label))}</text>
     <text x="${width - padding.right - 86}" y="${height - 6}" fill="#94a3b8" font-size="11">${escapeHtml(formatChartTime(points[lastIndex].label))}</text>
     <g class="chart-focus" style="display:none">
@@ -291,7 +291,7 @@ function renderInteractiveLineChart(svgSelector, rawPoints, options) {
     focusLabel.textContent = formatChartTime(point.label);
     const pctText = point.pct == null || Number.isNaN(Number(point.pct)) ? '' : ` · ${Number(point.pct).toFixed(2)}%`;
     const carryText = point.carriedFrom ? ` · 延续${point.carriedFrom}` : '';
-    focusPrice.textContent = `价格 ${point.value.toFixed(2)}${pctText}${carryText}`;
+    focusPrice.textContent = `价格 ${formatPrice(point.value)}${pctText}${carryText}`;
   };
 
   const handleMove = (event) => {
@@ -491,8 +491,8 @@ function renderPriceChart(history, period = 'day') {
       <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" />
     </g>
     ${candles}
-    <text x="8" y="${padding.top + 4}" fill="#94a3b8" font-size="11">${rawMax.toFixed(2)}</text>
-    <text x="8" y="${height - padding.bottom}" fill="#94a3b8" font-size="11">${rawMin.toFixed(2)}</text>
+    <text x="8" y="${padding.top + 4}" fill="#94a3b8" font-size="11">${formatPrice(rawMax)}</text>
+    <text x="8" y="${height - padding.bottom}" fill="#94a3b8" font-size="11">${formatPrice(rawMin)}</text>
     <text x="${padding.left}" y="${height - 6}" fill="#94a3b8" font-size="11">${escapeHtml(formatChartTime(points[0].label))}</text>
     <text x="${width - padding.right - 86}" y="${height - 6}" fill="#94a3b8" font-size="11">${escapeHtml(formatChartTime(points[lastIndex].label))}</text>
     <g class="chart-focus" style="display:none">
@@ -526,8 +526,8 @@ function renderPriceChart(history, period = 'day') {
     focusDot.setAttribute('cy', point.closeY);
     focusLabel.textContent = point.periodLabel || formatChartTime(point.label);
     const pct = point.open ? ((point.close - point.open) / point.open) * 100 : null;
-    focusPrice.textContent = `收 ${point.close.toFixed(2)} · ${pct == null ? '-' : pct.toFixed(2)}%`;
-    focusExtra.textContent = `开 ${point.open.toFixed(2)} 高 ${point.high.toFixed(2)} 低 ${point.low.toFixed(2)}`;
+    focusPrice.textContent = `收 ${formatPrice(point.close)} · ${pct == null ? '-' : pct.toFixed(2)}%`;
+    focusExtra.textContent = `开 ${formatPrice(point.open)} 高 ${formatPrice(point.high)} 低 ${formatPrice(point.low)}`;
   };
 
   const handleMove = (event) => {
@@ -709,7 +709,7 @@ function renderIntradayChart(points, meta = {}) {
     : (valid[valid.length - 1].value >= valid[0].value ? '#ef4444' : '#22c55e');
   const gridYs = [0, 0.25, 0.5, 0.75, 1].map((ratio) => padding.top + ratio * plotHeight);
   const zeroY = percentMode ? yOf(0) : null;
-  const formatAxisValue = (value) => percentMode ? value.toFixed(2) + '%' : value.toFixed(2);
+  const formatAxisValue = (value) => percentMode ? value.toFixed(2) + '%' : formatPrice(value);
   const sessionMarks = [
     { label: '09:30', index: 0, anchor: 'start' },
     { label: '11:30 / 13:00', index: 120.5, anchor: 'middle' },
@@ -768,7 +768,7 @@ function renderIntradayChart(points, meta = {}) {
     focusDot.setAttribute('cy', point.y);
     const pctText = point.pct == null || Number.isNaN(Number(point.pct)) ? '' : ` · ${Number(point.pct).toFixed(2)}%`;
     const carryText = point.carriedFrom ? ` · 延续${point.carriedFrom}` : '';
-    focusPrice.textContent = `价格 ${point.value.toFixed(2)}${pctText}${carryText}`;
+    focusPrice.textContent = `价格 ${formatPrice(point.value)}${pctText}${carryText}`;
   };
 
   const handleMove = (event) => {
@@ -898,7 +898,7 @@ async function loadStockDetail() {
     const realtime = data.realtime || {};
 
     qs('#stock-detail-title').textContent = `${escapeHtml(data.name || code)} (${escapeHtml(data.code || code)})`;
-    qs('#stock-stat-close').textContent = formatNumber(realtime.latest_price ?? data.latest_kline?.close, 2);
+    qs('#stock-stat-close').textContent = formatPrice(realtime.latest_price ?? data.latest_kline?.close);
     qs('#stock-stat-change').textContent = formatPercent(realtime.pct_chg ?? data.latest_kline?.intraday_change_pct);
     qs('#stock-stat-change').classList.remove('up', 'down');
     const stockChangeClass = getPctClass(realtime.pct_chg ?? data.latest_kline?.intraday_change_pct);
@@ -1007,7 +1007,7 @@ async function loadStockDetail() {
       <div><strong>建议动作</strong></div>
       <div>${latestSelection.run_id ? '可直接跳转到跟踪复盘页查看整轮表现' : '当前暂无可关联复盘记录'}</div>
       <div><strong>当前价格</strong></div>
-      <div>${formatNumber(realtime.latest_price ?? data.latest_kline?.close, 2)}</div>
+      <div>${formatPrice(realtime.latest_price ?? data.latest_kline?.close)}</div>
       <div><strong>实时涨跌幅</strong></div>
       <div>${formatPercent(realtime.pct_chg)}</div>
       <div><strong>最近交易日</strong></div>

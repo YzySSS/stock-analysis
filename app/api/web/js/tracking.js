@@ -63,6 +63,30 @@ function formatDateRange(dates = []) {
   return dates.length > 1 ? `${dates[0]} ~ ${dates[dates.length - 1]}` : dates[0];
 }
 
+function formatSelectionTime(item = {}) {
+  return item.selection_datetime || item.selection_date || '-';
+}
+
+function formatTradePlanInline(plan = null, status = null) {
+  if (!plan) return '';
+  const entryZone = plan.entry_zone || {};
+  const stopLoss = plan.stop_loss || {};
+  const takeProfit = Array.isArray(plan.take_profit) ? plan.take_profit : [];
+  const firstTakeProfit = takeProfit[0] || {};
+  const entryLow = entryZone.low ?? plan.entry_price;
+  const entryHigh = entryZone.high ?? plan.entry_price;
+  const statusText = status?.status_label ? ` · ${status.status_label}` : '';
+  return `买入 ${formatNumber(entryLow, 3)}-${formatNumber(entryHigh, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${statusText}`;
+}
+
+function getTradePlanBadgeClass(status = null) {
+  const value = status?.status || '';
+  if (value.includes('take_profit')) return 'status-ok';
+  if (value.includes('stop_loss') || value.includes('ambiguous')) return 'status-error';
+  if (value === 'tracking') return 'status-warn';
+  return 'status-muted';
+}
+
 function renderSummaryCard({ title, summary, strategyText, dateText }) {
   const best = summary.best_item;
   const worst = summary.worst_item;
@@ -207,9 +231,13 @@ function renderTrackingTable(items, summary = {}) {
       : null;
     const reviewNote = pct == null
       ? '缺少收益数据'
-      : pct >= 0
+      : item.trade_plan_status?.completed
+        ? `交易完成：${item.trade_plan_status.status_label || '-'}`
+        : pct >= 0
         ? '已验证正收益'
         : '需重点复盘回撤';
+    const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
+    const planBadgeClass = getTradePlanBadgeClass(item.trade_plan_status);
     const includeInStats = item.include_in_stats !== false;
     return `
       <tr class="${includeInStats ? '' : 'tracking-excluded-row'}" data-tracking-key="${escapeHtml(`${item.code || ''}__${item.selection_date || ''}__${item.strategy_id || ''}`)}">
@@ -218,10 +246,10 @@ function renderTrackingTable(items, summary = {}) {
           <div class="muted">${escapeHtml(item.code || '')}</div>
         </td>
         <td>${escapeHtml(getStrategyLabel(item))}</td>
-        <td>${escapeHtml(item.selection_date || '')}</td>
-        <td>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</td>
+        <td>${escapeHtml(formatSelectionTime(item))}</td>
+        <td>${formatPrice(item.selected_open_price ?? item.selected_close_price)}</td>
         <td>
-          ${formatNumber(item.current_price, 2)}
+          ${formatPrice(item.current_price)}
           <div class="muted">${escapeHtml(item.realtime_quote_time || '无实时')}</div>
         </td>
         <td class="${getPctClass(pct)}">${formatPercent(pct)}</td>
@@ -229,8 +257,13 @@ function renderTrackingTable(items, summary = {}) {
         <td>${item.tracking_days ?? '-'}</td>
         <td class="up">${formatPercent(item.max_gain_pct)}</td>
         <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
-        <td>${escapeHtml(item.review_status || '-')}</td>
-        <td>${escapeHtml(reviewNote)}</td>
+        <td>
+          <span class="badge ${planBadgeClass}">${escapeHtml(item.trade_plan_status?.status_label || item.review_status || '-')}</span>
+        </td>
+        <td>
+          <div>${escapeHtml(reviewNote)}</div>
+          ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
+        </td>
         <td>
           <button class="btn btn-sm ${includeInStats ? 'btn-secondary' : 'btn-warning'}" type="button" data-action="toggle-tracking-stats" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}" data-include-in-stats="${includeInStats ? 'true' : 'false'}">
             ${escapeHtml(statsToggleLabel(includeInStats))}
@@ -257,6 +290,7 @@ function renderTrackingCards(items = [], summary = {}) {
       ? Number(pct) - Number(summary.benchmark_return_pct)
       : null;
     const includeInStats = item.include_in_stats !== false;
+    const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     return `
       <article class="tracking-record-card ${includeInStats ? '' : 'tracking-excluded-row'}">
         <div class="tracking-record-head">
@@ -267,16 +301,17 @@ function renderTrackingCards(items = [], summary = {}) {
           <em class="${getPctClass(pct) || ''}">${formatPercent(pct)}</em>
         </div>
         <div class="tracking-record-grid">
-          <span>入选价 <b>${formatNumber(item.selected_open_price ?? item.selected_close_price, 2)}</b></span>
-          <span>实时价 <b>${formatNumber(item.current_price, 2)}</b></span>
+          <span>入选价 <b>${formatPrice(item.selected_open_price ?? item.selected_close_price)}</b></span>
+          <span>实时价 <b>${formatPrice(item.current_price)}</b></span>
           <span>超额 <b class="${getPctClass(excessReturn) || ''}">${formatPercent(excessReturn)}</b></span>
           <span>跟踪 <b>${item.tracking_days ?? '-'} 天</b></span>
           <span>最大浮盈 <b class="up">${formatPercent(item.max_gain_pct)}</b></span>
           <span>最大回撤 <b class="down">${formatPercent(item.max_drawdown_pct)}</b></span>
         </div>
+        ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
         <div class="tracking-record-foot">
-          <span>${escapeHtml(item.selection_date || '-')} · ${escapeHtml(item.realtime_quote_time || '无实时')}</span>
-          <span class="badge ${includeInStats ? 'status-ok' : 'status-muted'}">${includeInStats ? '纳入统计' : '不统计'}</span>
+          <span>${escapeHtml(formatSelectionTime(item))} · ${escapeHtml(item.realtime_quote_time || '无实时')}</span>
+          <span class="badge ${getTradePlanBadgeClass(item.trade_plan_status)}">${escapeHtml(item.trade_plan_status?.status_label || (includeInStats ? '纳入统计' : '不统计'))}</span>
         </div>
       </article>
     `;
