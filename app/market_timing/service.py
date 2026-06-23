@@ -66,6 +66,23 @@ def _signal_score_from_signal(signal: int, neutral_score: float = 50) -> float:
     return {1: 75.0, 0: neutral_score, -1: 25.0}.get(signal, neutral_score)
 
 
+def _limit_emotion_score(limit_up: float, limit_down: float) -> tuple[int, float, str]:
+    if limit_up + limit_down <= 0:
+        return 0, 50.0, "0/0"
+    signal = 1 if limit_up >= limit_down * 1.8 else -1 if limit_down >= limit_up * 1.4 else 0
+    score = _clamp(50 + ((limit_up - limit_down) / max(limit_up + limit_down, 1)) * 45)
+    return signal, round(score, 1), f"{int(limit_up)}/{int(limit_down)}"
+
+
+def _intraday_breadth_score(up_ratio: float | None, amount_pressure: float | None) -> tuple[int, float | None, str]:
+    if up_ratio is None or amount_pressure is None:
+        return 0, None, "-"
+    breadth_seed = up_ratio * 0.62 + (amount_pressure + 1) / 2 * 0.38
+    signal = _score_signal(breadth_seed, 0.58, 0.43)
+    score = _clamp(breadth_seed * 100)
+    return signal, round(score, 1), f"上涨 {up_ratio * 100:.1f}% / 额压 {amount_pressure * 100:.1f}%"
+
+
 def _json_loads(value: Any, fallback: Any) -> Any:
     if value is None:
         return fallback
@@ -131,6 +148,9 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
         "iv_skew": "情绪/自算 IV 偏斜",
         "futures_holding_net": "情绪/股指期货会员持仓",
         "up_down_amount_pressure": "情绪/上涨下跌成交额差",
+        "intraday_market_strength": "盘中/市场强度",
+        "intraday_breadth": "盘中/涨跌扩散",
+        "intraday_limit_emotion": "盘中/涨跌停情绪",
     }
     for row in indicator_rows:
         signals.append(
@@ -204,6 +224,11 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
     quote_time = str(overview.get("latest_quote_time") or "") or None
     pressure = _to_float(overview.get("amount_pressure"))
     total_amount = _to_float(overview.get("total_amount"))
+    market_strength = _to_float(overview.get("market_strength"))
+    up_ratio = _to_float(overview.get("up_ratio"))
+    amount_weighted_pct_chg = _to_float(overview.get("amount_weighted_pct_chg"))
+    limit_up = _to_float(overview.get("limit_up_like")) or _to_float(overview.get("limit_up_count")) or 0
+    limit_down = _to_float(overview.get("limit_down_like")) or _to_float(overview.get("limit_down_count")) or 0
     if pressure is None or not realtime_trade_date or not quote_time or not total_amount:
         return stored_signal
 
@@ -213,7 +238,7 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
 
     signal_value, score, value_label = _amount_pressure_score(pressure)
     signals = []
-    replaced = False
+    seen_ids = set()
     for item in stored_signal.get("signals") or []:
         item = dict(item)
         if item.get("indicator_id") == "up_down_amount_pressure":
@@ -241,9 +266,10 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
                     "meta": meta,
                 }
             )
-            replaced = True
         signals.append(item)
-    if not replaced:
+        if item.get("indicator_id"):
+            seen_ids.add(item.get("indicator_id"))
+    if "up_down_amount_pressure" not in seen_ids:
         signals.append(
             {
                 "dimension": "sentiment",
@@ -268,16 +294,90 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
             }
         )
 
+    if market_strength is not None:
+        signals.append(
+            {
+                "dimension": "intraday",
+                "label": "盘中市场强度",
+                "article_dimension": "盘中/市场强度",
+                "indicator_id": "intraday_market_strength",
+                "signal": _score_signal(market_strength, 62, 42),
+                "signal_label": _signal_label(_score_signal(market_strength, 62, 42)),
+                "score": round(_clamp(market_strength), 1),
+                "value": round(market_strength, 4),
+                "value_label": f"{market_strength:.1f}",
+                "source_status": "盘中实时",
+                "source": "stock_realtime_snapshot",
+                "meta": {
+                    "market_state": overview.get("market_state"),
+                    "market_state_label": overview.get("market_state_label"),
+                    "amount_weighted_pct_chg": amount_weighted_pct_chg,
+                    "quote_time": quote_time,
+                },
+            },
+        )
+    breadth_signal, breadth_score, breadth_label = _intraday_breadth_score(up_ratio, pressure)
+    if breadth_score is not None:
+        signals.append(
+            {
+                "dimension": "intraday",
+                "label": "盘中涨跌扩散",
+                "article_dimension": "盘中/涨跌扩散",
+                "indicator_id": "intraday_breadth",
+                "signal": breadth_signal,
+                "signal_label": _signal_label(breadth_signal),
+                "score": breadth_score,
+                "value": breadth_score,
+                "value_label": breadth_label,
+                "source_status": "盘中实时",
+                "source": "stock_realtime_snapshot",
+                "meta": {
+                    "up_ratio": up_ratio,
+                    "down_ratio": _to_float(overview.get("down_ratio")),
+                    "amount_pressure": pressure,
+                    "up_count": overview.get("up_count"),
+                    "down_count": overview.get("down_count"),
+                    "flat_count": overview.get("flat_count"),
+                    "quote_time": quote_time,
+                },
+            },
+        )
+    limit_signal, limit_score, limit_label = _limit_emotion_score(limit_up, limit_down)
+    if limit_up + limit_down > 0:
+        signals.append(
+            {
+                "dimension": "intraday",
+                "label": "盘中涨跌停情绪",
+                "article_dimension": "盘中/涨跌停情绪",
+                "indicator_id": "intraday_limit_emotion",
+                "signal": limit_signal,
+                "signal_label": _signal_label(limit_signal),
+                "score": limit_score,
+                "value": {"limit_up": int(limit_up), "limit_down": int(limit_down)},
+                "value_label": limit_label,
+                "source_status": "盘中实时",
+                "source": "stock_realtime_snapshot",
+                "meta": {
+                    "limit_up_like": limit_up,
+                    "limit_down_like": limit_down,
+                    "quote_time": quote_time,
+                },
+            },
+        )
+
     weights = {
-        "index_bollinger": 0.16,
-        "index_pe_percentile": 0.14,
-        "erp": 0.14,
-        "margin_buy_ratio": 0.14,
-        "option_pcr": 0.08,
-        "qvix_volatility": 0.08,
-        "iv_skew": 0.08,
-        "futures_holding_net": 0.08,
-        "up_down_amount_pressure": 0.10,
+        "index_bollinger": 0.12,
+        "index_pe_percentile": 0.12,
+        "erp": 0.12,
+        "margin_buy_ratio": 0.10,
+        "option_pcr": 0.06,
+        "qvix_volatility": 0.07,
+        "iv_skew": 0.07,
+        "futures_holding_net": 0.07,
+        "up_down_amount_pressure": 0.09,
+        "intraday_market_strength": 0.10,
+        "intraday_breadth": 0.06,
+        "intraday_limit_emotion": 0.02,
     }
     valid = [item for item in signals if item.get("score") is not None]
     total_weight = sum(weights.get(item.get("indicator_id"), 0) for item in valid)
@@ -307,11 +407,17 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
     }[state]
     reasons = list(stored_signal.get("reasons") or [])
     realtime_reason = f"盘中上涨/下跌成交额差 {value_label}，{_signal_label(signal_value)}"
+    if market_strength is not None:
+        realtime_reason = f"盘中市场强度 {market_strength:.1f}，成交额压力 {value_label}，{_signal_label(signal_value)}"
     reasons = [item for item in reasons if "上涨/下跌成交额差" not in item]
     reasons.insert(0, realtime_reason)
     risk_notes = list(stored_signal.get("risk_notes") or [])
     if realtime_trade_date != stored_trade_date:
         risk_notes.append(f"盘中成交额因子已更新至 {realtime_trade_date}，其余日频因子沿用 {stored_trade_date or '最近交易日'}")
+    else:
+        risk_notes.append(f"盘中实时层已更新至 {quote_time}，日频因子保留收盘确认口径")
+    if amount_weighted_pct_chg is not None and amount_weighted_pct_chg <= -1.5:
+        risk_notes.append(f"成交额加权跌幅 {amount_weighted_pct_chg:.2f}%，盘中建议按防守优先")
 
     refreshed = dict(stored_signal)
     refreshed.update(
@@ -335,6 +441,9 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
         if item.get("factor") == "上涨/下跌股票成交额差":
             item["status"] = "盘中实时"
             item["reason"] = "盘中由 stock_realtime_snapshot 刷新，收盘后由 daily_kline 确认"
+    refreshed.setdefault("article_factor_coverage", []).append(
+        {"dimension": "盘中", "factor": "盘中市场强弱", "status": "盘中实时", "reason": "由 stock_realtime_snapshot 实时宽度、额压和涨跌停结构计算"}
+    )
     return refreshed
 
 
@@ -368,12 +477,7 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
     capital_signal, capital_pressure, capital_meta = _sector_net_amount_score(overview)
     capital_score = ((capital_pressure + 1) * 50) if capital_pressure is not None else 50.0
 
-    limit_pressure = 0
-    if limit_up + limit_down >= 8:
-        limit_pressure = 1 if limit_up >= limit_down * 1.8 else -1 if limit_down >= limit_up * 1.4 else 0
-    limit_score = _signal_score_from_signal(limit_pressure)
-    if limit_up + limit_down:
-        limit_score = _clamp(50 + ((limit_up - limit_down) / max(limit_up + limit_down, 1)) * 45)
+    limit_pressure, limit_score, _ = _limit_emotion_score(limit_up, limit_down)
 
     vote_sum = trend_signal + breadth_signal + capital_signal + limit_pressure
     raw_score = 50 + trend_signal * 18 + breadth_signal * 15 + capital_signal * 12 + limit_pressure * 8
