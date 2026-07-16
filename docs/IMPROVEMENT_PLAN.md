@@ -451,7 +451,7 @@ P2 实时、舆情和日志数据生命周期
 P3 migration、模块边界与自动化回归
 ```
 
-2026-07-16 当前检查点：能力真实性、任务锁、公网保护、策略 capability/readiness、可信回测工程链以及 selection / backtest / portfolio advice 三类独立 worker 均已部署；C3 已完成进程租约、统一 `/api/readiness`、任务/错误 retention 和日志轮转。D1/D2 已完整收口：全市场 raw 1m 按交易日分区保留 2 天，5m/15m 与 tracked 1m 保留 90 天；舆情新写入改为父快照 + stock/news/source 关系化明细，最近 5 个交易日保留盘中快照、旧日期只保留 EOD；历史任务最终保留 21,772 条 V2 快照、清理 124,545 条冗余记录，legacy/pending/prunable 均为 0。E1 已统一 16 个版本化 schema migration。E2-E6 已完成 Portfolio/Tracking/Dashboard/Selection/Backtest Repository：持仓固定 9 条 SQL；Tracking 分页先圈 ID、冷/缓存约从 7.77s/5.49s 降到 0.313s/0.049s；Dashboard 查询约从 76 条降到固定 17 条；Selection 与 Backtest 的 route/Service/worker 业务层不再直连 MySQL，冻结结果、任务、候选和回测 API 影子响应零差异。P3-3 也已完成：生产 app 对 scripts/src 的反向依赖为 0，ETF/舆情任务实现进入 `app/data_ingestion`，相关脚本变成薄启动器，旧选股 CLI 改为排队，未路由首页和 ETF grid 原型已归档；P3-4 七类最低回归已有覆盖，全量 115 项。readiness 数据新鲜度已改用股票池 95% 完整日线口径，ETF/零星盘中行只标 partial；factor input 新增 18:30 补跑/03:20 兜底、按日期一次预取和 80% 源覆盖护栏。16:53 确认当日 Tushare 已发布 5,524 行、覆盖 99.69%，后台补齐 5,541 条 07-16 factor input 后 readiness 已恢复 `ready + accepting_jobs=true`。空库 smoke 真实实跑等待独立测试库，舆情物理表空间回收等待维护窗口。证书续签按当前决策暂缓，所有回测继续保持 research-only / unvalidated。当前代码内架构整改主线和当日数据验收均已完成，剩余为已明确的外部/运维项。
+2026-07-16 当前检查点：能力真实性、任务锁、公网保护、策略 capability/readiness、可信回测工程链以及 selection / backtest / portfolio advice 三类独立 worker 均已部署；C3 已完成进程租约、统一 `/api/readiness`、任务/错误 retention 和日志轮转。D1/D2 已完整收口：全市场 raw 1m 按交易日分区保留 2 天，5m/15m 与 tracked 1m 保留 90 天；舆情新写入改为父快照 + stock/news/source 关系化明细，最近 5 个交易日保留盘中快照、旧日期只保留 EOD；历史任务最终保留 21,772 条 V2 快照、清理 124,545 条冗余记录，legacy/pending/prunable 均为 0。E1 已统一 16 个版本化 schema migration。E2-E6 已完成 Portfolio/Tracking/Dashboard/Selection/Backtest Repository：持仓固定 9 条 SQL；Tracking 分页先圈 ID、冷/缓存约从 7.77s/5.49s 降到 0.313s/0.049s；Dashboard 查询约从 76 条降到固定 17 条；Selection 与 Backtest 的 route/Service/worker 业务层不再直连 MySQL，冻结结果、任务、候选和回测 API 影子响应零差异。P3-3 也已完成：生产 app 对 scripts/src 的反向依赖为 0，ETF/舆情任务实现进入 `app/data_ingestion`，相关脚本变成薄启动器，旧选股 CLI 改为排队，未路由首页和 ETF grid 原型已归档；P3-4 七类最低回归已有覆盖，全量 115 项。readiness 数据新鲜度已改用股票池 95% 完整日线口径，ETF/零星盘中行只标 partial；factor input 新增 18:30 补跑/03:20 兜底、按日期一次预取和 80% 源覆盖护栏。16:53 确认当日 Tushare 已发布 5,524 行、覆盖 99.69%，后台补齐 5,541 条 07-16 factor input 后 readiness 已恢复 `ready + accepting_jobs=true`。独立测试库的真实空库 smoke 也已完成：16 个 migration 首次全部应用、第二遍零变更。舆情存储维护已确认当前实例使用共享 InnoDB 表空间，应用侧单表 `OPTIMIZE` 不能完成物理缩容；只刷新统计并保留 provider 级监控。证书续签按当前决策暂缓，所有回测继续保持 research-only / unvalidated。当前代码内架构整改主线、空库重建和应用侧存储维护均已完成，剩余为已明确的外部/运维项。
 
 详细任务、依赖和验收标准见：
 
@@ -472,6 +472,17 @@ P3 migration、模块边界与自动化回归
 4. 将“建议质量”和“纪律执行”分开评分。
 
 完成这条链后，系统才真正从“能约束交易纪律”进入“能复盘纪律和建议质量”的阶段。
+
+### 12. UI 设计与视觉一致性（后续阶段，当前暂缓）
+
+UI 设计不并入当前架构整改，不在基础设施收口期间改页面布局或视觉语义。后续单独启动时采用以下边界：
+
+1. 先从现有页面反向整理项目专属 `DESIGN.md`，固定 A 股涨红跌绿、深色高密度量化工作台、侧栏与数字信息层级。
+2. 优先治理设计 token、数字等宽、focus/active/disabled、骨架/空/错状态，以及 `pages.css` 多轮覆盖债务，不先换前端框架。
+3. 只选一个页面做隔离原型和视觉回归，确认后再人工迁移小批 CSS，不能直接让外部设计工具接管生产仓库。
+4. 可参考 Open Design 的 `frontend-design`、Web Guidelines 和小步 refine 方法；完整 Open Design 仅允许在本地或一次性沙箱中关闭 telemetry 后试用，不安装到生产服务器。
+
+恢复条件：架构整改与存储维护稳定，且大X明确启动 UI 阶段。
 
 ---
 

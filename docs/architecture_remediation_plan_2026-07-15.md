@@ -1,6 +1,6 @@
 # 股票分析系统架构审计与整改计划（2026-07-15）
 
-> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1-E6 的 migration 与五个核心 Repository 垂直切片均已部署；P3-3 反向依赖/旧入口清理、P3-4 最小回归体系和真实空库 smoke 均已完成。剩余维护项为舆情物理表空间回收；证书按当前决策暂缓。
+> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1-E6 的 migration 与五个核心 Repository 垂直切片均已部署；P3-3 反向依赖/旧入口清理、P3-4 最小回归体系和真实空库 smoke 均已完成。舆情存储已确认处于共享 InnoDB 表空间，应用侧单表物理缩容不成立，现以统计刷新和 provider 级监控收口；证书按当前决策暂缓。
 >
 > 本文保留 `docs/IMPROVEMENT_PLAN.md` 中“个人纪律型投研工作台、模块化单体、异步任务驱动、不做自动交易、不急拆微服务”的产品与架构定位，只更新当前整改优先级。
 >
@@ -920,3 +920,13 @@ backtest 也补齐到共享任务契约：
 迁移前后 ETF 归一化、新闻来源/日期/可信度/质量和本地情绪打分冻结包 SHA-256 完全一致；旧线上 Portfolio 与新磁盘代码逐叶差异为 0，部署后哈希继续命中。新增 6 项依赖边界/CLI/归档回归，全量回归增至 115 项。selection/portfolio worker 与 API 串行重启后，API 和三个 worker 均 active、`NRestarts=0`，三类队列为 0，公网 health 200、未认证 portfolio 401。P3-3 完成；P3-4 的七类最低回归也已覆盖。随后独立测试库已完成真实空库 smoke，首次 16 个 migration 全部应用、第二遍零变更。
 
 16:53 再次只读探测到 Tushare 2026-07-16 `daily_basic` 已发布 5,524 行、覆盖 99.69%，随后通过独立后台任务只补最新交易日：12 批写入 `factor_input_daily` 5,541 行，无不可用日期，任务日志 success。最终 `/api/readiness` 从 degraded 恢复为 `ready + accepting_jobs=true`，三个 worker healthy/idle、三类队列为 0。真实空库 smoke 随后也已完成。至此本轮代码内架构整改、空库重建和当日数据新鲜度验收均完成；剩余项仅为需要独立维护窗口的舆情物理表空间回收，以及按原决定暂缓的证书续签。
+
+### 2026-07-16：P2-2 舆情存储维护判定已收口
+
+生命周期完成后的真实数据为 21,772 条父快照，21,772 条均为 V2，三个 legacy JSON 字段非空行与字节数均为 0。数据库为腾讯云 CynosDB MySQL 8.0.30，`@@innodb_file_per_table=0`；统计刷新前 `information_schema.tables` 仍把父表估成 132,670 行/约 4.71 GB，新闻关系表则把真实 942,047 行低估为 32,343 行，说明原“4.49 GB 单表占用”主要混入了严重过期的 engine statistics，不能直接当作物理文件大小。
+
+因此取消原先“直接 `OPTIMIZE TABLE` 或 shadow rebuild 回收单表物理文件”的设想：共享表空间释放页已经可以被实例内其他 InnoDB 数据复用，但单表重建不能缩小共享物理文件，还会增加临时空间、I/O 和元数据锁风险。新增 `scripts/inspect_market_opinion_storage.py`，默认只读输出实际行数、engine 统计、表空间模式和维护判定；显式 `--analyze-statistics` 也只刷新四张舆情表的优化器统计，并复用舆情 advisory lock，脚本没有 `OPTIMIZE` 或 rebuild 入口。
+
+18:56 在收盘后无舆情任务运行时，通过新工具显式执行一次 `--analyze-statistics`，四表均返回 `status / OK`，没有执行 `OPTIMIZE` 或 rebuild。刷新后父表估算为 21,945 行/约 160.6 MB，新闻关系表估算为 935,759 行/约 311.2 MB，已与真实数量同一量级；共享 `DATA_FREE` 约 10.17 GB，只能解释为实例级可复用页，不能归因到单表或直接等同云端账单空间。维护任务 `market_opinion_storage_20260716_185628` 已记 success。新增 3 项维护判定回归后全量 118 项通过，migration 16/16、readiness ready、三 worker healthy/idle、三队列 0，服务 `NRestarts=0`；本切片没有重启 API/worker。
+
+若未来云端存储账单/配额仍需要真实下降，只能在数据库管理侧确认 CynosDB 的物理回收语义，并另开 provider-approved 的实例迁移或全库重建窗口；不扩大应用账号权限，也不由业务服务器自行执行。UI 设计评估已转入 `IMPROVEMENT_PLAN.md` 的后续独立阶段，不属于本轮架构整改。
