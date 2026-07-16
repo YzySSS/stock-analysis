@@ -918,3 +918,5 @@ backtest 也补齐到共享任务契约：
 - 未被路由引用的 `app/api/web/index.html` 迁到 `archive/legacy_web_index.html`；ETF grid 原型迁到 `archive/legacy_grid_trader.py`，旧研究版本通过薄兼容导入继续可读。
 
 迁移前后 ETF 归一化、新闻来源/日期/可信度/质量和本地情绪打分冻结包 SHA-256 完全一致；旧线上 Portfolio 与新磁盘代码逐叶差异为 0，部署后哈希继续命中。新增 6 项依赖边界/CLI/归档回归，全量回归增至 115 项。selection/portfolio worker 与 API 串行重启后，API 和三个 worker 均 active、`NRestarts=0`，三类队列为 0，公网 health 200、未认证 portfolio 401。P3-3 完成；P3-4 的七类最低回归也已覆盖，真实空库 smoke 仍只等待外部测试库。
+
+16:53 再次只读探测到 Tushare 2026-07-16 `daily_basic` 已发布 5,524 行、覆盖 99.69%，随后通过独立后台任务只补最新交易日：12 批写入 `factor_input_daily` 5,541 行，无不可用日期，任务日志 success。最终 `/api/readiness` 从 degraded 恢复为 `ready + accepting_jobs=true`，三个 worker healthy/idle、三类队列为 0。至此本轮代码内架构整改与当日数据新鲜度验收均完成；剩余项仅为需要外部条件或维护窗口的真实空库 smoke、舆情物理表空间回收和暂缓的证书续签。
