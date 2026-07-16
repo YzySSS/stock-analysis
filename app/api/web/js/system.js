@@ -25,6 +25,7 @@ async function loadSystemPage() {
     const elapsedMs = Math.round(performance.now() - started);
     const latest = data.latest || {};
     const sentimentQuality = data.sentiment_quality || {};
+    const dataQuality = data.data_quality || {};
     const taskRuns = data.task_runs || [];
     const schedules = data.scheduled_tasks || [];
     const marketOpinion = data.market_opinion_update || null;
@@ -69,7 +70,7 @@ async function loadSystemPage() {
     renderReadiness(readiness, panels.readiness, panels.readinessOverall);
     panels.coverage.innerHTML = renderScheduleGrid(schedules, taskMap, taskRuns, marketOpinion);
     if (panels.taskRun) panels.taskRun.innerHTML = '';
-    panels.gap.innerHTML = renderGapNote();
+    panels.gap.innerHTML = renderDataQuality(dataQuality);
     panels.sentiment.innerHTML = renderSentimentQuality(sentimentQuality);
     panels.jobErrors.innerHTML = renderJobErrors(data.job_error_summary || [], data.retention_policy || {});
     panels.realtimeLifecycle.innerHTML = renderRealtimeLifecycle(data.realtime_lifecycle || {});
@@ -320,6 +321,7 @@ function renderTaskRunMetrics(run = {}, marketOpinion = null) {
     marketOpinion?.failed_source_count != null ? `失败源 ${escapeHtml(marketOpinion.failed_source_count)}` : '',
     marketOpinion?.sector_summary_count != null ? `热点 ${escapeHtml(marketOpinion.sector_summary_count)}` : '',
     meta.source_used ? `来源 ${escapeHtml(meta.source_used)}` : '',
+    meta.counts ? `质量 通过${escapeHtml(meta.counts.pass ?? 0)} / 提示${escapeHtml(meta.counts.warn ?? 0)} / 失败${escapeHtml(meta.counts.fail ?? 0)}` : '',
   ].filter(Boolean);
   const summary = metrics.length ? metrics.join(' · ') : '暂无额外指标';
   const sourceErrors = meta.source_errors && typeof meta.source_errors === 'object'
@@ -337,16 +339,37 @@ function renderTaskRunMetrics(run = {}, marketOpinion = null) {
   return `${summary}<div class="muted">${prefix}：${escapeHtml(detail)}</div>`;
 }
 
-function renderGapNote() {
+function renderDataQuality(item = {}) {
+  if (!item.generated_at) {
+    return '<div class="empty-state">尚无离线质量快照，等待 04:05 或 18:45 自动审计。</div>';
+  }
+  const counts = item.counts || {};
+  const checks = item.checks || [];
+  const noteworthy = checks.filter((check) => check.status !== 'pass');
+  const rows = noteworthy.length
+    ? noteworthy.map((check) => {
+        const badgeClass = check.status === 'fail' ? 'status-error' : 'status-warn';
+        const statusLabel = check.status === 'fail' ? '失败' : '提示';
+        const samples = (check.samples || []).slice(0, 5).map((sample) => sample.code).filter(Boolean);
+        const sampleText = samples.length ? `<div class="muted">样本：${escapeHtml(samples.join('、'))}</div>` : '';
+        return `
+          <div class="system-error-summary-row">
+            <b>${escapeHtml(check.label || check.check_id || '-')}</b>
+            <span class="badge ${badgeClass}">${statusLabel}</span>
+            <small>${escapeHtml(check.message || '-')}</small>
+            ${sampleText}
+          </div>
+        `;
+      }).join('')
+    : '<div class="empty-state">本批次全部质量规则通过。</div>';
+  const healthLabel = item.status === 'fail' ? '存在硬失败' : item.status === 'warn' ? '有可解释告警' : '全部通过';
   return `
     <div class="system-gap-callout">
-      <strong>当前展示策略</strong>
-      <p>顶部卡片使用轻量聚合与缓存结果；K线完整度、字段缺失、估值缺口等重查询建议改为后台快照表后再展示。</p>
+      <strong>${escapeHtml(healthLabel)} · ${escapeHtml(item.reference_trade_date || '-')}</strong>
+      <p>审计于 ${escapeHtml(item.generated_at)} 完成：通过 ${escapeHtml(counts.pass ?? 0)}，提示 ${escapeHtml(counts.warn ?? 0)}，失败 ${escapeHtml(counts.fail ?? 0)}。</p>
     </div>
-    <div class="system-gap-list">
-      <span>历史输入层状态归属本页，不再放回测中心。</span>
-      <span>页面请求路径仍只读 MySQL 快照，不直接拉 AkShare/Tavily。</span>
-    </div>
+    <div class="system-error-summary-list">${rows}</div>
+    <div class="muted">PE 缺失不作为硬故障；停牌、暂停上市和当日新股会与待处理源缺口分开统计。页面只读取任务快照，不扫描行情大表。</div>
   `;
 }
 

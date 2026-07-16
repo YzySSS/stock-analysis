@@ -8,6 +8,7 @@ from app.api.routes.system import (
     TASK_RUNNING_STALE_SECONDS,
     TASK_SCHEDULES,
     TRACKED_TASKS,
+    _data_quality_status,
     _latest_task_runs,
 )
 
@@ -25,6 +26,7 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "ths_concept_hot_update",
                 "stock_popularity_update",
                 "portfolio_etf_quote_update",
+                "data_quality_audit",
             }.issubset(TRACKED_TASKS)
         )
 
@@ -53,6 +55,30 @@ class SystemTaskRegistryTests(unittest.TestCase):
         self.assertEqual(items[0]["status"], "stale")
         self.assertEqual(items[0]["recorded_status"], "running")
         self.assertTrue(items[0]["stale"])
+
+    def test_data_quality_status_reuses_persisted_task_metadata(self):
+        payload = _data_quality_status(
+            [
+                {
+                    "task_name": "data_quality_audit",
+                    "status": "partial_success",
+                    "run_id": "dq-1",
+                    "started_at": "2026-07-17 04:05:00",
+                    "finished_at": "2026-07-17 04:05:03",
+                    "message": "completed with warnings",
+                    "metadata": {
+                        "health": "warning",
+                        "status": "warn",
+                        "counts": {"pass": 8, "warn": 3, "fail": 0},
+                        "checks": [{"check_id": "daily_kline_coverage", "status": "warn"}],
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(payload["health"], "warning")
+        self.assertEqual(payload["task_status"], "partial_success")
+        self.assertEqual(payload["counts"]["warn"], 3)
 
 
 if __name__ == "__main__":

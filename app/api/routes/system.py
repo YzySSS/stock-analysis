@@ -32,6 +32,7 @@ TASK_SCHEDULES = [
     {"task_name": "market_timing_daily_update", "task_label": "市场择时日更", "schedule": "每天 03:40；交易日 15:35"},
     {"task_name": "strategy_factor_ci_daily_update", "task_label": "策略因子 CI 日更", "schedule": "每天 03:45；交易日 15:50"},
     {"task_name": "stock_sentiment_daily_update", "task_label": "真实舆情日更", "schedule": "每天 03:50"},
+    {"task_name": "data_quality_audit", "task_label": "核心数据质量审计", "schedule": "每天 04:05；交易日 18:45"},
     {"task_name": "daily_kline_realtime_eod_backfill", "task_label": "日线收盘快照兜底", "schedule": "交易日 15:10"},
     {"task_name": "stock_realtime_lifecycle", "task_label": "实时行情分层与保留", "schedule": "交易日 15:20"},
     {"task_name": "market_opinion_update", "task_label": "热点舆情聚合", "schedule": "交易日 09:00-15:59 每 15 分钟"},
@@ -849,6 +850,37 @@ def _scheduled_tasks() -> list[dict]:
     return [dict(item) for item in TASK_SCHEDULES]
 
 
+def _data_quality_status(task_runs: list[dict]) -> dict:
+    run = next((item for item in task_runs if item.get("task_name") == "data_quality_audit"), None)
+    if not run:
+        return {
+            "health": "unknown",
+            "status": "missing",
+            "generated_at": None,
+            "counts": {"pass": 0, "warn": 0, "fail": 0},
+            "checks": [],
+            "message": "尚未执行核心数据质量审计",
+        }
+
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    payload = dict(metadata)
+    if run.get("status") in {"failed", "stale"}:
+        payload["health"] = "error"
+        payload["status"] = "fail"
+    payload.update(
+        {
+            "task_status": run.get("status"),
+            "run_id": run.get("run_id"),
+            "started_at": run.get("started_at"),
+            "finished_at": run.get("finished_at"),
+            "message": run.get("message"),
+        }
+    )
+    payload.setdefault("counts", {"pass": 0, "warn": 0, "fail": 0})
+    payload.setdefault("checks", [])
+    return payload
+
+
 def _realtime_lifecycle_summary() -> dict:
     table_names = (
         "stock_realtime_intraday",
@@ -1019,6 +1051,7 @@ def system_status() -> dict:
         "latest": _latest_dates(),
         "sentiment_quality": _sentiment_quality_stats(),
         "data_baseline": _data_baseline_summary(),
+        "data_quality": _data_quality_status(task_runs),
         "scheduled_tasks": _scheduled_tasks(),
         "task_runs": task_runs,
         "readiness": readiness,

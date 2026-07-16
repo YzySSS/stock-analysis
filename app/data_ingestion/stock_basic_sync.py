@@ -48,11 +48,11 @@ class StockBasicSync:
         self.pro = ts.pro_api(self.token)
 
     @staticmethod
-    def normalize_industry(value: str | None) -> str | None:
-        if not value:
+    def normalize_industry(value: object) -> str | None:
+        if value is None:
             return None
         value = str(value).strip()
-        return value or None
+        return None if not value or value.lower() in {"nan", "none", "null"} else value
 
     @staticmethod
     def from_ts_code(ts_code: str) -> str:
@@ -95,6 +95,23 @@ class StockBasicSync:
                 )
             )
         return rows
+
+    def fetch_delisted_codes(self) -> List[str]:
+        """Fetch confirmed delistings without importing the whole historical D list."""
+        df = self.pro.stock_basic(
+            exchange="",
+            list_status="D",
+            fields="ts_code",
+        )
+        if df is None or df.empty:
+            return []
+        return sorted(
+            {
+                self.from_ts_code(str(row.get("ts_code")))
+                for row in df.to_dict("records")
+                if row.get("ts_code")
+            }
+        )
 
     def save_to_mysql(self, records: List[StockBasicRecord]) -> int:
         if not records:
@@ -158,11 +175,40 @@ class StockBasicSync:
             with conn.cursor() as cursor:
                 return int(cursor.execute(sql) or 0)
 
+    @staticmethod
+    def mark_existing_delisted(codes: List[str], batch_size: int = 500) -> int:
+        """Mark only already-known stock rows so historical D records are not re-imported."""
+        normalized = sorted({code for code in codes if code})
+        if not normalized:
+            return 0
+        updated = 0
+        with mysql_conn(dict_cursor=False) as conn:
+            with conn.cursor() as cursor:
+                for offset in range(0, len(normalized), batch_size):
+                    batch = normalized[offset : offset + batch_size]
+                    placeholders = ",".join(["%s"] * len(batch))
+                    updated += int(
+                        cursor.execute(
+                            f"""
+                            UPDATE stock_basic
+                            SET is_delisted=1
+                            WHERE instrument_type='stock'
+                              AND COALESCE(is_delisted, 0)=0
+                              AND code IN ({placeholders})
+                            """,
+                            batch,
+                        )
+                        or 0
+                    )
+        return updated
+
     def run(self) -> int:
         records = self.fetch_stock_basic()
+        delisted_codes = self.fetch_delisted_codes()
         saved = self.save_to_mysql(records)
+        marked_delisted = self.mark_existing_delisted(delisted_codes)
         supplemented = self.supplement_from_realtime_snapshot()
-        return saved + supplemented
+        return saved + marked_delisted + supplemented
 
 
 if __name__ == "__main__":

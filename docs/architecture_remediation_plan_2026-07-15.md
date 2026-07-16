@@ -930,3 +930,11 @@ backtest 也补齐到共享任务契约：
 18:56 在收盘后无舆情任务运行时，通过新工具显式执行一次 `--analyze-statistics`，四表均返回 `status / OK`，没有执行 `OPTIMIZE` 或 rebuild。刷新后父表估算为 21,945 行/约 160.6 MB，新闻关系表估算为 935,759 行/约 311.2 MB，已与真实数量同一量级；共享 `DATA_FREE` 约 10.17 GB，只能解释为实例级可复用页，不能归因到单表或直接等同云端账单空间。维护任务 `market_opinion_storage_20260716_185628` 已记 success。新增 3 项维护判定回归后全量 118 项通过，migration 16/16、readiness ready、三 worker healthy/idle、三队列 0，服务 `NRestarts=0`；本切片没有重启 API/worker。
 
 若未来云端存储账单/配额仍需要真实下降，只能在数据库管理侧确认 CynosDB 的物理回收语义，并另开 provider-approved 的实例迁移或全库重建窗口；不扩大应用账号权限，也不由业务服务器自行执行。UI 设计评估已转入 `IMPROVEMENT_PLAN.md` 的后续独立阶段，不属于本轮架构整改。
+
+### 2026-07-17：整改后 DQ1 核心数据质量闭环已落地
+
+架构主线完成后进入数据可信度阶段。新增 `app/data_quality` 垂直切片和 `scripts/run_data_quality_audit.py`：Repository 只读取股票主数据、最新日线/因子、状态快照和未来日期的有界切片，Service 统一输出 11 条 `pass/warn/fail` 规则；任务结果复用 `task_run_log.metadata_json`，`/api/system/status` 和数据状态页只读最近快照，不增加在线大表扫描。
+
+缺口不再只报一个覆盖率：停牌/暂停上市、当日新股和待处理源缺口分别统计，PE 缺失不再作为因子硬故障。同步修复 `StockBasicSync` 长期只读取 `list_status=L` 导致退市旧行留在有效池的问题：额外读取 D 集合但只标记库内已有代码，同时将行业 `NaN` 归一化为 NULL。13 只历史退市旧行退出有效池后，有效股票由 5,542 降为 5,529；日线缺口由 20 降为 7，因子市场字段缺口由 20 降为 7，最终审计为 `8 pass / 3 warn / 0 fail`。剩余告警保留真实样本，不写猜测值。详细记录见 `docs/data_quality_audit_2026-07-17.md`。
+
+验收结果：全量 125 项、Python/JavaScript/shell/diff 检查通过，migration 16/16；两条质量 cron 已安装且无重复。API 串行重启后 active、`NRestarts=0`，本地 health/readiness/system status 与公网 health 均 200，readiness `ready / accepting_jobs=true`；三个 worker 未重启且继续 active。
