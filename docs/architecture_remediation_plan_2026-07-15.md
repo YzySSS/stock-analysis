@@ -1,6 +1,6 @@
 # 股票分析系统架构审计与整改计划（2026-07-15）
 
-> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层、舆情关系化新写入和生命周期调度已部署，历史舆情归一化/裁剪由收盘后后台任务执行；批次 E1 的唯一版本化 migration 入口以及 E2-E5 的 Portfolio/Tracking/Dashboard/Selection Repository 垂直切片均已部署。证书按当前决策暂缓。
+> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1 的唯一版本化 migration 入口以及 E2-E6 的 Portfolio/Tracking/Dashboard/Selection/Backtest Repository 垂直切片均已部署。证书按当前决策暂缓。
 >
 > 本文保留 `docs/IMPROVEMENT_PLAN.md` 中“个人纪律型投研工作台、模块化单体、异步任务驱动、不做自动交易、不急拆微服务”的产品与架构定位，只更新当前整改优先级。
 >
@@ -25,7 +25,7 @@
 1. 页面/API 宣称可用，但数据和策略并不支持，例如 ETF、指数选股。
 2. 回测工程链路可运行，但存在前视偏差、非 point-in-time 基本面和幸存者偏差。
 3. 三类长任务、worker 租约、readiness 与任务保留周期已统一；分钟行情和舆情也已具备明确分层、保留期与收盘后清理任务。
-4. 下一阶段的主要结构风险已转为散落 schema 入口、Router/Service 内 SQL 以及脚本与应用层的反向依赖。
+4. schema 入口和五个核心 Repository 边界已经收敛；下一阶段的主要结构风险转为脚本与应用层的反向依赖、旧入口和失联原型。
 
 整改总原则：
 
@@ -441,7 +441,7 @@ validation_status: unvalidated
 1. `PortfolioRepository`：先解决列表 N+1 和 Service 过大。（E2 已完成）
 2. `TrackingRepository`：避免分页同时重新加载全量结果。（E3 已完成）
 3. `DashboardRepository`：统一市场快照查询和缓存。（E4 已完成）
-4. `SelectionRepository` / `BacktestRepository`：复用任务与结果查询。（SelectionRepository 已完成，BacktestRepository 待继续）
+4. `SelectionRepository` / `BacktestRepository`：复用任务与结果查询。（E5/E6 均已完成）
 
 原则：
 
@@ -891,3 +891,17 @@ backtest 也补齐到共享任务契约：
 为避免边界移动顺手改口径，部署前冻结三组基线：selection results、selection runs，以及 `lowvol_reversal + 2026-07-16 15:05 + limit=10` 的候选包。新磁盘代码与旧线上进程在真实 ASGI 序列化下逐字段一致，三组最终 SHA-256 均相同；候选代码顺序和全部诊断字段未变化。Repository 对动态日期运算符和市场板块只接受白名单，并新增候选 SQL、保存去重事务及“业务层不得直连 MySQL”的回归。
 
 验证结果：全量回归增至 102 项，编译、migration 16/16、diff 检查通过；上线窗口三类队列为 0，可用内存约 2.2 GiB。selection worker 与 API 串行重启后均 active、`NRestarts=0`，本地 health/readiness/results/runs 均 200，selection worker healthy/idle、队列 0；公网 health 200、未认证 selection 401。readiness 仍为 `degraded + accepting_jobs=true`，唯一原因仍是当日 factor input 等待 18:30 上游补跑。下一垂直切片进入 `BacktestRepository`。
+
+### 2026-07-16：D2 历史舆情生命周期已完整收口
+
+16:05 首次后台生命周期任务已归一化 16,875 条保留快照，但在一个同时含“已完成”和“待处理”记录的混合批次中，UPDATE 错误复用了原批次占位符，触发 `TypeError: not enough arguments for format string`。异常发生在裁剪前，因此该失败任务没有删除历史快照。
+
+现已改为按 SELECT 实际返回的 `normalized_ids` 生成 UPDATE 占位符，并增加混合批次回归。恢复任务保持幂等，继续归一化剩余 3,554 条后先完成保留集校验，再删除 124,545 条冗余快照。最终保留 21,772 条、46 个交易日；`normalized_rows=21772`、`legacy_json_rows=0`、`pending_normalization_rows=0`、`prunable_rows=0`。任务日志状态为 success，D2 不再有后台历史迁移尾项。
+
+### 2026-07-16：E6 BacktestRepository 已部署
+
+新增 `app/backtest/repository.py`，将回测 run/result/curve/trade/factor status 读取、候选与历史窗口加载、run 创建/进度/结果/完成写入，以及验证基线查询，从 route、`BacktestService` 和 `validation_baseline` 收口到 Repository。三层均不再导入 `mysql_conn` 或保存 SQL；研究披露、能力预检、策略执行、收益计算、分页字段映射和验证结论仍留在原业务边界。
+
+部署前冻结一个正式历史 run 的四组 API 响应、2026-04-24 的 5,201 条候选及 2026-04-24/27 两个交易日。旧线上进程与新磁盘代码逐字段一致；部署后 results/runs/trades/factor-status 四个 SHA-256 再次全部命中冻结值。没有提交新回测任务，也没有制造正式或系统测试数据。
+
+验证结果：全量回归增至 109 项，编译、migration 16/16、diff 检查通过；上线前后三类队列均为 0。backtest worker 与 API 串行重启后 active、`NRestarts=0`，三个 worker 均 healthy/idle；公网 health 200、未认证 backtest 401。readiness 仍为 `degraded + accepting_jobs=true`，唯一原因是 2026-07-16 日线已完整而 factor input 等待 18:30 上游补跑。E2-E6 的五个核心 Repository 垂直切片至此完成，下一步进入 P3-3：清理反向依赖和旧入口。

@@ -14,9 +14,9 @@ from typing import Any, Dict, List, Optional, Sequence
 from pymysql.err import IntegrityError
 
 from app.backtest.policy import BACKTEST_METHODOLOGY_VERSION, research_disclosure
+from app.backtest.repository import BacktestRepository
 from app.jobs.errors import record_job_error
 from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
-from app.shared.db import mysql_conn
 from app.shared.instrument_policy import SUPPORTED_BACKTEST_INSTRUMENT_TYPES, require_supported_instrument
 from app.stock_selection.selector import StockSelector
 from app.strategies.service import StrategyService
@@ -74,10 +74,15 @@ class BacktestService:
     STALE_RUNNING_SECONDS = 30 * 60
     DEFAULT_MAX_ATTEMPTS = 2
 
-    def __init__(self, job_states: MySQLJobStateRepository | None = None) -> None:
+    def __init__(
+        self,
+        job_states: MySQLJobStateRepository | None = None,
+        repository: BacktestRepository | None = None,
+    ) -> None:
         self.job_states = job_states or MySQLJobStateRepository(
             MySQLJobTable(table="backtest_run")
         )
+        self.repository = repository or BacktestRepository()
 
     @staticmethod
     def _stable_hash(value: Any) -> str:
@@ -134,19 +139,9 @@ class BacktestService:
         item["is_st"] = False
         return item
 
-    @staticmethod
-    def _fetch_data_cutoff(end_date: str) -> str | None:
-        sql = """
-        SELECT MAX(f.trade_date) AS data_cutoff_date
-        FROM factor_input_daily f
-        INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
-        WHERE f.trade_date <= %s
-        """
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (end_date,))
-                row = cursor.fetchone() or {}
-        return str(row.get("data_cutoff_date")) if row.get("data_cutoff_date") else None
+    def _fetch_data_cutoff(self, end_date: str) -> str | None:
+        value = self.repository.fetch_data_cutoff(end_date)
+        return str(value) if value else None
 
     def submit(self, request: BacktestRequest) -> Dict[str, Any]:
         self._validate_request(request)
@@ -199,20 +194,7 @@ class BacktestService:
         )
 
     def _get_active_by_idempotency(self, idempotency_key: str) -> Dict[str, Any] | None:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM backtest_run
-                    WHERE active_idempotency_key=%s
-                      AND status IN ('queued','running')
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (idempotency_key,),
-                )
-                row = cursor.fetchone()
+        row = self.repository.get_active_run_by_idempotency(idempotency_key)
         if not row:
             return None
         return self.get_run(str(row["run_id"]))
@@ -274,10 +256,7 @@ class BacktestService:
         return f"{socket.gethostname()}:{os.getpid()}"
 
     def get_run(self, run_id: str) -> Dict[str, Any]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM backtest_run WHERE run_id=%s", (run_id,))
-                row = cursor.fetchone()
+        row = self.repository.get_run(run_id)
         if not row:
             raise ValueError("backtest run not found")
         summary_json = row.get("summary_json")
@@ -455,45 +434,13 @@ class BacktestService:
         self._finish_run(run_id, "success", len(trade_dates), len(all_picks), len(all_trades), summary)
 
     def _fetch_trade_dates(self, start_date: str, end_date: str) -> List[str]:
-        sql = """
-        SELECT DISTINCT f.trade_date
-        FROM factor_input_daily f
-        INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
-        WHERE f.trade_date BETWEEN %s AND %s
-        ORDER BY f.trade_date
-        """
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (start_date, end_date))
-                return [str(row["trade_date"]) for row in cursor.fetchall()]
+        return [
+            str(row["trade_date"])
+            for row in self.repository.fetch_trade_dates(start_date, end_date)
+        ]
 
     def _has_lowvol_feature_cache(self, trade_date: str) -> bool:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT
-                        (
-                            SELECT COUNT(*)
-                            FROM lowvol_reversal_feature_daily
-                            WHERE trade_date = %s
-                        ) AS cache_count,
-                        (
-                            SELECT COUNT(*)
-                            FROM factor_input_daily f
-                            INNER JOIN daily_kline dk
-                              ON dk.code = f.code AND dk.trade_date = f.trade_date
-                            INNER JOIN stock_basic sb ON sb.code = f.code
-                            WHERE f.trade_date = %s
-                              AND sb.instrument_type = 'stock'
-                              AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
-                              AND dk.open IS NOT NULL
-                              AND dk.open > 0
-                        ) AS expected_count
-                    """,
-                    (trade_date, trade_date),
-                )
-                row = cursor.fetchone() or {}
+        row = self.repository.lowvol_feature_cache_counts(trade_date)
         cache_count = int(row.get("cache_count") or 0)
         expected_count = int(row.get("expected_count") or 0)
         if expected_count <= 0:
@@ -501,87 +448,10 @@ class BacktestService:
         return cache_count >= max(1000, int(expected_count * 0.9))
 
     def _load_candidates_from_feature_cache(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
-        sql = """
-        SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            0 AS is_st,
-            NULL AS pe_tushare,
-            NULL AS pb_tushare,
-            NULL AS roe,
-            NULL AS roa,
-            NULL AS grossprofit_margin,
-            NULL AS netprofit_margin,
-            NULL AS revenue_yoy,
-            NULL AS profit_yoy,
-            NULL AS eps,
-            f.turnover_rate,
-            f.volume_ratio,
-            f.total_mv,
-            NULL AS completeness_score,
-            dk.open,
-            dk.close,
-            dk.amount,
-            dk.trade_date,
-            lf.ma20,
-            lf.ma60,
-            lf.close_5d,
-            lf.close_20d,
-            lf.prev_close_1d,
-            lf.max_close_20,
-            lf.min_close_20,
-            lf.avg_amount_20,
-            lf.kline_count_20,
-            lf.kline_count_60,
-            lf.std_return_20,
-            lf.pct_chg_1d,
-            lf.turnover_rate_5d_avg,
-            mf.net_mf_amount,
-            mf.net_mf_vol,
-            mf.buy_lg_amount,
-            mf.sell_lg_amount,
-            mf.buy_elg_amount,
-            mf.sell_elg_amount,
-            chip.his_low AS chip_his_low,
-            chip.his_high AS chip_his_high,
-            chip.cost_5pct AS chip_cost_5pct,
-            chip.cost_15pct AS chip_cost_15pct,
-            chip.cost_50pct AS chip_cost_50pct,
-            chip.cost_85pct AS chip_cost_85pct,
-            chip.cost_95pct AS chip_cost_95pct,
-            chip.weight_avg AS chip_weight_avg,
-            chip.winner_rate AS chip_winner_rate,
-            DATEDIFF(f.trade_date, sb.listing_date) AS listed_days,
-            ssd.sentiment_score,
-            ssd.news_count,
-            mcd.market_strength,
-            mcd.market_state
-        FROM factor_input_daily f
-        INNER JOIN stock_basic sb ON sb.code = f.code
-        INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
-        INNER JOIN lowvol_reversal_feature_daily lf ON lf.code = f.code AND lf.trade_date = f.trade_date
-        LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
-        LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
-        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code
-          AND ssd.trade_date = (
-              SELECT MAX(s2.trade_date)
-              FROM stock_sentiment_daily s2
-              WHERE s2.code = f.code AND s2.trade_date <= f.trade_date
-          )
-        LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
-        WHERE f.trade_date = %s
-          AND sb.instrument_type = %s
-          AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
-          AND dk.open IS NOT NULL
-          AND dk.open > 0
-        ORDER BY sb.code
-        """
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (trade_date, instrument_type))
-                rows = cursor.fetchall()
+        rows = self.repository.load_feature_candidate_rows(
+            trade_date,
+            instrument_type,
+        )
         candidates: List[Dict[str, Any]] = []
         for row in rows:
             item = selector._build_candidate(self._exclude_non_point_in_time_fields(row))
@@ -599,129 +469,12 @@ class BacktestService:
             pass
         kline_window_start = self._fetch_window_start_date("daily_kline", trade_date, 90)
         factor_window_start = self._fetch_window_start_date("factor_input_daily", trade_date, 10)
-        sql = """
-        SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            0 AS is_st,
-            NULL AS pe_tushare,
-            NULL AS pb_tushare,
-            NULL AS roe,
-            NULL AS roa,
-            NULL AS grossprofit_margin,
-            NULL AS netprofit_margin,
-            NULL AS revenue_yoy,
-            NULL AS profit_yoy,
-            NULL AS eps,
-            f.turnover_rate,
-            f.volume_ratio,
-            f.total_mv,
-            NULL AS completeness_score,
-            dk.open,
-            dk.close,
-            dk.amount,
-            dk.trade_date,
-            ma.ma20,
-            ma.ma60,
-            ma.close_5d,
-            ma.close_20d,
-            ma.prev_close_1d,
-            ma.max_close_20,
-            ma.min_close_20,
-            ma.avg_amount_20,
-            ma.kline_count_20,
-            ma.kline_count_60,
-            ma.std_return_20,
-            ma.pct_chg_1d,
-            tma.turnover_rate_5d_avg,
-            mf.net_mf_amount,
-            mf.net_mf_vol,
-            mf.buy_lg_amount,
-            mf.sell_lg_amount,
-            mf.buy_elg_amount,
-            mf.sell_elg_amount,
-            chip.his_low AS chip_his_low,
-            chip.his_high AS chip_his_high,
-            chip.cost_5pct AS chip_cost_5pct,
-            chip.cost_15pct AS chip_cost_15pct,
-            chip.cost_50pct AS chip_cost_50pct,
-            chip.cost_85pct AS chip_cost_85pct,
-            chip.cost_95pct AS chip_cost_95pct,
-            chip.weight_avg AS chip_weight_avg,
-            chip.winner_rate AS chip_winner_rate,
-            DATEDIFF(f.trade_date, sb.listing_date) AS listed_days,
-            ssd.sentiment_score,
-            ssd.news_count,
-            mcd.market_strength,
-            mcd.market_state
-        FROM factor_input_daily f
-        INNER JOIN stock_basic sb ON sb.code = f.code
-        INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
-        LEFT JOIN (
-            SELECT
-                code,
-                AVG(CASE WHEN rn <= 20 THEN close END) AS ma20,
-                AVG(CASE WHEN rn <= 60 THEN close END) AS ma60,
-                MAX(CASE WHEN rn = 6 THEN close END) AS close_5d,
-                MAX(CASE WHEN rn = 20 THEN close END) AS close_20d,
-                MAX(CASE WHEN rn = 2 THEN close END) AS prev_close_1d,
-                MAX(CASE WHEN rn <= 20 THEN close END) AS max_close_20,
-                MIN(CASE WHEN rn <= 20 THEN close END) AS min_close_20,
-                AVG(CASE WHEN rn <= 20 THEN amount END) AS avg_amount_20,
-                SUM(CASE WHEN rn <= 20 THEN 1 ELSE 0 END) AS kline_count_20,
-                COUNT(*) AS kline_count_60,
-                STDDEV_SAMP(CASE WHEN rn <= 20 AND prev_close IS NOT NULL AND prev_close > 0 THEN close / prev_close - 1 END) AS std_return_20,
-                MAX(CASE WHEN rn = 1 AND prev_close IS NOT NULL AND prev_close > 0 THEN (close - prev_close) / prev_close * 100 END) AS pct_chg_1d
-            FROM (
-                SELECT
-                    code,
-                    trade_date,
-                    close,
-                    amount,
-                    LAG(close) OVER (PARTITION BY code ORDER BY trade_date) AS prev_close,
-                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
-                FROM daily_kline
-                WHERE trade_date BETWEEN %s AND %s
-            ) ranked
-            WHERE rn <= 60
-            GROUP BY code
-        ) ma ON sb.code = ma.code
-        LEFT JOIN (
-            SELECT code, AVG(turnover_rate) AS turnover_rate_5d_avg
-            FROM (
-                SELECT
-                    code,
-                    turnover_rate,
-                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
-                FROM factor_input_daily
-                WHERE trade_date BETWEEN %s AND %s
-                  AND turnover_rate IS NOT NULL
-            ) ranked_turnover
-            WHERE rn <= 5
-            GROUP BY code
-        ) tma ON sb.code = tma.code
-        LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
-        LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
-        LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code
-          AND ssd.trade_date = (
-              SELECT MAX(s2.trade_date)
-              FROM stock_sentiment_daily s2
-              WHERE s2.code = f.code AND s2.trade_date <= f.trade_date
-          )
-        LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
-        WHERE f.trade_date = %s
-          AND sb.instrument_type = %s
-          AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
-          AND dk.open IS NOT NULL
-          AND dk.open > 0
-        ORDER BY sb.code
-        """
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (kline_window_start, trade_date, factor_window_start, trade_date, trade_date, instrument_type))
-                rows = cursor.fetchall()
+        rows = self.repository.load_candidate_rows(
+            trade_date=trade_date,
+            instrument_type=instrument_type,
+            kline_window_start=kline_window_start,
+            factor_window_start=factor_window_start,
+        )
         candidates: List[Dict[str, Any]] = []
         for row in rows:
             item = selector._build_candidate(self._exclude_non_point_in_time_fields(row))  # 复用 V1 候选口径，V2 后续再拆出公共 builder
@@ -730,25 +483,9 @@ class BacktestService:
             candidates.append(item)
         return candidates
 
-    @staticmethod
-    def _fetch_window_start_date(table: str, trade_date: str, limit: int) -> str:
-        if table not in {"daily_kline", "factor_input_daily"}:
-            raise ValueError("unsupported history table")
-        sql = f"""
-        SELECT MIN(trade_date) AS start_date
-        FROM (
-            SELECT DISTINCT trade_date
-            FROM {table}
-            WHERE trade_date <= %s
-            ORDER BY trade_date DESC
-            LIMIT %s
-        ) recent_dates
-        """
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (trade_date, int(limit)))
-                row = cursor.fetchone() or {}
-        return str(row.get("start_date") or trade_date)
+    def _fetch_window_start_date(self, table: str, trade_date: str, limit: int) -> str:
+        value = self.repository.fetch_window_start_date(table, trade_date, limit)
+        return str(value or trade_date)
 
     def _build_pick(self, item: Dict[str, Any], trade_date: str) -> Dict[str, Any]:
         return {
@@ -893,31 +630,11 @@ class BacktestService:
     def _fetch_future_bars(self, codes: Sequence[str], trade_date: str, lookahead: int) -> Dict[str, List[Dict[str, Any]]]:
         if not codes:
             return {}
-        placeholders = ",".join(["%s"] * len(codes))
-        sql = f"""
-        SELECT dk.code, NULL AS name, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
-               prev.close AS prev_close,
-               af.adj_factor
-        FROM daily_kline dk
-        LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
-        LEFT JOIN daily_kline prev ON prev.code = dk.code
-          AND prev.trade_date = (
-            SELECT MAX(p.trade_date)
-            FROM daily_kline p
-            WHERE p.code = dk.code AND p.trade_date < dk.trade_date
-          )
-        WHERE dk.code IN ({placeholders}) AND dk.trade_date > %s
-        ORDER BY dk.code, dk.trade_date
-        """
-        params = list(codes) + [trade_date]
         grouped: Dict[str, List[Dict[str, Any]]] = {code: [] for code in codes}
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, params)
-                for row in cursor.fetchall():
-                    code = row["code"]
-                    if len(grouped.setdefault(code, [])) < lookahead:
-                        grouped[code].append(row)
+        for row in self.repository.fetch_future_bar_rows(codes, trade_date):
+            code = row["code"]
+            if len(grouped.setdefault(code, [])) < lookahead:
+                grouped[code].append(row)
         return grouped
 
     @staticmethod
@@ -1138,149 +855,72 @@ class BacktestService:
         idempotency_key: str | None = None,
     ) -> None:
         methodology = self._methodology_metadata(request)
-        columns = (
-            "run_id",
-            "strategy_id",
-            "trade_strategy_id",
-            "strategy_version",
-            "instrument_type",
-            "start_date",
-            "end_date",
-            "return_mode",
-            "evaluation_mode",
-            "methodology_version",
-            "data_cutoff_date",
-            "strategy_config_hash",
-            "methodology_json",
-            "use_adjusted_price",
-            "commission_bps",
-            "stamp_tax_bps",
-            "slippage_bps",
-            "execution_constraints_enabled",
-            "is_system_test",
-            "validation_baseline_id",
-            "status",
-            "idempotency_key",
-            "active_idempotency_key",
-            "attempt_count",
-            "max_attempts",
-            "phase",
-            "request_json",
-            "started_at",
-            "progress_total_days",
-            "progress_done_days",
-            "progress_pct",
+        self.repository.create_run(
+            {
+                "run_id": run_id,
+                "strategy_id": request.strategy_id,
+                "trade_strategy_id": request.trade_strategy_id,
+                "strategy_version": selector.strategy_meta.get("version"),
+                "instrument_type": request.instrument_type,
+                "start_date": request.start_date,
+                "end_date": request.end_date,
+                "return_mode": request.return_mode,
+                "evaluation_mode": request.evaluation_mode,
+                "methodology_version": BACKTEST_METHODOLOGY_VERSION,
+                "data_cutoff_date": self._fetch_data_cutoff(request.end_date),
+                "strategy_config_hash": self._strategy_config_hash(selector),
+                "methodology_json": _to_json(methodology),
+                "use_adjusted_price": int(request.use_adjusted_price),
+                "commission_bps": request.commission_bps,
+                "stamp_tax_bps": request.stamp_tax_bps,
+                "slippage_bps": request.slippage_bps,
+                "execution_constraints_enabled": int(request.apply_execution_constraints),
+                "is_system_test": int(request.is_system_test),
+                "validation_baseline_id": request.validation_baseline_id,
+                "status": status,
+                "idempotency_key": idempotency_key,
+                "active_idempotency_key": idempotency_key if status == "queued" else None,
+                "attempt_count": 0,
+                "max_attempts": self.DEFAULT_MAX_ATTEMPTS,
+                "phase": "任务已提交" if status == "queued" else "回测执行中",
+                "request_json": _to_json(request.__dict__),
+                "started_at": started_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "progress_total_days": progress_total_days,
+                "progress_done_days": 0,
+                "progress_pct": 0,
+            }
         )
-        sql = f"INSERT INTO backtest_run ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})"
-        values = (
-            run_id,
-            request.strategy_id,
-            request.trade_strategy_id,
-            selector.strategy_meta.get("version"),
-            request.instrument_type,
-            request.start_date,
-            request.end_date,
-            request.return_mode,
-            request.evaluation_mode,
-            BACKTEST_METHODOLOGY_VERSION,
-            self._fetch_data_cutoff(request.end_date),
-            self._strategy_config_hash(selector),
-            _to_json(methodology),
-            int(request.use_adjusted_price),
-            request.commission_bps,
-            request.stamp_tax_bps,
-            request.slippage_bps,
-            int(request.apply_execution_constraints),
-            int(request.is_system_test),
-            request.validation_baseline_id,
-            status,
-            idempotency_key,
-            idempotency_key if status == "queued" else None,
-            0,
-            self.DEFAULT_MAX_ATTEMPTS,
-            "任务已提交" if status == "queued" else "回测执行中",
-            _to_json(request.__dict__),
-            started_at.strftime("%Y-%m-%d %H:%M:%S"),
-            progress_total_days,
-            0,
-            0,
-        )
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, values)
 
     def _mark_running(self, run_id: str, progress_total_days: int) -> None:
-        sql = """
-        UPDATE backtest_run
-        SET status='running', progress_total_days=%s, progress_done_days=0,
-            progress_pct=0, current_trade_date=NULL, estimated_seconds_left=NULL,
-            worker_heartbeat_at=%s, phase='回测执行中', error_code=NULL,
-            error_message=NULL, started_at=%s, finished_at=NULL
-        WHERE run_id=%s
-        """
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute(sql, (progress_total_days, now, now, run_id))
+        self.repository.mark_running(
+            run_id,
+            progress_total_days,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
 
     def _clear_run_results(self, run_id: str) -> None:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                for table in ["backtest_pick", "backtest_trade", "backtest_summary_daily"]:
-                    cursor.execute(f"DELETE FROM {table} WHERE run_id=%s", (run_id,))
+        self.repository.clear_run_results(run_id)
 
     def _update_progress(self, run_id: str, done_days: int, total_days: int, current_trade_date: str, seconds_left: int | None) -> None:
         progress_pct = round((done_days / total_days) * 100, 4) if total_days else 0
-        sql = """
-        UPDATE backtest_run
-        SET progress_done_days=%s, progress_total_days=%s, progress_pct=%s,
-            current_trade_date=%s, estimated_seconds_left=%s, worker_heartbeat_at=%s,
-            phase='回测执行中'
-        WHERE run_id=%s
-        """
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (done_days, total_days, progress_pct, current_trade_date, seconds_left, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_id))
+        self.repository.update_progress(
+            run_id=run_id,
+            done_days=done_days,
+            total_days=total_days,
+            progress_pct=progress_pct,
+            current_trade_date=current_trade_date,
+            seconds_left=seconds_left,
+            now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
 
     def _save_results(self, run_id: str, strategy_id: str, picks: Sequence[Dict[str, Any]], trades: Sequence[Dict[str, Any]], daily: Sequence[Dict[str, Any]]) -> None:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                if picks:
-                    cursor.executemany(
-                        """
-                        INSERT INTO backtest_pick (run_id, strategy_id, trade_date, code, rank_no, score, entry_price, entry_price_type, factor_json, explain_json)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE score=VALUES(score), rank_no=VALUES(rank_no), entry_price=VALUES(entry_price), factor_json=VALUES(factor_json), explain_json=VALUES(explain_json)
-                        """,
-                        [
-                            (run_id, strategy_id, p["trade_date"], p["code"], p.get("rank_no"), p.get("score"), p.get("entry_price"), p.get("entry_price_type"), _to_json(p.get("factor_json")), _to_json(p.get("explain_json")))
-                            for p in picks
-                        ],
-                    )
-                if trades:
-                    cursor.executemany(
-                        """
-                        INSERT INTO backtest_trade (run_id, strategy_id, trade_date, code, entry_date, entry_price, exit_date_1d, exit_price_1d, return_1d_pct, exit_date_3d, exit_price_3d, return_3d_pct, max_gain_pct, max_drawdown_pct)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE exit_date_1d=VALUES(exit_date_1d), exit_price_1d=VALUES(exit_price_1d), return_1d_pct=VALUES(return_1d_pct), exit_date_3d=VALUES(exit_date_3d), exit_price_3d=VALUES(exit_price_3d), return_3d_pct=VALUES(return_3d_pct), max_gain_pct=VALUES(max_gain_pct), max_drawdown_pct=VALUES(max_drawdown_pct)
-                        """,
-                        [
-                            (t["run_id"], t["strategy_id"], t["trade_date"], t["code"], t["entry_date"], t["entry_price"], t.get("exit_date_1d"), t.get("exit_price_1d"), t.get("return_1d_pct"), t.get("exit_date_3d"), t.get("exit_price_3d"), t.get("return_3d_pct"), t.get("max_gain_pct"), t.get("max_drawdown_pct"))
-                            for t in trades
-                        ],
-                    )
-                if daily:
-                    cursor.executemany(
-                        """
-                        INSERT INTO backtest_summary_daily (run_id, strategy_id, trade_date, pick_count, avg_return_1d_pct, avg_return_3d_pct, win_rate_1d_pct, win_rate_3d_pct, benchmark_return_1d_pct, benchmark_return_3d_pct)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE pick_count=VALUES(pick_count), avg_return_1d_pct=VALUES(avg_return_1d_pct), avg_return_3d_pct=VALUES(avg_return_3d_pct), win_rate_1d_pct=VALUES(win_rate_1d_pct), win_rate_3d_pct=VALUES(win_rate_3d_pct)
-                        """,
-                        [
-                            (d["run_id"], d["strategy_id"], d["trade_date"], d["pick_count"], d.get("avg_return_1d_pct"), d.get("avg_return_3d_pct"), d.get("win_rate_1d_pct"), d.get("win_rate_3d_pct"), d.get("benchmark_return_1d_pct"), d.get("benchmark_return_3d_pct"))
-                            for d in daily
-                        ],
-                    )
+        self.repository.save_results(
+            run_id=run_id,
+            strategy_id=strategy_id,
+            picks=picks,
+            trades=trades,
+            daily=daily,
+        )
 
     def _finish_run(
         self,
@@ -1298,45 +938,23 @@ class BacktestService:
             "failed": "运行失败",
             "cancelled": "已取消",
         }.get(status, status)
-        sql = """
-        UPDATE backtest_run
-        SET status=%s, phase=%s, sample_days=%s, total_picks=%s, total_trades=%s,
-            progress_done_days=CASE WHEN %s='success' THEN progress_total_days ELSE progress_done_days END,
-            progress_pct=CASE WHEN %s='success' THEN 100 ELSE progress_pct END,
-            estimated_seconds_left=CASE WHEN %s='success' THEN 0 ELSE estimated_seconds_left END,
-            total_return_pct=%s, avg_return_pct=%s, max_drawdown_pct=%s, win_rate_pct=%s,
-            worker_heartbeat_at=%s, estimated_seconds_left=CASE WHEN %s IN ('success','cancelled') THEN 0 ELSE estimated_seconds_left END,
-            summary_json=%s, error_code=%s, error_message=%s, finished_at=%s,
-            active_idempotency_key=NULL
-        WHERE run_id=%s
-        """
-        updated = 0
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    sql,
-                    (
-                        status,
-                        phase,
-                        sample_days,
-                        total_picks,
-                        total_trades,
-                        status,
-                        status,
-                        status,
-                        summary.get("total_return_pct"),
-                        summary.get("avg_return_pct"),
-                        summary.get("max_drawdown_pct"),
-                        summary.get("win_rate_pct"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        status,
-                        _to_json(summary),
-                        error_code,
-                        error_message,
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        run_id,
-                    ),
-                )
-                updated = cursor.rowcount
+        updated = self.repository.finish_run(
+            {
+                "run_id": run_id,
+                "status": status,
+                "phase": phase,
+                "sample_days": sample_days,
+                "total_picks": total_picks,
+                "total_trades": total_trades,
+                "total_return_pct": summary.get("total_return_pct"),
+                "avg_return_pct": summary.get("avg_return_pct"),
+                "max_drawdown_pct": summary.get("max_drawdown_pct"),
+                "win_rate_pct": summary.get("win_rate_pct"),
+                "summary": summary,
+                "error_code": error_code,
+                "error_message": error_message,
+                "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
         if updated and status == "failed":
             record_job_error("backtest", "backtest", error_code, error_message)

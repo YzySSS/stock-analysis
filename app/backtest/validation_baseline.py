@@ -8,8 +8,8 @@ from decimal import Decimal
 from typing import Any, Dict, Sequence
 
 from app.backtest.policy import BACKTEST_METHODOLOGY_VERSION, LEGACY_BACKTEST_METHODOLOGY_VERSION
+from app.backtest.repository import BacktestRepository
 from app.backtest.service import BacktestRequest, BacktestService
-from app.shared.db import mysql_conn
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 
 
@@ -169,22 +169,16 @@ def build_run_comparison(current: Dict[str, Any], legacy: Dict[str, Any] | None)
 class BacktestValidationBaseline:
     """Runs a small, serial, system-test-only backtest validation baseline."""
 
-    def __init__(self, service: BacktestService | None = None) -> None:
+    def __init__(
+        self,
+        service: BacktestService | None = None,
+        repository: BacktestRepository | None = None,
+    ) -> None:
         self.service = service or BacktestService()
+        self.repository = repository or getattr(self.service, "repository", None) or BacktestRepository()
 
-    @staticmethod
-    def _active_runs() -> list[Dict[str, Any]]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT run_id, strategy_id, status, started_at
-                    FROM backtest_run
-                    WHERE status IN ('queued', 'running')
-                    ORDER BY id
-                    """
-                )
-                return cursor.fetchall() or []
+    def _active_runs(self) -> list[Dict[str, Any]]:
+        return self.repository.list_active_runs()
 
     @staticmethod
     def _assert_resources(min_available_mb: int, max_swap_used_mb: int) -> Dict[str, int]:
@@ -199,9 +193,8 @@ class BacktestValidationBaseline:
             )
         return snapshot
 
-    @staticmethod
-    def _assert_queue_idle() -> None:
-        active = BacktestValidationBaseline._active_runs()
+    def _assert_queue_idle(self) -> None:
+        active = self._active_runs()
         if active:
             raise RuntimeError(f"回测队列当前非空，拒绝叠加基线任务：{active}")
 
@@ -347,48 +340,14 @@ class BacktestValidationBaseline:
         report["execution_resource_snapshot"] = system_memory_snapshot()
         return report
 
-    @staticmethod
-    def _load_baseline_runs(baseline_id: str) -> list[Dict[str, Any]]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM backtest_run
-                    WHERE validation_baseline_id=%s AND is_system_test=1
-                    ORDER BY id
-                    """,
-                    (baseline_id,),
-                )
-                return cursor.fetchall() or []
+    def _load_baseline_runs(self, baseline_id: str) -> list[Dict[str, Any]]:
+        return self.repository.list_baseline_runs(baseline_id)
 
-    @staticmethod
-    def _legacy_candidates(current: Dict[str, Any]) -> list[Dict[str, Any]]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM backtest_run
-                    WHERE strategy_id=%s
-                      AND start_date=%s
-                      AND end_date=%s
-                      AND return_mode=%s
-                      AND status='success'
-                      AND COALESCE(is_system_test, 0)=0
-                      AND COALESCE(methodology_version, %s)=%s
-                    ORDER BY id DESC
-                    """,
-                    (
-                        current.get("strategy_id"),
-                        current.get("start_date"),
-                        current.get("end_date"),
-                        current.get("return_mode"),
-                        LEGACY_BACKTEST_METHODOLOGY_VERSION,
-                        LEGACY_BACKTEST_METHODOLOGY_VERSION,
-                    ),
-                )
-                return cursor.fetchall() or []
+    def _legacy_candidates(self, current: Dict[str, Any]) -> list[Dict[str, Any]]:
+        return self.repository.list_legacy_candidates(
+            current,
+            LEGACY_BACKTEST_METHODOLOGY_VERSION,
+        )
 
     @staticmethod
     def _legacy_match_score(current: Dict[str, Any], legacy: Dict[str, Any]) -> tuple[int, int]:

@@ -8,11 +8,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.backtest.policy import research_disclosure
+from app.backtest.repository import BacktestRepository
 from app.backtest.service import BacktestRequest, BacktestService
-from app.shared.db import mysql_conn
 from app.shared.instrument_policy import UnsupportedInstrumentError
 
 router = APIRouter(tags=["backtest"])
+backtest_repository = BacktestRepository()
 
 
 def _to_float(value: object) -> float | None:
@@ -180,33 +181,13 @@ def normalize_run_row(row: dict, *, include_details: bool = True) -> dict:
 @router.get("/backtest/results")
 def get_backtest_results(run_id: Optional[str] = Query(default=None)) -> dict:
     if not run_id:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT run_id FROM backtest_run WHERE COALESCE(is_system_test, 0) = 0 ORDER BY id DESC LIMIT 1")
-                latest = cursor.fetchone() or {}
-                run_id = latest.get("run_id")
+        run_id = backtest_repository.latest_official_run_id()
     if not run_id:
         return {**research_disclosure(), "run_id": None, "summary": None, "curve": []}
 
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM backtest_run WHERE run_id = %s", (run_id,))
-            run = cursor.fetchone()
-            if not run:
-                raise HTTPException(status_code=404, detail="backtest run not found")
-
-            cursor.execute(
-                """
-                SELECT trade_date, pick_count, avg_return_1d_pct, avg_return_3d_pct,
-                       win_rate_1d_pct, win_rate_3d_pct,
-                       benchmark_return_1d_pct, benchmark_return_3d_pct
-                FROM backtest_summary_daily
-                WHERE run_id = %s
-                ORDER BY trade_date
-                """,
-                (run_id,),
-            )
-            curve = cursor.fetchall() or []
+    run, curve = backtest_repository.load_run_results(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="backtest run not found")
 
     summary_json = run.get("summary_json")
     summary = json.loads(summary_json) if isinstance(summary_json, str) else summary_json
@@ -232,45 +213,22 @@ def get_backtest_trades(
     code: Optional[str] = Query(default=None),
     return_mode: str = Query(default="1d"),
 ) -> dict:
-    conditions = ["run_id = %s"]
-    base_params: list[object] = [run_id]
-    if trade_date:
-        conditions.append("trade_date = %s")
-        base_params.append(trade_date)
-    if code:
-        conditions.append("code = %s")
-        base_params.append(code)
     offset = (page - 1) * limit
-    prefixed_conditions = [f"t.{condition}" if condition.startswith(("run_id", "trade_date", "code")) else condition for condition in conditions]
-    where_sql = " AND ".join(prefixed_conditions)
-    sql = f"""
-    SELECT t.run_id, t.strategy_id, t.trade_date, t.code, sb.name,
-           p.score AS entry_score, p.factor_json,
-           t.entry_date, t.entry_price,
-           t.exit_date_1d, t.exit_price_1d, t.return_1d_pct,
-           t.exit_date_3d, t.exit_price_3d, t.return_3d_pct,
-           t.max_gain_pct, t.max_drawdown_pct
-    FROM backtest_trade t
-    LEFT JOIN stock_basic sb ON sb.code = t.code
-    LEFT JOIN backtest_pick p ON p.run_id = t.run_id AND p.trade_date = t.trade_date AND p.code = t.code
-    WHERE {where_sql}
-    ORDER BY t.trade_date DESC, t.return_{'1d' if return_mode == '1d' else '3d'}_pct DESC
-    LIMIT %s OFFSET %s
-    """
-    count_sql = f"""
-    SELECT COUNT(*) AS total
-    FROM backtest_trade t
-    WHERE {where_sql}
-    """
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT use_adjusted_price FROM backtest_run WHERE run_id=%s", (run_id,))
-            run_row = cursor.fetchone() or {}
-            cursor.execute(count_sql, base_params)
-            total = int((cursor.fetchone() or {}).get("total") or 0)
-            cursor.execute(sql, base_params + [limit, offset])
-            rows = cursor.fetchall() or []
-            horizon_by_key = build_trade_horizon_rows(cursor, rows, bool(run_row.get("use_adjusted_price")))
+    page_data = backtest_repository.load_trade_page(
+        run_id=run_id,
+        limit=limit,
+        offset=offset,
+        trade_date=trade_date,
+        code=code,
+        return_mode=return_mode,
+    )
+    total = page_data["total"]
+    rows = page_data["rows"]
+    horizon_by_key = build_trade_horizon_rows(
+        rows,
+        page_data["horizon_bars"],
+        page_data["use_adjusted_price"],
+    )
     return {
         "run_id": run_id,
         "limit": limit,
@@ -295,7 +253,11 @@ def get_backtest_trades(
     }
 
 
-def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: bool = False) -> dict[tuple[object, object], list[dict]]:
+def build_trade_horizon_rows(
+    trades: list[dict],
+    bars_by_key: dict[tuple[object, object], list[dict]],
+    use_adjusted_price: bool = False,
+) -> dict[tuple[object, object], list[dict]]:
     """Build T/T+1/T+2/T+3/T+4 close and intraday risk snapshots for trade rows.
 
     Values are relative to the recorded entry price. When the run used adjusted
@@ -305,14 +267,6 @@ def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: boo
     result: dict[tuple[object, object], list[dict]] = {}
     if not trades:
         return result
-    sql = """
-    SELECT dk.trade_date, dk.close, dk.high, dk.low, af.adj_factor
-    FROM daily_kline dk
-    LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
-    WHERE dk.code=%s AND dk.trade_date >= %s
-    ORDER BY dk.trade_date
-    LIMIT 5
-    """
     for trade in trades:
         code = trade.get("code")
         trade_date = trade.get("trade_date")
@@ -320,8 +274,7 @@ def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: boo
         entry_price = _to_float(trade.get("entry_price"))
         if not code or not trade_date or not entry_date or not entry_price:
             continue
-        cursor.execute(sql, (code, entry_date))
-        bars = cursor.fetchall() or []
+        bars = bars_by_key.get((trade_date, code), [])
         entry_factor = _to_float(bars[0].get("adj_factor")) if bars else None
         items: list[dict] = []
         for day_no, bar in enumerate(bars[:5], start=0):
@@ -351,20 +304,10 @@ def get_backtest_runs(
     include_system_tests: bool = Query(default=False),
     compact: bool = Query(default=False),
 ) -> dict:
-    where_sql = "" if include_system_tests else "WHERE COALESCE(is_system_test, 0) = 0"
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                f"""
-                SELECT *
-                FROM backtest_run
-                {where_sql}
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (limit,),
-            )
-            rows = cursor.fetchall() or []
+    rows = backtest_repository.list_runs(
+        limit=limit,
+        include_system_tests=include_system_tests,
+    )
     return {
         "items": [
             normalize_run_row(row, include_details=not compact)
@@ -375,40 +318,11 @@ def get_backtest_runs(
 
 @router.get("/factor-input/status")
 def get_factor_input_status() -> dict:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT MIN(trade_date) AS min_trade_date, MAX(trade_date) AS max_trade_date FROM factor_input_daily")
-            summary = cursor.fetchone() or {}
-            cursor.execute("SELECT TABLE_ROWS AS total_rows FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'factor_input_daily'")
-            table_stats = cursor.fetchone() or {}
-
-            latest_trade_date = summary.get("max_trade_date")
-            cursor.execute(
-                """
-                SELECT
-                    SUM(CASE WHEN pe_tushare IS NOT NULL THEN 1 ELSE 0 END) AS pe_tushare_filled,
-                    SUM(CASE WHEN pb_tushare IS NOT NULL THEN 1 ELSE 0 END) AS pb_tushare_filled,
-                    SUM(CASE WHEN turnover_rate IS NOT NULL THEN 1 ELSE 0 END) AS turnover_rate_filled,
-                    SUM(CASE WHEN roe IS NOT NULL THEN 1 ELSE 0 END) AS roe_filled,
-                    SUM(CASE WHEN revenue_yoy IS NOT NULL THEN 1 ELSE 0 END) AS revenue_yoy_filled,
-                    COUNT(*) AS total_rows
-                FROM factor_input_daily
-                WHERE trade_date = %s
-                """,
-                (latest_trade_date,),
-            )
-            field_row = cursor.fetchone() or {}
-
-            cursor.execute(
-                """
-                SELECT task_name, run_id, status, started_at, finished_at, message
-                FROM task_run_log
-                WHERE task_name = 'factor_input_history_backfill'
-                ORDER BY id DESC
-                LIMIT 1
-                """
-            )
-            latest_task = cursor.fetchone() or {}
+    status_rows = backtest_repository.load_factor_input_status()
+    summary = status_rows["summary"]
+    table_stats = status_rows["table_stats"]
+    field_row = status_rows["field_row"]
+    latest_task = status_rows["latest_task"]
 
     latest_rows = int(field_row.get("total_rows") or 0)
     total_rows = int(table_stats.get("total_rows") or latest_rows)

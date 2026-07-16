@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
-from unittest.mock import patch
 
 from app.backtest.policy import (
     BACKTEST_METHODOLOGY_VERSION,
@@ -112,27 +111,10 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
     def test_run_insert_persists_reproducibility_metadata(self):
         executed: dict = {}
 
-        class FakeCursor:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return False
-
-            def execute(self, sql, params):
-                executed["sql"] = sql
-                executed["params"] = params
-
-        class FakeConnection:
-            def cursor(self):
-                return FakeCursor()
-
-        class FakeContext:
-            def __enter__(self):
-                return FakeConnection()
-
-            def __exit__(self, *_args):
-                return False
+        class FakeRepository:
+            @staticmethod
+            def create_run(values):
+                executed.update(values)
 
         class FakeStrategy:
             config = {"max_picks": 3}
@@ -149,19 +131,17 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
             is_system_test=True,
             validation_baseline_id="b3-smoke",
         )
-        service = BacktestService()
+        service = BacktestService(repository=FakeRepository())
         service._fetch_data_cutoff = lambda _end_date: "2026-07-02"
 
-        with patch("app.backtest.service.mysql_conn", return_value=FakeContext()):
-            service._create_run("run", request, FakeSelector(), datetime(2026, 7, 15), status="queued", progress_total_days=2)
+        service._create_run("run", request, FakeSelector(), datetime(2026, 7, 15), status="queued", progress_total_days=2)
 
-        self.assertIn("methodology_version", executed["sql"])
-        self.assertIn("strategy_config_hash", executed["sql"])
-        self.assertIn("is_system_test", executed["sql"])
-        self.assertIn("validation_baseline_id", executed["sql"])
-        self.assertEqual(executed["sql"].count("%s"), len(executed["params"]))
-        self.assertIn(BACKTEST_METHODOLOGY_VERSION, executed["params"])
-        self.assertIn("b3-smoke", executed["params"])
+        self.assertEqual(executed["methodology_version"], BACKTEST_METHODOLOGY_VERSION)
+        self.assertTrue(executed["strategy_config_hash"])
+        self.assertEqual(executed["is_system_test"], 1)
+        self.assertEqual(executed["validation_baseline_id"], "b3-smoke")
+        self.assertEqual(executed["status"], "queued")
+        self.assertEqual(executed["progress_total_days"], 2)
 
 
 if __name__ == "__main__":
