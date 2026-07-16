@@ -305,8 +305,8 @@ class JobRepository:
 - `BacktestRepository` 已完成：route、`BacktestService`、验证基线不再直连 MySQL，run/result/trade/factor status、候选窗口、结果写入和验证查询统一收口；四组 API、5,201 条固定候选和交易日影子响应零差异。
 - readiness 数据新鲜度已按业务口径校准：历史输入层只与达到股票池 95% 覆盖的完整日线日期比较；ETF/零星盘中日线只记为 partial available，不再触发股票因子落后误报。
 - factor input 改为 18:30 收盘后补跑、03:20 兜底；Tushare `daily_basic` 每交易日只抓一次，低于 80% 覆盖的日期不写入并以 `partial_success` 暴露上游未就绪。
-- 下一步进入 P3-3，清理脚本与 `app` 的反向依赖、旧入口和失联原型。
-- 真实空库 migration smoke 等待数据库侧提供独立测试库；禁止借生产库模拟。
+- P3-3 已完成：生产 app 对 `scripts/src` 的直接依赖为 0，ETF/舆情可复用任务进入 `app/data_ingestion`，相关脚本为薄启动器；旧选股 CLI 改为排队，未路由首页和 ETF grid 原型已归档。
+- P3-4 七类最低回归已覆盖，全量 115 项；真实空库 migration smoke 等待数据库侧提供独立测试库，禁止借生产库模拟。
 
 ## 9. 验证与回滚要求
 

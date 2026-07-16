@@ -10,7 +10,8 @@ from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, r
 from app.shared.strategy_loader import StrategyLoader, StrategyRegistryError
 from app.stock_selection.deepseek_sentiment_rerank import DeepSeekSentimentReranker
 from app.stock_selection.selector import StockSelector
-from app.stock_selection.sentiment_refresh import NewsAggregator, refresh_v12_candidate_sentiment
+from app.data_ingestion.news_provider import NewsAggregator
+from app.stock_selection.sentiment_refresh import refresh_v12_candidate_sentiment
 from app.strategies.capability import StrategyCapabilityService
 
 

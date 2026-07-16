@@ -1,75 +1,39 @@
-"""选股运行入口。
-
-第一版目标：
-1. 从策略注册表加载默认策略或指定策略
-2. 构造标准化输入
-3. 执行策略
-4. 输出标准化 JSON
-
-后续再逐步接入真实数据层、数据库和定时调度。
-"""
+"""Submit a selection task to the recoverable MySQL worker queue."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict
-from datetime import datetime
-from typing import Dict
 
-from app.shared.strategy_loader import StrategyLoader
-from app.strategies.active.v13_three_factor.strategy import StrategyInput
+from app.stock_selection.run_tasks import SelectionRunService
 
 
-def build_demo_features(universe: list[str]) -> Dict[str, Dict]:
-    """构造演示用时序特征。
-
-    当前仍是 demo 数据，但格式已经更接近真实因子计算输入：
-    - closes: 历史收盘价序列
-    - turnovers: 历史换手率序列
-    """
-
-    demo = {}
-    for i, code in enumerate(universe):
-        base_price = 10 + i * 7
-        closes = [round(base_price * (1 + 0.002 * j + ((-1) ** j) * 0.003), 2) for j in range(1, 31)]
-        turnovers = [round(1.5 + ((j + i) % 7) * 0.35, 2) for j in range(30)]
-        demo[code] = {
-            "closes": closes,
-            "turnovers": turnovers,
-        }
-    return demo
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="提交异步选股任务；结果通过 run_id 在选股页或 API 查询。"
+    )
+    parser.add_argument("--strategy", dest="strategy_id", help="策略 ID；默认使用当前默认策略")
+    parser.add_argument("--limit", type=int, default=3, help="最大入选数量，默认 3")
+    parser.add_argument("--score-threshold", type=float, default=None, help="可选分数底线")
+    parser.add_argument("--instrument-type", default="stock", help="当前仅支持 stock")
+    parser.add_argument("--market-board", default=None, help="可选市场板块白名单")
+    return parser
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="运行选股策略")
-    parser.add_argument("--strategy", help="策略 ID，不传则使用默认策略")
-    parser.add_argument("--date", help="交易日期，格式 YYYY-MM-DD")
-    parser.add_argument(
-        "--universe",
-        help="逗号分隔的股票池，例如 000001.SZ,000002.SZ,600519.SH",
+    args = build_parser().parse_args()
+    run = SelectionRunService().submit(
+        {
+            "strategy_id": args.strategy_id,
+            "limit": args.limit,
+            "max_picks": args.limit,
+            "score_threshold": args.score_threshold,
+            "instrument_type": args.instrument_type,
+            "market_board": args.market_board,
+            "save": False,
+        }
     )
-    args = parser.parse_args()
-
-    trade_date = args.date or datetime.now().strftime("%Y-%m-%d")
-    universe = (
-        [item.strip() for item in args.universe.split(",") if item.strip()]
-        if args.universe
-        else ["000001.SZ", "000002.SZ", "600519.SH", "300750.SZ", "601318.SH"]
-    )
-
-    loader = StrategyLoader()
-    strategy = loader.load_strategy(args.strategy)
-
-    payload = StrategyInput(
-        trade_date=trade_date,
-        universe=universe,
-        market_context={"mode": "demo"},
-        features=build_demo_features(universe),
-    )
-
-    result = strategy.run(payload)
-    print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+    print(json.dumps(run, ensure_ascii=False, indent=2, default=str))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # 股票分析系统架构审计与整改计划（2026-07-15）
 
-> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1 的唯一版本化 migration 入口以及 E2-E6 的 Portfolio/Tracking/Dashboard/Selection/Backtest Repository 垂直切片均已部署。证书按当前决策暂缓。
+> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1-E6 的 migration 与五个核心 Repository 垂直切片均已部署；P3-3 反向依赖/旧入口清理和 P3-4 最小回归体系也已完成。证书按当前决策暂缓，真实空库 smoke 等待独立测试库。
 >
 > 本文保留 `docs/IMPROVEMENT_PLAN.md` 中“个人纪律型投研工作台、模块化单体、异步任务驱动、不做自动交易、不急拆微服务”的产品与架构定位，只更新当前整改优先级。
 >
@@ -450,11 +450,11 @@ validation_status: unvalidated
 
 #### P3-3 清理反向依赖和旧入口
 
-- 把 `scripts` 中可复用同步逻辑迁入 `app/data_ingestion`。
-- 脚本只保留 CLI 参数和任务启动。
-- 迁移或归档 `app -> src` 依赖。
-- 修复或删除失效选股 CLI。
-- 归档旧 `/static/index.html` 和失联 ETF grid 原型。
+- 把 `scripts` 中可复用同步逻辑迁入 `app/data_ingestion`。（已完成本轮扫描发现的全部生产反向依赖）
+- 脚本只保留 CLI 参数和任务启动。（ETF/日更舆情/策略舆情三个相关入口已完成）
+- 迁移或归档 `app -> src` 依赖。（已完成，静态边界测试锁定为 0）
+- 修复或删除失效选股 CLI。（已改为只提交 selection worker 任务；Selector 直接执行明确拒绝）
+- 归档旧 `/static/index.html` 和失联 ETF grid 原型。（已完成，legacy import 兼容保留）
 
 #### P3-4 最小测试体系
 
@@ -467,6 +467,8 @@ validation_status: unvalidated
 - backtest 防未来数据。
 - schema 空库初始化。
 - 高频任务防重入。
+
+以上最小测试均已有对应回归；真实空数据库双执行 smoke 工具已完成，但仍等待数据库侧提供独立测试库，不能拿生产库模拟。
 
 ### P4：真正支持 ETF（独立项目）
 
@@ -905,3 +907,14 @@ backtest 也补齐到共享任务契约：
 部署前冻结一个正式历史 run 的四组 API 响应、2026-04-24 的 5,201 条候选及 2026-04-24/27 两个交易日。旧线上进程与新磁盘代码逐字段一致；部署后 results/runs/trades/factor-status 四个 SHA-256 再次全部命中冻结值。没有提交新回测任务，也没有制造正式或系统测试数据。
 
 验证结果：全量回归增至 109 项，编译、migration 16/16、diff 检查通过；上线前后三类队列均为 0。backtest worker 与 API 串行重启后 active、`NRestarts=0`，三个 worker 均 healthy/idle；公网 health 200、未认证 backtest 401。readiness 仍为 `degraded + accepting_jobs=true`，唯一原因是 2026-07-16 日线已完整而 factor input 等待 18:30 上游补跑。E2-E6 的五个核心 Repository 垂直切片至此完成，下一步进入 P3-3：清理反向依赖和旧入口。
+
+### 2026-07-16：P3-3 反向依赖与旧入口清理已部署
+
+静态扫描确认生产 `app` 只有两条真实反向依赖：`PortfolioService` 动态导入 ETF 同步脚本，以及选股舆情链同时导入 `scripts` 持久化函数和 `src` 新闻模块。现已完成以下收敛：
+
+- ETF 抓取、日线/快照写入和任务逻辑迁入 `app/data_ingestion/portfolio_etf_quote_sync.py`；原脚本只保留启动器，Service 改为显式 app 内依赖。顺带修复 Service 调用 `save_snapshot` 未传 batch ID 导致 best-effort 快照静默失败的问题，缺省 ID 现在由同步模块生成。
+- 新闻 provider、可信度、质量过滤迁入 `app/data_ingestion`；`save_news` / `save_daily` 与确定性本地情绪打分收口到 `sentiment_sync.py`；日更舆情和策略候选舆情任务迁入 app job，两个脚本退化为薄启动器。`src` 只保留 legacy compatibility import，生产 app 不再修改 `sys.path` 或依赖 `src/scripts`。
+- `app.stock_selection.run_selection` 从 demo 特征直跑改为只提交可恢复 selection worker 任务；`selector.py` 直接执行明确退出，不能再绕过队列同步扫全市场。
+- 未被路由引用的 `app/api/web/index.html` 迁到 `archive/legacy_web_index.html`；ETF grid 原型迁到 `archive/legacy_grid_trader.py`，旧研究版本通过薄兼容导入继续可读。
+
+迁移前后 ETF 归一化、新闻来源/日期/可信度/质量和本地情绪打分冻结包 SHA-256 完全一致；旧线上 Portfolio 与新磁盘代码逐叶差异为 0，部署后哈希继续命中。新增 6 项依赖边界/CLI/归档回归，全量回归增至 115 项。selection/portfolio worker 与 API 串行重启后，API 和三个 worker 均 active、`NRestarts=0`，三类队列为 0，公网 health 200、未认证 portfolio 401。P3-3 完成；P3-4 的七类最低回归也已覆盖，真实空库 smoke 仍只等待外部测试库。

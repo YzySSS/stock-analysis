@@ -15,6 +15,7 @@ from typing import Any
 import requests
 from pymysql.err import IntegrityError
 
+from app.data_ingestion.portfolio_etf_quote_sync import fetch_etf_history, save_daily_rows, save_snapshot
 from app.jobs.errors import record_job_error
 from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
 from app.portfolio.repository import PortfolioRepository
@@ -997,8 +998,6 @@ class PortfolioService:
         if (stock or {}).get("instrument_type") != "etf":
             return
         try:
-            from scripts.run_portfolio_etf_quote_update import fetch_etf_history, save_daily_rows, save_snapshot
-
             rows = fetch_etf_history(code, 90)
             save_daily_rows(rows)
             save_snapshot(code, rows)

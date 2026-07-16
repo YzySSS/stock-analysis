@@ -1,22 +1,13 @@
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 from typing import Any, Dict, List
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SRC_ROOT = PROJECT_ROOT / "src"
-for path in [PROJECT_ROOT, SRC_ROOT]:
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
+from app.data_ingestion.news_credibility import NewsCredibilityChecker
+from app.data_ingestion.news_filter import NewsFilter
+from app.data_ingestion.news_provider import NewsAggregator
+from app.data_ingestion.sentiment_sync import LocalSentimentScorer, save_daily, save_news
 from app.shared.db import mysql_conn
-from news_credibility import NewsCredibilityChecker
-from news_filter import NewsFilter
-from news_provider import NewsAggregator
-from sentiment_factor import SentimentFactorCalculator
-from scripts.run_sentiment_daily_update import save_daily, save_news
 
 
 def _existing_sentiment_codes(trade_date: str, min_news_count: int = 1) -> set[str]:
@@ -52,7 +43,7 @@ def refresh_v12_candidate_sentiment(
 
     rows = candidates[:candidate_limit]
     aggregator = NewsAggregator()
-    calculator = SentimentFactorCalculator(cache_dir=str(PROJECT_ROOT / "logs" / "sentiment_cache"))
+    calculator = LocalSentimentScorer()
     credibility_checker = NewsCredibilityChecker()
 
     existing_by_date: dict[str, set[str]] = {}

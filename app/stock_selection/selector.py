@@ -1421,7 +1421,7 @@ class StockSelector:
 
 
 if __name__ == "__main__":
-    selector = StockSelector()
-    results = selector.run_from_mysql(limit=20, instrument_type="stock")
-    for item in results:
-        print(item)
+    raise SystemExit(
+        "Direct synchronous selection is disabled; use "
+        "`python -m app.stock_selection.run_selection` to submit a worker task."
+    )
