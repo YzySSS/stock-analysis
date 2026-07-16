@@ -323,7 +323,7 @@ PYTHONPATH=. .venv/bin/python -m app.orchestration.migrate --check
 
 普通 API、Service、选股候选加载、ingestion 和 cron writer 不再执行 DDL；只有 realtime lifecycle 仍按数据保留策略创建/删除日期分区。系统 readiness/page 展示 migration target/applied/pending，crontab 安装也会先 check。
 
-空库 smoke 命令要求独立、首次零表且名称以 `stock_migration_smoke_` 开头，并会执行两遍验证幂等。当前生产 MySQL 是远端 `10.4.4.17`，应用账号只授权 `stock.*`，无法自行创建测试库；因此空库 smoke 工具和安全拒绝测试已完成，真实空库实跑等待数据库管理员 provision 独立库，禁止改用生产库测试。
+空库 smoke 命令要求独立、首次零表且名称精确为 `stock_migration_smoke` 或以 `stock_migration_smoke_` 开头，并会执行两遍验证幂等。2026-07-16 已在数据库侧 provision 的 `stock_migration_smoke` 实跑成功：首次应用 16 个 migration、生成 61 张表，第二遍 `applied_now=0`，最终 16/16 ready；生产库迁移快照哈希在执行前后保持一致。测试库保留，不自动清表或删除。禁止改用生产库测试。
 
 上线验证：79 项回归通过；API/三个 worker active、`NRestarts=0`，readiness 返回 `schema_migrations.health=healthy / 16 applied / 0 pending`；13:45 后的新一轮舆情、实时行情、热度与资金流任务在移除运行时 DDL 后继续成功/预期降级运行。
 

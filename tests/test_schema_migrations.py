@@ -18,8 +18,22 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
     def test_empty_database_smoke_rejects_production_or_wrong_database(self):
         with self.assertRaises(ValueError):
             validate_smoke_database_name("stock", "stock")
+        with self.assertRaises(ValueError):
+            validate_smoke_database_name(
+                "stock_migration_smokeevil",
+                "stock_migration_smokeevil",
+            )
+        with self.assertRaises(ValueError):
+            validate_smoke_database_name(
+                "stock_migration_smoke_",
+                "stock_migration_smoke_",
+            )
         with self.assertRaises(RuntimeError):
             validate_smoke_database_name("stock", "stock_migration_smoke_test")
+        validate_smoke_database_name(
+            "stock_migration_smoke",
+            "stock_migration_smoke",
+        )
         validate_smoke_database_name(
             "stock_migration_smoke_test",
             "stock_migration_smoke_test",

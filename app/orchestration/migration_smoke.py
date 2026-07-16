@@ -7,7 +7,7 @@ from app.orchestration.migrate import apply_migrations, migration_plan
 from app.shared.db import mysql_conn, ping_mysql
 
 
-SMOKE_DATABASE_PREFIX = "stock_migration_smoke_"
+SMOKE_DATABASE_BASENAME = "stock_migration_smoke"
 REQUIRED_TABLES = {
     "schema_migration",
     "stock_basic",
@@ -35,8 +35,15 @@ REQUIRED_TABLES = {
 
 
 def validate_smoke_database_name(actual: str | None, expected: str) -> None:
-    if not expected.startswith(SMOKE_DATABASE_PREFIX):
-        raise ValueError(f"smoke database must start with {SMOKE_DATABASE_PREFIX}")
+    has_safe_name = expected == SMOKE_DATABASE_BASENAME or (
+        expected.startswith(f"{SMOKE_DATABASE_BASENAME}_")
+        and len(expected) > len(SMOKE_DATABASE_BASENAME) + 1
+    )
+    if not has_safe_name:
+        raise ValueError(
+            f"smoke database must be {SMOKE_DATABASE_BASENAME} "
+            f"or start with {SMOKE_DATABASE_BASENAME}_"
+        )
     if actual != expected:
         raise RuntimeError(f"connected database {actual!r} does not match expected smoke database {expected!r}")
 
@@ -94,7 +101,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run the unified migration twice against an explicitly provisioned empty smoke database"
     )
-    parser.add_argument("--database", required=True, help=f"must start with {SMOKE_DATABASE_PREFIX}")
+    parser.add_argument(
+        "--database",
+        required=True,
+        help=(
+            f"must be {SMOKE_DATABASE_BASENAME} "
+            f"or start with {SMOKE_DATABASE_BASENAME}_"
+        ),
+    )
     args = parser.parse_args()
     try:
         print(json.dumps(run_empty_database_smoke(args.database), ensure_ascii=False, default=str))

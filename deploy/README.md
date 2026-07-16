@@ -33,15 +33,15 @@ systemctl enable --now stock-analysis-api.service stock-analysis-backtest-worker
 
 统一 migration 的 `0016` 增加三类 worker 的进程级租约、统一错误/日汇总表，并补齐 backtest 的 attempt、稳定错误码和 active 幂等列。三个 worker 启动后会持续更新空闲/运行心跳；`GET /api/readiness` 在 migration、数据库或任一必要 worker 不可用时返回 503，`GET /api/health` 仍保持不访问数据库的轻量存活检查。
 
-空库重建 smoke 只允许显式配置、名称以 `stock_migration_smoke_` 开头且首次零表的独立数据库；它会跑两遍 migration 并校验第二遍零变更，不会创建或删除数据库：
+空库重建 smoke 只允许显式配置、名称精确为 `stock_migration_smoke` 或以 `stock_migration_smoke_` 开头且首次零表的独立数据库；它会跑两遍 migration 并校验第二遍零变更，不会创建或删除数据库：
 
 ```bash
-DB_NAME=stock_migration_smoke_example \
+DB_NAME=stock_migration_smoke \
   .venv/bin/python -m app.orchestration.migration_smoke \
-  --database stock_migration_smoke_example
+  --database stock_migration_smoke
 ```
 
-当前生产数据库位于远端，应用账号只授权 `stock.*`，不能自行创建独立 smoke 库；因此现网已验证“已有库升级 + 幂等重跑 + systemd startup check”，空库实跑需由数据库侧先 provision 一个独立空库。
+当前生产数据库位于远端，应用账号不能自行创建数据库，独立 smoke 库仍需由数据库侧 provision。2026-07-16 已在 `stock_migration_smoke` 完成真实空库验收：首次应用 16 个 migration、生成 61 张表，工具内部第二遍 `applied_now=0`。该工具要求首次零表；再次完整演练应重新 provision 空库或使用新的安全后缀库名，不会自动清表或删库。
 
 模板按当前服务器路径 `/root/.openclaw/workspace/stock-analysis` 编写；迁移目录时先统一替换路径并运行 `systemd-analyze verify`。
 

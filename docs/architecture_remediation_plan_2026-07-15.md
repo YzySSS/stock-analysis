@@ -1,6 +1,6 @@
 # 股票分析系统架构审计与整改计划（2026-07-15）
 
-> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1-E6 的 migration 与五个核心 Repository 垂直切片均已部署；P3-3 反向依赖/旧入口清理和 P3-4 最小回归体系也已完成。证书按当前决策暂缓，真实空库 smoke 等待独立测试库。
+> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层和舆情关系化生命周期已完整收口；批次 E1-E6 的 migration 与五个核心 Repository 垂直切片均已部署；P3-3 反向依赖/旧入口清理、P3-4 最小回归体系和真实空库 smoke 均已完成。剩余维护项为舆情物理表空间回收；证书按当前决策暂缓。
 >
 > 本文保留 `docs/IMPROVEMENT_PLAN.md` 中“个人纪律型投研工作台、模块化单体、异步任务驱动、不做自动交易、不急拆微服务”的产品与架构定位，只更新当前整改优先级。
 >
@@ -846,7 +846,7 @@ backtest 也补齐到共享任务契约：
 
 首次上线后发现 `0001` checksum 错把 Python `runner.__module__` 当稳定身份：CLI `python -m` 下是 `__main__`，API import 下是包路径，导致 readiness 误报一个 pending。已固定 core runner 的 canonical identity、增加回归并记录 `.learnings/ERRORS.md`；CLI 与 import 两条路径现在都返回 16/16 ready。
 
-新增强护栏空库 smoke：只允许名称以 `stock_migration_smoke_` 开头、连接库与参数完全一致且首次零表的独立数据库，执行两遍 migration 并要求第二遍零变更。当前 MySQL 在远端 `10.4.4.17`，应用账号仅有 `stock.*` 的 DDL/DML 权限，无法 provision 新数据库，因此没有拿生产库伪造空库结果；工具与拒绝生产库测试已完成，真实空库实跑等待数据库侧提供独立空库。
+新增强护栏空库 smoke：只允许名称精确为 `stock_migration_smoke` 或以 `stock_migration_smoke_` 开头、连接库与参数完全一致且首次零表的独立数据库，执行两遍 migration 并要求第二遍零变更。数据库侧 provision 后已完成真实空库验收：首次应用 16 个 migration、生成 61 张表，第二遍 `applied_now=0`，最终 16/16 ready；生产库迁移快照哈希在执行前后保持一致。测试库保留，工具不会自动清表或删库。
 
 验证结果：79 项回归、编译、JavaScript/shell、systemd unit、diff 检查通过；四个 unit 的 ExecStartPre 实际退出码均为 0，API 与三个 worker active、`NRestarts=0`，readiness `schema_migrations=16/16 + ready`。E1 完成后，E 批次下一步按垂直切片抽 PortfolioRepository，再处理 Tracking/Dashboard。
 
@@ -917,6 +917,6 @@ backtest 也补齐到共享任务契约：
 - `app.stock_selection.run_selection` 从 demo 特征直跑改为只提交可恢复 selection worker 任务；`selector.py` 直接执行明确退出，不能再绕过队列同步扫全市场。
 - 未被路由引用的 `app/api/web/index.html` 迁到 `archive/legacy_web_index.html`；ETF grid 原型迁到 `archive/legacy_grid_trader.py`，旧研究版本通过薄兼容导入继续可读。
 
-迁移前后 ETF 归一化、新闻来源/日期/可信度/质量和本地情绪打分冻结包 SHA-256 完全一致；旧线上 Portfolio 与新磁盘代码逐叶差异为 0，部署后哈希继续命中。新增 6 项依赖边界/CLI/归档回归，全量回归增至 115 项。selection/portfolio worker 与 API 串行重启后，API 和三个 worker 均 active、`NRestarts=0`，三类队列为 0，公网 health 200、未认证 portfolio 401。P3-3 完成；P3-4 的七类最低回归也已覆盖，真实空库 smoke 仍只等待外部测试库。
+迁移前后 ETF 归一化、新闻来源/日期/可信度/质量和本地情绪打分冻结包 SHA-256 完全一致；旧线上 Portfolio 与新磁盘代码逐叶差异为 0，部署后哈希继续命中。新增 6 项依赖边界/CLI/归档回归，全量回归增至 115 项。selection/portfolio worker 与 API 串行重启后，API 和三个 worker 均 active、`NRestarts=0`，三类队列为 0，公网 health 200、未认证 portfolio 401。P3-3 完成；P3-4 的七类最低回归也已覆盖。随后独立测试库已完成真实空库 smoke，首次 16 个 migration 全部应用、第二遍零变更。
 
-16:53 再次只读探测到 Tushare 2026-07-16 `daily_basic` 已发布 5,524 行、覆盖 99.69%，随后通过独立后台任务只补最新交易日：12 批写入 `factor_input_daily` 5,541 行，无不可用日期，任务日志 success。最终 `/api/readiness` 从 degraded 恢复为 `ready + accepting_jobs=true`，三个 worker healthy/idle、三类队列为 0。至此本轮代码内架构整改与当日数据新鲜度验收均完成；剩余项仅为需要外部条件或维护窗口的真实空库 smoke、舆情物理表空间回收和暂缓的证书续签。
+16:53 再次只读探测到 Tushare 2026-07-16 `daily_basic` 已发布 5,524 行、覆盖 99.69%，随后通过独立后台任务只补最新交易日：12 批写入 `factor_input_daily` 5,541 行，无不可用日期，任务日志 success。最终 `/api/readiness` 从 degraded 恢复为 `ready + accepting_jobs=true`，三个 worker healthy/idle、三类队列为 0。真实空库 smoke 随后也已完成。至此本轮代码内架构整改、空库重建和当日数据新鲜度验收均完成；剩余项仅为需要独立维护窗口的舆情物理表空间回收，以及按原决定暂缓的证书续签。
