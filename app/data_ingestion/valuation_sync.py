@@ -53,18 +53,6 @@ class ValuationSync:
         self.pro = ts.pro_api(self.token)
         self.task_logger = TaskRunLogger()
 
-    def ensure_columns(self) -> None:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SHOW COLUMNS FROM stock_basic")
-                columns = {row[0] for row in cursor.fetchall()}
-                if "pe_tushare" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN pe_tushare DECIMAL(12,4) DEFAULT NULL")
-                if "pb_tushare" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN pb_tushare DECIMAL(12,4) DEFAULT NULL")
-                if "valuation_updated_at" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN valuation_updated_at DATETIME DEFAULT NULL")
-
     def get_trade_date(self) -> str:
         today = datetime.now().strftime("%Y%m%d")
         df = self.pro.daily_basic(trade_date=today, fields="ts_code,pe,pb")
@@ -210,7 +198,6 @@ class ValuationSync:
         require_missing_pb: bool = False,
         allow_missing_pe_only: bool = True,
     ) -> ValuationSyncResult:
-        self.ensure_columns()
         result = ValuationSyncResult(run_id=self.build_run_id())
         self.task_logger.start(
             task_name="valuation_sync",

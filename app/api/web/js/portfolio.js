@@ -2,6 +2,7 @@ let portfolioState = {
   positions: [],
   selectedId: null,
   editingId: null,
+  advicePolls: new Map(),
 };
 
 const HOLDING_STRATEGIES = [
@@ -76,6 +77,30 @@ function alertLevelLabel(level) {
     info: '纪律提示',
   };
   return labels[level] || '纪律提示';
+}
+
+function supportLevelText(level) {
+  if (!level) return '-';
+  const strength = level.strength_label ? ` ${level.strength_label.replace('支撑', '')}` : '';
+  return `${price(level.price)}${strength}`;
+}
+
+function supportLevelMeta(level) {
+  if (!level) return '';
+  const parts = [];
+  if (level.strength_label) parts.push(level.strength_label);
+  if (level.score != null) parts.push(`${formatNumber(level.score, 0)}分`);
+  if (level.distance_pct != null) parts.push(`距现价${formatNumber(level.distance_pct, 1)}%`);
+  if (level.touches) parts.push(`触碰${level.touches}次`);
+  if (level.rebound_pct != null) parts.push(`反弹${formatNumber(level.rebound_pct, 1)}%`);
+  if (level.volume_confirm) parts.push('放量确认');
+  return parts.join(' · ');
+}
+
+function supportLevelDetail(level) {
+  const meta = supportLevelMeta(level);
+  const reason = level.reason || '';
+  return `${price(level.price)}${meta ? `（${meta}）` : ''}${reason ? `：${reason}` : ''}`;
 }
 
 function outcomeLabel(label) {
@@ -305,9 +330,12 @@ function renderDetail(item) {
   const supportLevels = plan.support_levels || [];
   const resistanceLevels = plan.resistance_levels || [];
   const aiSummary = ai.summary || ai.operation_plan || (ai.status && ai.status !== 'ok' ? ai.message : '') || '暂无 AI 持仓建议，先参考本地规则摘要。';
+  const adviceRunning = ['queued', 'running'].includes(ai.status);
   const aiMeta = ai.status === 'ok'
     ? `${ai.model ? `模型 ${ai.model}` : 'AI建议'} · 有效至 ${ai.expires_at || '-'}`
-    : (ai.message || 'AI建议未生成');
+    : (adviceRunning
+      ? `${ai.phase || ai.message || 'AI 建议生成中'}${ai.progress_pct ? ` · ${formatNumber(ai.progress_pct, 0)}%` : ''}`
+      : (ai.message || 'AI建议未生成'));
 
   title.textContent = `${item.name || item.code} 持仓诊断`;
   subtitle.textContent = `${item.code} · ${item.strategy_label || item.strategy_id} · 买入 ${item.buy_datetime || '-'}`;
@@ -333,7 +361,8 @@ function renderDetail(item) {
       </article>
       <article>
         <span>关键支撑</span>
-        <strong>${supportLevels.length ? supportLevels.slice(0, 2).map((level) => price(level.price)).join(' / ') : '-'}</strong>
+        <strong>${supportLevels.length ? supportLevels.slice(0, 2).map((level) => supportLevelText(level)).join(' / ') : '-'}</strong>
+        ${supportLevels.length ? `<small>${escapeHtml(supportLevelMeta(supportLevels[0]) || supportLevels[0].reason || '')}</small>` : ''}
       </article>
       <article>
         <span>关键压力</span>
@@ -375,7 +404,8 @@ function renderDetail(item) {
       ${renderOutcomeSummary(outcomeSummary)}
       <div class="portfolio-advice-actions">
         <span>${escapeHtml(aiMeta)}</span>
-        <button class="btn btn-secondary btn-small" type="button" data-refresh-advice="${item.id}">刷新分析</button>
+        <button class="btn btn-secondary btn-small" type="button" data-refresh-advice="${item.id}" ${adviceRunning ? 'disabled' : ''}>${adviceRunning ? '生成中' : '刷新分析'}</button>
+        ${adviceRunning && ai.run_id ? `<button class="btn btn-danger btn-small" type="button" data-cancel-advice="${ai.run_id}">取消任务</button>` : ''}
         <button class="btn btn-secondary btn-small" type="button" data-advice-detail="${item.id}">查看详情</button>
       </div>
     </div>
@@ -404,10 +434,11 @@ function renderAlertList(alerts = []) {
 
 function levelList(title, levels = []) {
   if (!levels.length) return '';
+  const isSupport = title.includes('支撑');
   return `
     <h3>${escapeHtml(title)}</h3>
     <ul>
-      ${levels.map((level) => `<li>${price(level.price)}：${escapeHtml(level.reason || '')}</li>`).join('')}
+      ${levels.map((level) => `<li>${escapeHtml(isSupport ? supportLevelDetail(level) : `${price(level.price)}：${level.reason || ''}`)}</li>`).join('')}
     </ul>
   `;
 }
@@ -512,28 +543,91 @@ async function loadPortfolio() {
     }
     renderTable(portfolioState.positions);
     selectPosition(portfolioState.selectedId);
+    portfolioState.positions.forEach((item) => {
+      const run = item.ai_review || {};
+      if (['queued', 'running'].includes(run.status) && run.run_id && !portfolioState.advicePolls.has(Number(run.run_id))) {
+        monitorAdviceRun(item.id, Number(run.run_id));
+      }
+    });
   } catch (error) {
     renderError(body, `持仓加载失败：${error.message}`);
   }
+}
+
+function clearAdvicePoll(runId) {
+  const key = Number(runId);
+  const timer = portfolioState.advicePolls.get(key);
+  if (timer) window.clearTimeout(timer);
+  portfolioState.advicePolls.delete(key);
+}
+
+function monitorAdviceRun(positionId, runId, attempt = 0) {
+  const key = Number(runId);
+  clearAdvicePoll(key);
+  if (attempt >= 30) return;
+  const delay = attempt === 0 ? 1200 : 4000;
+  const timer = window.setTimeout(async () => {
+    try {
+      const data = await fetchJson(`/api/portfolio/advice/runs/${key}`);
+      const run = data.advice_run || {};
+      if (['queued', 'running'].includes(run.status)) {
+        const item = portfolioState.positions.find((position) => Number(position.id) === Number(positionId));
+        if (item) {
+          item.ai_review = {
+            ...(item.ai_review || {}),
+            status: run.status,
+            run_id: key,
+            phase: run.phase,
+            progress_pct: run.progress_pct,
+            message: run.cancel_requested ? 'AI 持仓建议正在取消。' : 'AI 持仓建议正在后台生成。',
+          };
+          if (Number(portfolioState.selectedId) === Number(positionId)) renderDetail(item);
+        }
+        monitorAdviceRun(positionId, key, attempt + 1);
+        return;
+      }
+      clearAdvicePoll(key);
+      await loadPortfolio();
+    } catch (_error) {
+      if (attempt < 29) monitorAdviceRun(positionId, key, attempt + 1);
+      else clearAdvicePoll(key);
+    }
+  }, delay);
+  portfolioState.advicePolls.set(key, timer);
 }
 
 async function refreshAdvice(id) {
   const item = portfolioState.positions.find((position) => Number(position.id) === Number(id));
   const label = item?.name || item?.code || id;
   try {
-    await fetchJson(`/api/portfolio/${id}/advice/refresh?force=true`, { method: 'POST' });
+    const data = await fetchJson(`/api/portfolio/${id}/advice/refresh?force=true`, { method: 'POST' });
+    const run = data.advice_run || {};
     const selected = portfolioState.positions.find((position) => Number(position.id) === Number(id));
-    if (selected) {
+    if (selected && ['queued', 'running'].includes(run.status)) {
       selected.ai_review = {
         ...(selected.ai_review || {}),
-        status: 'queued',
-        message: 'AI 持仓建议已提交后台生成，稍后刷新查看。',
+        status: run.status,
+        run_id: run.id,
+        phase: run.phase,
+        progress_pct: run.progress_pct,
+        message: run.deduplicated ? '已有同一持仓的 AI 任务正在生成。' : 'AI 持仓建议已提交后台生成。',
       };
       renderDetail(selected);
     }
-    setTimeout(loadPortfolio, 2500);
+    if (['queued', 'running'].includes(run.status) && run.id) monitorAdviceRun(id, Number(run.id));
+    else await loadPortfolio();
   } catch (error) {
     alert(`${label} 刷新分析失败：${error.message}`);
+  }
+}
+
+async function cancelAdvice(runId) {
+  clearAdvicePoll(runId);
+  try {
+    await fetchJson(`/api/portfolio/advice/runs/${runId}/cancel`, { method: 'POST' });
+    await loadPortfolio();
+  } catch (error) {
+    alert(`取消 AI 建议任务失败：${error.message}`);
   }
 }
 
@@ -606,6 +700,11 @@ function bindPortfolioEvents() {
     const refreshAdviceButton = event.target.closest('[data-refresh-advice]');
     if (refreshAdviceButton) {
       await refreshAdvice(refreshAdviceButton.dataset.refreshAdvice);
+      return;
+    }
+    const cancelAdviceButton = event.target.closest('[data-cancel-advice]');
+    if (cancelAdviceButton) {
+      await cancelAdvice(cancelAdviceButton.dataset.cancelAdvice);
       return;
     }
     const closeAdviceButton = event.target.closest('[data-close-advice]');

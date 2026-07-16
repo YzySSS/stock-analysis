@@ -23,7 +23,7 @@ from app.data_ingestion.newsnow_client import (  # noqa: E402
     NewsNowClient,
     NewsNowItem,
 )
-from app.orchestration.market_opinion_schema import ensure_market_opinion_schema  # noqa: E402
+from app.data_ingestion.market_opinion_repository import save_sector_summaries_normalized  # noqa: E402
 from app.shared.db import mysql_conn  # noqa: E402
 from app.shared.task_log import TaskRunLogger  # noqa: E402
 
@@ -784,49 +784,15 @@ def load_sector_candidate_stocks(sector_type: str, sector_name: str, as_of: date
 
 
 def save_sector_summaries(summaries: list[dict[str, Any]], trade_date: str | None = None, as_of_datetime: str | None = None) -> None:
-    if not summaries:
-        if trade_date and as_of_datetime:
-            with mysql_conn(dict_cursor=False) as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("DELETE FROM sector_opinion_daily WHERE trade_date=%s AND as_of_datetime=%s", (trade_date, as_of_datetime))
+    final_trade_date = trade_date or (summaries[0]["trade_date"] if summaries else None)
+    final_as_of = as_of_datetime or (summaries[0]["as_of_datetime"] if summaries else None)
+    if not final_trade_date or not final_as_of:
         return
-    trade_date = trade_date or summaries[0]["trade_date"]
-    as_of_datetime = as_of_datetime or summaries[0]["as_of_datetime"]
-    sql = """
-    INSERT INTO sector_opinion_daily (
-        trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
-        news_count, source_count, stock_count, positive_news_count, negative_news_count,
-        top_stocks_json, top_news_json, source_json
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    ON DUPLICATE KEY UPDATE
-        sector_score=VALUES(sector_score), weighted_impact_score=VALUES(weighted_impact_score), news_count=VALUES(news_count),
-        source_count=VALUES(source_count), stock_count=VALUES(stock_count),
-        positive_news_count=VALUES(positive_news_count), negative_news_count=VALUES(negative_news_count),
-        top_stocks_json=VALUES(top_stocks_json), top_news_json=VALUES(top_news_json), source_json=VALUES(source_json)
-    """
-    values = [
-        (
-            row["trade_date"],
-            row["sector_type"],
-            row["sector_name"],
-            row["as_of_datetime"],
-            row["sector_score"],
-            row["weighted_impact_score"],
-            row["news_count"],
-            row["source_count"],
-            row["stock_count"],
-            row["positive_news_count"],
-            row["negative_news_count"],
-            json.dumps(row["top_stocks"], ensure_ascii=False, default=str),
-            json.dumps(row["top_news"], ensure_ascii=False, default=str),
-            json.dumps(row["sources"], ensure_ascii=False, default=str),
-        )
-        for row in summaries
-    ]
-    with mysql_conn(dict_cursor=False) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM sector_opinion_daily WHERE trade_date=%s AND as_of_datetime=%s", (trade_date, as_of_datetime))
-            cursor.executemany(sql, values)
+    save_sector_summaries_normalized(
+        summaries,
+        trade_date=final_trade_date,
+        as_of_datetime=final_as_of,
+    )
 
 
 def select_sources(args: argparse.Namespace) -> list[str]:
@@ -853,7 +819,6 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    ensure_market_opinion_schema()
     lock_handle = acquire_lock()
     if lock_handle is None:
         print(json.dumps({"status": "skipped", "reason": "previous_run_still_running"}, ensure_ascii=False))

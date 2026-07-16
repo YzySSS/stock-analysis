@@ -9,6 +9,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: enabled
+      backtest_status: research_only
+      validation_status: unvalidated
+      evidence_status: observed
+      evidence_note: 已有真实选股运行记录；回测仍采用 research-only 口径
     tags: [lowvol, reversal, experimental]
     description: 低波动反转策略 v2.1，当前已恢复到选股中心可执行列表，适合作为实验策略观察
 
@@ -20,6 +30,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: enabled
+      backtest_status: research_only
+      validation_status: unvalidated
+      evidence_status: observed
+      evidence_note: 已有少量真实选股运行记录；尚未完成样本外验证
     tags: [turnover, lowvol, reversal, v13]
     description: 新架构下的三因子策略骨架，已具备基础因子定义与近似打分逻辑
 
@@ -31,6 +51,16 @@ strategies:
     status: legacy
     mode: legacy
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: legacy_enabled
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: observed
+      evidence_note: 兼容链路已有少量真实运行记录；历史舆情无法严格复刻
     tags: [trend, momentum, quality, sentiment, value, v12]
     description: 历史版本多因子策略，当前以轻量兼容版本接入选股中心执行链路
 
@@ -42,6 +72,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily, stock_chip_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 仅有策略骨架，尚无真实运行证据
     tags: [moneyflow, chip, repair, experimental]
     description: 结合资金回流、筹码成本分布、温和回撤与低波动，寻找价格尚未明显拉升但修复迹象增强的股票
 
@@ -53,6 +93,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 仅有策略骨架，尚无真实运行证据
     tags: [quality, value, lowvol, experimental]
     description: 偏稳健的质量/估值/低波组合，优先盈利质量较好、估值不过分且波动较低的股票
 
@@ -64,6 +114,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 仅有策略骨架，尚无真实运行证据
     tags: [leader, momentum, moneyflow, sentiment, experimental]
     description: 面向 A 股题材和行业龙头，综合强势程度、放量确认、资金流、辨识度和市场热度
 
@@ -75,6 +135,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 仅有策略骨架，尚无真实运行证据
     tags: [emotion, limitup, reversal, leader, experimental]
     description: 面向连板/强势票分歧后反包的情绪龙观察池，允许涨停票保留，仅用于高波动短线观察
 
@@ -86,6 +156,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 仅有策略骨架，尚无真实运行证据
     tags: [low-position, resonance, reversal, moneyflow, experimental]
     description: 借鉴低位多指标共振思想，结合20日低位、超卖修复、动能回暖、温和放量和资金回流寻找低位修复候选
 
@@ -97,6 +177,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 仅有策略骨架，尚无真实运行证据
     tags: [multi-timeframe, trend, momentum, moneyflow, experimental]
     description: 用日线趋势、近20日趋势、近5日触发、资金和市场环境代理多周期共振，后续可接入分钟线升级
 
@@ -108,6 +198,16 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: none
+      evidence_note: 日线结构代理尚无真实运行证据
     tags: [chan, structure, fractal, divergence, experimental]
     description: 缠论 V1 日线结构观察策略，用底分型、笔转折、中枢支撑、背驰修复和离开确认的可量化代理信号筛选观察池
 
@@ -119,5 +219,15 @@ strategies:
     status: experimental
     mode: current
     executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, sector_opinion_daily]
+      minimum_coverage: 0.95
+      maximum_data_age_days: 1
+      runtime_status: enabled
+      backtest_status: disabled
+      validation_status: unvalidated
+      evidence_status: observed
+      evidence_note: 已有真实选股运行记录；收益样本仍不足且未通过样本外验证
     tags: [sentiment, news, moneyflow, experimental]
     description: 贴合 A 股新闻/公告/题材驱动特征，优先使用本地舆情缓存，后续可对 TopN 接 DeepSeek 精排

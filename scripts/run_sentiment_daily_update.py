@@ -13,7 +13,6 @@ for path in [PROJECT_ROOT, SRC_ROOT]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 from app.shared.db import mysql_conn
 from app.shared.task_log import TaskRunLogger
 from news_provider import NewsAggregator
@@ -199,7 +198,6 @@ def main() -> None:
     parser.add_argument("--akshare-only", action="store_true", help="disable Tavily fine search")
     parser.add_argument("--sleep-seconds", type=float, default=0.2)
     args = parser.parse_args()
-    ensure_market_sentiment_schema()
     trade_date = args.trade_date or resolve_trade_date()
     run_id = f"stock_sentiment_{trade_date.replace('-', '')}_{datetime.now().strftime('%H%M%S')}"
     logger = TaskRunLogger()

@@ -14,8 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.orchestration.market_fund_flow_schema import ensure_market_fund_flow_schema
 from app.shared.db import mysql_conn
+from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 from app.shared.task_log import TaskRunLogger
 
 TASK_NAME = "market_fund_flow_update"
@@ -82,20 +82,6 @@ def row_value(item: Any, candidates: list[str]) -> Any:
         if value is not None:
             return value
     return None
-
-
-def acquire_lock() -> bool:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT GET_LOCK(%s, 0) AS locked", (LOCK_NAME,))
-            row = cursor.fetchone() or {}
-            return int(row.get("locked") or 0) == 1
-
-
-def release_lock() -> None:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT RELEASE_LOCK(%s)", (LOCK_NAME,))
 
 
 def fetch_rows(now: datetime, include_concept: bool = True) -> list[FundFlowRow]:
@@ -242,20 +228,20 @@ def main() -> None:
     parser.add_argument("--no-concept", action="store_true", help="only fetch industry fund flow")
     args = parser.parse_args()
 
-    ensure_market_fund_flow_schema()
     now = datetime.now()
     if not args.force and not is_trading_time(now):
         print(json.dumps({"status": "skipped", "reason": "outside_trading_time", "now": now.isoformat(timespec="seconds")}, ensure_ascii=False))
         return
-    if not acquire_lock():
+    lock_handle = acquire_mysql_advisory_lock(LOCK_NAME)
+    if lock_handle is None:
         print(json.dumps({"status": "skipped", "reason": "previous_run_still_running"}, ensure_ascii=False))
         return
 
     run_id = f"market_fund_flow_{now.strftime('%Y%m%d_%H%M%S')}"
     logger = TaskRunLogger()
-    logger.start(TASK_NAME, run_id, {"retention_days": args.retention_days, "include_concept": not args.no_concept})
     started = time.time()
     try:
+        logger.start(TASK_NAME, run_id, {"retention_days": args.retention_days, "include_concept": not args.no_concept})
         rows = fetch_rows(datetime.now(), include_concept=not args.no_concept)
         db_result = save_rows(rows, retention_days=args.retention_days)
         elapsed = round(time.time() - started, 2)
@@ -278,7 +264,9 @@ def main() -> None:
         print(json.dumps(payload, ensure_ascii=False))
         raise
     finally:
-        release_lock()
+        release_error = release_mysql_advisory_lock(lock_handle)
+        if release_error:
+            print(json.dumps({"status": "warning", "reason": "release_lock_failed", "error": release_error}, ensure_ascii=False), file=sys.stderr)
 
 
 if __name__ == "__main__":

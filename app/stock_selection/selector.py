@@ -5,13 +5,10 @@ import math
 from datetime import datetime, time
 from typing import Any, Dict, List, Optional
 
+from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
 from app.shared.db import mysql_conn
 from app.shared.sentiment_scoring import enrich_opinion_news_item
 from app.shared.strategy_loader import StrategyLoader
-from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
-from app.orchestration.market_opinion_schema import ensure_market_opinion_schema
-from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflow_schema
-from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
 from app.stock_selection.trade_plan import build_selection_trade_plan
 
 
@@ -728,7 +725,6 @@ class StockSelector:
         if self.strategy_id != "a_share_sentiment" or not candidates:
             return diagnostics
 
-        ensure_market_opinion_schema()
         market_opinion_config = self.strategy.config.get("market_opinion", {}) or {}
         allowed_sector_types = {
             str(value).strip()
@@ -761,7 +757,7 @@ class StockSelector:
         if requested_as_of_dt:
             as_of_text = requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S")
             sql = """
-            SELECT trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
+            SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
                    news_count, source_count, stock_count, positive_news_count, negative_news_count,
                    top_stocks_json, top_news_json, source_json
             FROM sector_opinion_daily
@@ -776,7 +772,7 @@ class StockSelector:
             params = (as_of_text,)
         else:
             sql = """
-            SELECT trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
+            SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
                    news_count, source_count, stock_count, positive_news_count, negative_news_count,
                    top_stocks_json, top_news_json, source_json
             FROM sector_opinion_daily
@@ -801,6 +797,7 @@ class StockSelector:
                     """
                 )
                 fund_rows = cursor.fetchall() or []
+        hydrate_sector_opinion_rows(sectors)
 
         diagnostics.update({
             "sector_count": len(sectors),
@@ -975,9 +972,6 @@ class StockSelector:
         instrument_type: str = "stock",
         market_board: Optional[str] = None,
     ) -> Dict[str, Any]:
-        ensure_market_sentiment_schema()
-        ensure_realtime_moneyflow_schema()
-        ensure_stock_popularity_schema()
         requested_as_of_dt = self._requested_market_opinion_as_of()
         clock_mode = self._selection_clock_mode(requested_as_of_dt)
         use_realtime = requested_as_of_dt is None and clock_mode == "intraday"

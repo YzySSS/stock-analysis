@@ -290,7 +290,11 @@ function renderMarketTiming(timing) {
   const reasons = qs('#home-market-timing-reasons');
   if (!timing) {
     if (summary) summary.textContent = '暂无择时信号';
-    if (signals) signals.innerHTML = '<div class="empty-state">暂无择时信号</div>';
+    if (signals) {
+      signals.style.removeProperty('--timing-signal-columns');
+      signals.removeAttribute('data-signal-count');
+      signals.innerHTML = '<div class="empty-state">暂无择时信号</div>';
+    }
     return;
   }
 
@@ -303,6 +307,9 @@ function renderMarketTiming(timing) {
 
   if (signals) {
     const items = timing.signals || [];
+    const columns = items.length > 1 ? Math.ceil(items.length / 2) : 1;
+    signals.style.setProperty('--timing-signal-columns', String(columns));
+    signals.dataset.signalCount = String(items.length);
     signals.innerHTML = items.length ? items.map((item) => `
       <article class="home-market-timing-signal ${timingSignalClass(item.signal)}">
         <span>${escapeHtml(item.label || item.dimension || '-')}</span>
@@ -548,7 +555,7 @@ async function loadHomePage() {
   const trackingPreview = qs('#home-tracking-preview');
 
   try {
-    const data = await fetchJson('/api/dashboard/summary?limit=8');
+    const data = await fetchJson('/api/dashboard/summary?limit=8&compact=true');
     const items = data.latest_tracking_preview || [];
     renderMarketOverview(data.market_overview);
     renderMarketTiming(data.market_timing);

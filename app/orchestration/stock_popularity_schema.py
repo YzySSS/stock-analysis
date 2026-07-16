@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
 
 DDL = [
@@ -48,7 +47,6 @@ DDL = [
 
 
 def ensure_stock_popularity_schema() -> dict:
-    init_mysql_schema()
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             for ddl in DDL:
@@ -57,7 +55,3 @@ def ensure_stock_popularity_schema() -> dict:
         "status": "ok",
         "tables": ["stock_popularity_snapshot", "stock_popularity_intraday"],
     }
-
-
-if __name__ == "__main__":
-    print(ensure_stock_popularity_schema())

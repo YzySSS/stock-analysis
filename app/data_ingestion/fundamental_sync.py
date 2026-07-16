@@ -81,30 +81,6 @@ class FundamentalSync:
         self.periods = ["20241231", "20240930", "20240630", "20240331", "20231231"]
         self.task_logger = TaskRunLogger()
 
-    def ensure_columns(self) -> None:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SHOW COLUMNS FROM stock_basic")
-                columns = {row[0] for row in cursor.fetchall()}
-                if "roe" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN roe DECIMAL(12,4) DEFAULT NULL")
-                if "roa" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN roa DECIMAL(12,4) DEFAULT NULL")
-                if "grossprofit_margin" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN grossprofit_margin DECIMAL(12,4) DEFAULT NULL")
-                if "netprofit_margin" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN netprofit_margin DECIMAL(12,4) DEFAULT NULL")
-                if "revenue_yoy" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN revenue_yoy DECIMAL(12,4) DEFAULT NULL")
-                if "profit_yoy" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN profit_yoy DECIMAL(12,4) DEFAULT NULL")
-                if "eps" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN eps DECIMAL(12,4) DEFAULT NULL")
-                if "fundamental_period" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN fundamental_period VARCHAR(16) DEFAULT NULL")
-                if "fundamental_updated_at" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN fundamental_updated_at DATETIME DEFAULT NULL")
-
     def fetch_stock_codes(
         self,
         limit: Optional[int] = 200,
@@ -274,7 +250,6 @@ class FundamentalSync:
         only_missing_profit_yoy: bool = False,
         prioritize_missing_pe: bool = False,
     ) -> FundamentalSyncResult:
-        self.ensure_columns()
         result = FundamentalSyncResult(run_id=self.build_run_id())
         self.task_logger.start(
             task_name="fundamental_sync",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
 
 
@@ -36,12 +35,7 @@ CREATE TABLE IF NOT EXISTS strategy_factor_ci_daily (
 
 
 def ensure_strategy_factor_ci_schema() -> dict:
-    init_mysql_schema()
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.execute(STRATEGY_FACTOR_CI_DDL)
     return {"strategy_factor_ci_daily": "ok"}
-
-
-if __name__ == "__main__":
-    print(ensure_strategy_factor_ci_schema())

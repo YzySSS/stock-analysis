@@ -11,7 +11,6 @@ for path in [PROJECT_ROOT, SRC_ROOT]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 from app.shared.db import mysql_conn
 from news_credibility import NewsCredibilityChecker
 from news_filter import NewsFilter
@@ -51,7 +50,6 @@ def refresh_v12_candidate_sentiment(
     3. caller ranks the preliminary pool by the refreshed sentiment score.
     """
 
-    ensure_market_sentiment_schema()
     rows = candidates[:candidate_limit]
     aggregator = NewsAggregator()
     calculator = SentimentFactorCalculator(cache_dir=str(PROJECT_ROOT / "logs" / "sentiment_cache"))

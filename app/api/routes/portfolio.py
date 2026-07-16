@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.portfolio.service import PortfolioService
@@ -73,7 +73,6 @@ def delete_portfolio_position(position_id: int) -> dict:
 @router.post("/portfolio/{position_id}/advice/refresh")
 def refresh_portfolio_advice(
     position_id: int,
-    background_tasks: BackgroundTasks,
     force: bool = Query(default=True),
 ) -> dict:
     service = PortfolioService()
@@ -81,9 +80,23 @@ def refresh_portfolio_advice(
         run = service.create_advice_refresh_run(position_id, force=force)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if run.get("status") == "queued":
-        background_tasks.add_task(PortfolioService().refresh_advice_run, int(run["id"]))
     return {"advice_run": run}
+
+
+@router.get("/portfolio/advice/runs/{run_id}")
+def get_portfolio_advice_run(run_id: int) -> dict:
+    try:
+        return {"advice_run": PortfolioService().get_advice_run(run_id)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/portfolio/advice/runs/{run_id}/cancel")
+def cancel_portfolio_advice_run(run_id: int) -> dict:
+    try:
+        return {"advice_run": PortfolioService().request_cancel_advice_run(run_id)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/portfolio/advice/outcomes/evaluate")

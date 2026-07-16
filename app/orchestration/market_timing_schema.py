@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
 
 
@@ -209,7 +208,6 @@ DDL = [
 
 
 def ensure_market_timing_schema() -> dict:
-    init_mysql_schema()
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             for sql in DDL:
@@ -229,7 +227,3 @@ def ensure_market_timing_schema() -> dict:
             "market_timing_signal_daily",
         ],
     }
-
-
-if __name__ == "__main__":
-    print(ensure_market_timing_schema())

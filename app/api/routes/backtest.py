@@ -7,8 +7,10 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.backtest.policy import research_disclosure
 from app.backtest.service import BacktestRequest, BacktestService
 from app.shared.db import mysql_conn
+from app.shared.instrument_policy import UnsupportedInstrumentError
 
 router = APIRouter(tags=["backtest"])
 
@@ -56,15 +58,23 @@ class BacktestRunRequest(BaseModel):
     score_threshold: Optional[float] = Field(default=None, ge=0, le=100)
 
 
-@router.post("/backtest/run")
+@router.post("/backtest/run", status_code=202)
 def run_backtest(payload: BacktestRunRequest) -> dict:
+    if not payload.save:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "synchronous_backtest_disabled",
+                "message": "回测已统一迁移到可恢复队列，请提交任务并通过 run_id 查询进度。",
+            },
+        )
     try:
         request = BacktestRequest(**payload.model_dump(exclude={"save"}))
-        if not payload.save:
-            return BacktestService().run(request, save=False)
         service = BacktestService()
         run = service.submit(request)
         return normalize_run_row(run)
+    except UnsupportedInstrumentError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -106,16 +116,20 @@ def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str
     return f"{base} {version_label}"
 
 
-def normalize_run_row(row: dict) -> dict:
+def normalize_run_row(row: dict, *, include_details: bool = True) -> dict:
     summary = row.get("summary_json")
-    if isinstance(summary, str):
+    if include_details and isinstance(summary, str):
         summary = json.loads(summary)
     request = row.get("request_json")
     if isinstance(request, str):
         request = json.loads(request)
+    methodology = row.get("methodology_json")
+    if isinstance(methodology, str):
+        methodology = json.loads(methodology)
     strategy_id = row.get("strategy_id")
     strategy_version = row.get("strategy_version")
-    return {
+    result = {
+        **research_disclosure(row.get("methodology_version")),
         "run_id": row.get("run_id"),
         "strategy_id": strategy_id,
         "trade_strategy_id": row.get("trade_strategy_id"),
@@ -125,12 +139,20 @@ def normalize_run_row(row: dict) -> dict:
         "end_date": str(row.get("end_date")) if row.get("end_date") else None,
         "return_mode": row.get("return_mode"),
         "evaluation_mode": row.get("evaluation_mode"),
+        "data_cutoff_date": str(row.get("data_cutoff_date")) if row.get("data_cutoff_date") else None,
+        "strategy_config_hash": row.get("strategy_config_hash"),
+        "instrument_type": row.get("instrument_type") or (request or {}).get("instrument_type") or "stock",
         "status": row.get("status"),
+        "phase": row.get("phase"),
+        "deduplicated": bool(row.get("deduplicated")),
         "worker_id": row.get("worker_id"),
         "locked_at": str(row.get("locked_at")) if row.get("locked_at") else None,
         "worker_heartbeat_at": str(row.get("worker_heartbeat_at")) if row.get("worker_heartbeat_at") else None,
         "cancel_requested": bool(row.get("cancel_requested")),
+        "attempt_count": int(row.get("attempt_count") or 0),
+        "max_attempts": int(row.get("max_attempts") or 0),
         "is_system_test": bool(row.get("is_system_test")),
+        "validation_baseline_id": row.get("validation_baseline_id"),
         "sample_days": int(row.get("sample_days") or 0),
         "total_picks": int(row.get("total_picks") or 0),
         "total_trades": int(row.get("total_trades") or 0),
@@ -143,12 +165,16 @@ def normalize_run_row(row: dict) -> dict:
         "avg_return_pct": float(row.get("avg_return_pct")) if row.get("avg_return_pct") is not None else None,
         "max_drawdown_pct": float(row.get("max_drawdown_pct")) if row.get("max_drawdown_pct") is not None else None,
         "win_rate_pct": float(row.get("win_rate_pct")) if row.get("win_rate_pct") is not None else None,
-        "summary": summary,
         "request": request,
         "started_at": str(row.get("started_at")) if row.get("started_at") else None,
         "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
+        "error_code": row.get("error_code"),
         "error_message": row.get("error_message"),
     }
+    if include_details:
+        result["summary"] = summary
+        result["methodology"] = methodology
+    return result
 
 
 @router.get("/backtest/results")
@@ -160,7 +186,7 @@ def get_backtest_results(run_id: Optional[str] = Query(default=None)) -> dict:
                 latest = cursor.fetchone() or {}
                 run_id = latest.get("run_id")
     if not run_id:
-        return {"run_id": None, "summary": None, "curve": []}
+        return {**research_disclosure(), "run_id": None, "summary": None, "curve": []}
 
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -290,10 +316,11 @@ def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: boo
     for trade in trades:
         code = trade.get("code")
         trade_date = trade.get("trade_date")
+        entry_date = trade.get("entry_date") or trade_date
         entry_price = _to_float(trade.get("entry_price"))
-        if not code or not trade_date or not entry_price:
+        if not code or not trade_date or not entry_date or not entry_price:
             continue
-        cursor.execute(sql, (code, trade_date))
+        cursor.execute(sql, (code, entry_date))
         bars = cursor.fetchall() or []
         entry_factor = _to_float(bars[0].get("adj_factor")) if bars else None
         items: list[dict] = []
@@ -306,7 +333,7 @@ def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: boo
             items.append(
                 {
                     "day_no": day_no,
-                    "label": "入选日" if day_no == 0 else f"T+{day_no}",
+                    "label": "入场日" if day_no == 0 else f"入场+{day_no}",
                     "trade_date": str(bar.get("trade_date")) if bar.get("trade_date") else None,
                     "close_price": round(close, 4) if close is not None else None,
                     "close_return_pct": _pct(entry_price, close),
@@ -322,6 +349,7 @@ def build_trade_horizon_rows(cursor, trades: list[dict], use_adjusted_price: boo
 def get_backtest_runs(
     limit: int = Query(default=20, ge=1, le=100),
     include_system_tests: bool = Query(default=False),
+    compact: bool = Query(default=False),
 ) -> dict:
     where_sql = "" if include_system_tests else "WHERE COALESCE(is_system_test, 0) = 0"
     with mysql_conn() as conn:
@@ -339,7 +367,7 @@ def get_backtest_runs(
             rows = cursor.fetchall() or []
     return {
         "items": [
-            normalize_run_row(row)
+            normalize_run_row(row, include_details=not compact)
             for row in rows
         ]
     }

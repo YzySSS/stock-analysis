@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
 
 DDL = [
@@ -89,11 +88,68 @@ DDL = [
         top_stocks_json JSON DEFAULT NULL,
         top_news_json JSON DEFAULT NULL,
         source_json JSON DEFAULT NULL,
+        payload_version TINYINT UNSIGNED NOT NULL DEFAULT 1,
+        payload_migrated_at DATETIME DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_sector_opinion_snapshot (trade_date, as_of_datetime, sector_type, sector_name),
         KEY idx_sector_opinion_date_score (trade_date, sector_score),
         KEY idx_sector_opinion_asof (as_of_datetime)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sector_opinion_stock (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        snapshot_id BIGINT NOT NULL,
+        rank_no SMALLINT UNSIGNED NOT NULL,
+        code VARCHAR(16) NOT NULL,
+        name VARCHAR(64) DEFAULT NULL,
+        industry VARCHAR(128) DEFAULT NULL,
+        score DECIMAL(12,4) DEFAULT NULL,
+        news_count INT NOT NULL DEFAULT 0,
+        match_type VARCHAR(64) DEFAULT NULL,
+        match_reason VARCHAR(500) DEFAULT NULL,
+        data_trade_date DATE DEFAULT NULL,
+        pct_chg DECIMAL(12,4) DEFAULT NULL,
+        amount DECIMAL(20,2) DEFAULT NULL,
+        extra_json JSON DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_sector_opinion_stock (snapshot_id, code),
+        KEY idx_sector_opinion_stock_code (code, snapshot_id),
+        KEY idx_sector_opinion_stock_snapshot_rank (snapshot_id, rank_no)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sector_opinion_news_ref (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        snapshot_id BIGINT NOT NULL,
+        scope_type VARCHAR(16) NOT NULL DEFAULT 'sector',
+        stock_code VARCHAR(16) NOT NULL DEFAULT '',
+        rank_no SMALLINT UNSIGNED NOT NULL,
+        raw_id BIGINT DEFAULT NULL,
+        impact_score DECIMAL(12,4) DEFAULT NULL,
+        signed_score DECIMAL(12,4) DEFAULT NULL,
+        timeliness_score DECIMAL(12,4) DEFAULT NULL,
+        timeliness_level VARCHAR(32) DEFAULT NULL,
+        age_days DECIMAL(12,4) DEFAULT NULL,
+        effective_until DATETIME DEFAULT NULL,
+        published_at DATETIME DEFAULT NULL,
+        fallback_json JSON DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_sector_opinion_news_ref (snapshot_id, scope_type, stock_code, rank_no),
+        KEY idx_sector_opinion_news_raw (raw_id),
+        KEY idx_sector_opinion_news_snapshot (snapshot_id, scope_type, stock_code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sector_opinion_source_ref (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        snapshot_id BIGINT NOT NULL,
+        rank_no SMALLINT UNSIGNED NOT NULL,
+        source_id VARCHAR(64) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_sector_opinion_source_ref (snapshot_id, source_id),
+        KEY idx_sector_opinion_source_snapshot_rank (snapshot_id, rank_no)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
 ]
@@ -126,7 +182,6 @@ def _index_exists(cursor, table: str, index_name: str) -> bool:
 
 
 def ensure_market_opinion_schema() -> dict:
-    init_mysql_schema()
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             for sql in DDL:
@@ -140,6 +195,10 @@ def ensure_market_opinion_schema() -> dict:
                     "timeliness_score": "ALTER TABLE market_opinion_raw ADD COLUMN timeliness_score DECIMAL(12,4) DEFAULT NULL AFTER amplification_score",
                     "timeliness_level": "ALTER TABLE market_opinion_raw ADD COLUMN timeliness_level VARCHAR(32) DEFAULT NULL AFTER timeliness_score",
                     "effective_until": "ALTER TABLE market_opinion_raw ADD COLUMN effective_until DATETIME DEFAULT NULL AFTER timeliness_level",
+                },
+                "sector_opinion_daily": {
+                    "payload_version": "ALTER TABLE sector_opinion_daily ADD COLUMN payload_version TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER source_json",
+                    "payload_migrated_at": "ALTER TABLE sector_opinion_daily ADD COLUMN payload_migrated_at DATETIME DEFAULT NULL AFTER payload_version",
                 },
             }
             for table, columns in upgrades.items():
@@ -162,8 +221,15 @@ def ensure_market_opinion_schema() -> dict:
                 )
             if not _index_exists(cursor, "sector_opinion_daily", "idx_sector_opinion_asof"):
                 cursor.execute("ALTER TABLE sector_opinion_daily ADD KEY idx_sector_opinion_asof (as_of_datetime)")
-    return {"status": "ok", "tables": ["market_opinion_raw", "market_opinion_stock_match", "market_opinion_sector_match", "sector_opinion_daily"]}
-
-
-if __name__ == "__main__":
-    print(ensure_market_opinion_schema())
+    return {
+        "status": "ok",
+        "tables": [
+            "market_opinion_raw",
+            "market_opinion_stock_match",
+            "market_opinion_sector_match",
+            "sector_opinion_daily",
+            "sector_opinion_stock",
+            "sector_opinion_news_ref",
+            "sector_opinion_source_ref",
+        ],
+    }

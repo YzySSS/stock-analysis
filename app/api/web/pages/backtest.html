@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260605a" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260715p0a" />
 </head>
 <body data-page="backtest">
   <div class="app-shell dashboard-shell">
@@ -37,18 +37,20 @@
         </div>
       </header>
 
+      <section class="backtest-research-notice" role="status" aria-label="回测研究口径提示">
+        <span class="badge status-warn">RESEARCH ONLY</span>
+        <div>
+          <strong>回测结果仅用于研究和排错，不代表可交易结论</strong>
+          <p>当前口径仍在修正信号时点、非时点化基本面与幸存者偏差；完成样本外验证前，请勿据此直接决策。</p>
+        </div>
+      </section>
+
       <section class="card backtest-terminal-control">
         <form id="backtest-form" class="backtest-terminal-form">
           <div class="terminal-form-field strategy-field">
             <label for="backtest-strategy-id">选股策略</label>
-            <select id="backtest-strategy-id">
-              <option value="lowvol_reversal">低波反转策略 v2.1（研究态）</option>
-              <option value="v13_three_factor">三因子策略</option>
-              <option value="fund_chip_repair">资金筹码修复选股</option>
-              <option value="quality_lowvol">质量低波选股</option>
-              <option value="leader_tactics">龙头战法选股</option>
-              <option value="low_position_resonance">低位共振修复</option>
-              <option value="multi_timeframe_resonance">多周期共振</option>
+            <select id="backtest-strategy-id" disabled>
+              <option value="">正在读取研究回测能力...</option>
             </select>
           </div>
           <div class="terminal-form-field return-field">
@@ -263,6 +265,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260612price"></script>
-  <script src="/static/js/backtest.js?v=20260612price"></script>
+  <script src="/static/js/backtest.js?v=20260716b2"></script>
 </body>
 </html>

@@ -4,70 +4,44 @@ import json
 from typing import Any, Dict, List, Optional
 
 from app.data_ingestion.intraday_bar_sync import get_or_fetch_intraday_bars
+from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
 from app.shared.db import mysql_conn
-from app.shared.strategy_loader import StrategyLoader
+from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, require_supported_instrument
+from app.shared.strategy_loader import StrategyLoader, StrategyRegistryError
 from app.stock_selection.deepseek_sentiment_rerank import DeepSeekSentimentReranker
 from app.stock_selection.selector import StockSelector
 from app.stock_selection.sentiment_refresh import NewsAggregator, refresh_v12_candidate_sentiment
+from app.strategies.capability import StrategyCapabilityService
 
 
 class StrategyService:
-    RUNTIME_READY_IDS = {
-        "lowvol_reversal",
-        "v13_three_factor",
-        "v12_legacy",
-        "fund_chip_repair",
-        "quality_lowvol",
-        "leader_tactics",
-        "limitup_reversal",
-        "low_position_resonance",
-        "multi_timeframe_resonance",
-        "chan_structure_watch",
-        "a_share_sentiment",
-    }
-    BACKTEST_READY_IDS = {
-        "lowvol_reversal",
-        "v13_three_factor",
-        "fund_chip_repair",
-        "quality_lowvol",
-        "leader_tactics",
-        "low_position_resonance",
-        "multi_timeframe_resonance",
-    }
-    BACKTEST_DISABLED_REASONS = {
-        "v12_legacy": "多因子策略当前选股会触发 Tavily/舆情精排，严格历史回测暂不开放，避免消耗搜索次数并避免伪历史舆情。",
-        "chan_structure_watch": "缠论结构观察 V1 先开放选股与跟踪复盘，回测需补更严格的历史结构识别后再开放。",
-        "a_share_sentiment": "A股舆情选股依赖 market_opinion_v2 历史 as_of 快照，已完成前置修复，但正式回测链路尚未接入。",
-    }
-
-    def __init__(self, registry_path: Optional[str] = None):
+    def __init__(
+        self,
+        registry_path: Optional[str] = None,
+        dataset_snapshot: Optional[Dict[str, Any]] = None,
+    ):
         self.loader = StrategyLoader(registry_path=registry_path)
+        self.capabilities = StrategyCapabilityService(
+            loader=self.loader,
+            dataset_snapshot=dataset_snapshot,
+        )
 
-    def _serialize_strategy_item(self, item: Dict[str, Any], default_strategy: str) -> Dict[str, Any]:
+    def _serialize_strategy_item(
+        self,
+        item: Dict[str, Any],
+        default_strategy: str,
+        instrument_type: str = "stock",
+        dataset_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         strategy_id = item.get("id")
         executable = bool(item.get("executable", True))
-        runtime_ready = strategy_id in self.RUNTIME_READY_IDS and executable
-        backtest_ready = strategy_id in self.BACKTEST_READY_IDS and executable
         mode = item.get("mode") or "current"
         status = item.get("status") or "unknown"
-
-        if status in {"research", "paused"}:
-            runtime_ready = False
-            availability = "research"
-            availability_label = "研究态"
-            availability_note = "历史回测尚未验证出稳定正收益，当前暂停选股/实盘，仅保留回测与因子研究。"
-        elif runtime_ready:
-            availability = "runtime_ready"
-            availability_label = "可执行"
-            availability_note = "当前已接通选股中心执行链路，可直接运行并保存结果。"
-        elif executable and status == "experimental":
-            availability = "experimental"
-            availability_label = "实验中"
-            availability_note = "已注册但尚未接通现有执行协议，暂不在选股页开放运行。"
-        else:
-            availability = "display_only"
-            availability_label = "仅展示"
-            availability_note = "当前只保留配置与说明，用于页面展示或历史参考。"
+        capability = self.capabilities.evaluate(
+            item,
+            instrument_type=instrument_type,
+            dataset_snapshot=dataset_snapshot,
+        )
 
         return {
             "id": strategy_id,
@@ -78,21 +52,60 @@ class StrategyService:
             "description": item.get("description"),
             "tags": item.get("tags", []),
             "executable": executable,
-            "runtime_ready": runtime_ready,
-            "backtest_ready": backtest_ready,
-            "backtest_note": "回测中心已开放该策略。" if backtest_ready else self.BACKTEST_DISABLED_REASONS.get(strategy_id, "回测中心暂未开放该策略。"),
-            "availability": availability,
-            "availability_label": availability_label,
-            "availability_note": availability_note,
+            **capability,
             "is_default": strategy_id == default_strategy,
         }
 
-    def list_strategies(self) -> List[Dict[str, Any]]:
+    def list_strategies(self, instrument_type: str = "stock") -> List[Dict[str, Any]]:
         default_strategy = self.get_default_strategy_id()
+        dataset_snapshot = self.capabilities.get_dataset_snapshot()
         return [
-            self._serialize_strategy_item(item, default_strategy)
+            self._serialize_strategy_item(
+                item,
+                default_strategy,
+                instrument_type=instrument_type,
+                dataset_snapshot=dataset_snapshot,
+            )
             for item in self.loader.registry.get("strategies", [])
         ]
+
+    def get_strategy_capability(
+        self,
+        strategy_id: Optional[str] = None,
+        instrument_type: str = "stock",
+    ) -> Dict[str, Any]:
+        final_strategy_id = strategy_id or self.get_default_strategy_id()
+        try:
+            meta = self.get_strategy_meta(final_strategy_id)
+        except StrategyRegistryError as exc:
+            raise ValueError(str(exc)) from exc
+        return self._serialize_strategy_item(
+            meta,
+            self.get_default_strategy_id(),
+            instrument_type=instrument_type,
+        )
+
+    def require_runtime_ready(
+        self,
+        strategy_id: Optional[str] = None,
+        instrument_type: str = "stock",
+    ) -> Dict[str, Any]:
+        capability = self.get_strategy_capability(strategy_id, instrument_type=instrument_type)
+        if not capability.get("runtime_ready"):
+            reasons = capability.get("runtime_reasons") or ["未达到实时执行门槛"]
+            raise ValueError(f"策略 {capability.get('id')} 当前不可运行：{reasons[0]}")
+        return capability
+
+    def require_backtest_ready(
+        self,
+        strategy_id: str,
+        instrument_type: str = "stock",
+    ) -> Dict[str, Any]:
+        capability = self.get_strategy_capability(strategy_id, instrument_type=instrument_type)
+        if not capability.get("backtest_ready"):
+            reasons = capability.get("backtest_reasons") or ["未达到研究回测门槛"]
+            raise ValueError(f"策略 {capability.get('id')} 当前不可回测：{reasons[0]}")
+        return capability
 
     def get_default_strategy_id(self) -> str:
         return self.loader.get_default_strategy_id()
@@ -148,7 +161,11 @@ class StrategyService:
     def get_strategy_detail(self, strategy_id: Optional[str] = None, instrument_type: str = "stock", sample_limit: int = 200) -> Dict[str, Any]:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         meta = self.get_strategy_meta(final_strategy_id)
-        serialized_meta = self._serialize_strategy_item(meta, self.get_default_strategy_id())
+        serialized_meta = self._serialize_strategy_item(
+            meta,
+            self.get_default_strategy_id(),
+            instrument_type=instrument_type,
+        )
         config = self.loader.load_config(final_strategy_id)
         factor_configs = config.get("factors", {}) or {}
         executable = bool(meta.get("executable", True))
@@ -198,6 +215,25 @@ class StrategyService:
             "mode": meta.get("mode") or "current",
             "executable": executable,
             "runtime_ready": runtime_ready,
+            "loadable": serialized_meta.get("loadable"),
+            "load_error": serialized_meta.get("load_error"),
+            "instrument_compatible": serialized_meta.get("instrument_compatible"),
+            "supported_instrument_types": serialized_meta.get("supported_instrument_types"),
+            "required_datasets": serialized_meta.get("required_datasets"),
+            "dataset_statuses": serialized_meta.get("dataset_statuses"),
+            "data_ready": serialized_meta.get("data_ready"),
+            "runtime_status": serialized_meta.get("runtime_status"),
+            "runtime_reasons": serialized_meta.get("runtime_reasons"),
+            "backtest_status": serialized_meta.get("backtest_status"),
+            "backtest_ready": serialized_meta.get("backtest_ready"),
+            "backtest_reasons": serialized_meta.get("backtest_reasons"),
+            "backtest_note": serialized_meta.get("backtest_note"),
+            "validation_status": serialized_meta.get("validation_status"),
+            "validated": serialized_meta.get("validated"),
+            "evidence_status": serialized_meta.get("evidence_status"),
+            "evidence_note": serialized_meta.get("evidence_note"),
+            "readiness_reasons": serialized_meta.get("readiness_reasons"),
+            "reference_trade_date": serialized_meta.get("reference_trade_date"),
             "availability": serialized_meta.get("availability"),
             "availability_label": serialized_meta.get("availability_label"),
             "availability_note": serialized_meta.get("availability_note"),
@@ -323,7 +359,7 @@ class StrategyService:
             type_params = allowed_sector_types
         if requested_as_of_dt:
             sql = f"""
-            SELECT trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
+            SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
                    news_count, source_count, stock_count, positive_news_count, negative_news_count,
                    top_stocks_json, top_news_json, source_json
             FROM sector_opinion_daily
@@ -339,7 +375,7 @@ class StrategyService:
             params = (requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S"), *type_params, limit)
         else:
             sql = f"""
-            SELECT trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
+            SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
                    news_count, source_count, stock_count, positive_news_count, negative_news_count,
                    top_stocks_json, top_news_json, source_json
             FROM sector_opinion_daily
@@ -361,6 +397,7 @@ class StrategyService:
                     """
                 )
                 fund_rows = cursor.fetchall() or []
+        hydrate_sector_opinion_rows(rows)
 
         sectors: List[Dict[str, Any]] = []
         for row in rows:
@@ -696,11 +733,17 @@ class StrategyService:
         score_threshold: Optional[float] = None,
         run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        instrument_type = require_supported_instrument(
+            instrument_type,
+            operation="selection",
+            supported=SUPPORTED_SELECTION_INSTRUMENT_TYPES,
+        )
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         strategy_meta = self.get_strategy_meta(final_strategy_id)
-        serialized_meta = self._serialize_strategy_item(strategy_meta, self.get_default_strategy_id())
-        if not serialized_meta.get("runtime_ready"):
-            raise ValueError(f"策略 {final_strategy_id} 当前未接通 V1 执行链路，暂不可运行")
+        serialized_meta = self.require_runtime_ready(
+            final_strategy_id,
+            instrument_type=instrument_type,
+        )
 
         overrides = {}
         if score_threshold is not None:
@@ -842,9 +885,7 @@ class StrategyService:
         score_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         strategy_meta = self.get_strategy_meta(strategy_id)
-        serialized_meta = self._serialize_strategy_item(strategy_meta, self.get_default_strategy_id())
-        if not serialized_meta.get("runtime_ready"):
-            raise ValueError(f"策略 {strategy_id} 当前未接通 V1 执行链路，暂不可保存")
+        self.require_runtime_ready(strategy_id, instrument_type="stock")
 
         overrides = {}
         if score_threshold is not None:

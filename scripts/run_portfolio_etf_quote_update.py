@@ -5,7 +5,9 @@ import argparse
 import json
 import math
 import sys
+import time
 from datetime import datetime
+from datetime import time as dtime
 from pathlib import Path
 from typing import Any
 
@@ -13,10 +15,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.orchestration.realtime_schema import ensure_realtime_schema
 from app.shared.db import mysql_conn
+from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
+from app.shared.task_log import TaskRunLogger
 
+TASK_NAME = "portfolio_etf_quote_update"
+LOCK_NAME = "portfolio_etf_quote_update_lock"
 SOURCE = "portfolio_etf_quote"
+EOD_DAILY_CUTOFF = dtime(14, 55)
 
 
 def to_float(value: Any) -> float | None:
@@ -58,14 +64,24 @@ def fetch_etf_history(code: str, days: int) -> list[dict[str, Any]]:
     symbol = compact_code(code)
     if len(symbol) != 6:
         raise ValueError(f"invalid ETF code: {code}")
+    rows: list[dict[str, Any]] = []
     try:
-        return fetch_etf_history_akshare(code, symbol, days)
+        rows = fetch_etf_history_akshare(code, symbol, days)
     except Exception:
         try:
-            return fetch_etf_history_eastmoney(code, symbol, days)
+            rows = fetch_etf_history_eastmoney(code, symbol, days)
         except Exception:
-            snapshot = fetch_etf_snapshot_tencent(code, symbol)
-            return [snapshot] if snapshot else []
+            rows = []
+
+    snapshot = fetch_etf_snapshot_tencent(code, symbol)
+    if not snapshot:
+        return rows
+    if not rows:
+        return [snapshot]
+    if str(snapshot.get("trade_date") or "") >= str(rows[-1].get("trade_date") or ""):
+        rows = [row for row in rows if row.get("trade_date") != snapshot.get("trade_date")]
+        rows.append(snapshot)
+    return rows[-days:]
 
 
 def fetch_etf_history_akshare(code: str, symbol: str, days: int) -> list[dict[str, Any]]:
@@ -223,8 +239,22 @@ def normalize_history_row(
     }
 
 
+def is_safe_daily_row(row: dict[str, Any]) -> bool:
+    if row.get("source") != "tencent_quote":
+        return True
+    if str(row.get("trade_date") or "") != datetime.now().date().isoformat():
+        return True
+    quote_time = str(row.get("quote_time") or "")
+    try:
+        parsed = datetime.fromisoformat(quote_time)
+    except ValueError:
+        return False
+    return parsed.time() >= EOD_DAILY_CUTOFF
+
+
 def save_daily_rows(rows: list[dict[str, Any]]) -> int:
-    if not rows:
+    safe_rows = [row for row in rows if is_safe_daily_row(row)]
+    if not safe_rows:
         return 0
     sql = """
     INSERT INTO daily_kline (code, trade_date, open, high, low, close, volume, amount, source)
@@ -238,14 +268,14 @@ def save_daily_rows(rows: list[dict[str, Any]]) -> int:
         amount=VALUES(amount),
         source=VALUES(source)
     """
-    payload = [{**row, "source": row.get("source") or SOURCE} for row in rows]
+    payload = [{**row, "source": row.get("source") or SOURCE} for row in safe_rows]
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.executemany(sql, payload)
             return cursor.rowcount
 
 
-def save_snapshot(code: str, rows: list[dict[str, Any]]) -> int:
+def save_snapshot(code: str, rows: list[dict[str, Any]], batch_id: str) -> int:
     if not rows:
         return 0
     latest = rows[-1]
@@ -254,11 +284,19 @@ def save_snapshot(code: str, rows: list[dict[str, Any]]) -> int:
             cursor.execute("SELECT name FROM stock_basic WHERE code = %s LIMIT 1", (code,))
             basic = cursor.fetchone() or {}
     quote_time = latest.get("quote_time") or f"{latest['trade_date']} 15:00:00"
+    received_at = datetime.now()
+    try:
+        parsed_quote_time = datetime.fromisoformat(str(quote_time))
+        freshness_seconds = max(int((received_at - parsed_quote_time).total_seconds()), 0)
+    except ValueError:
+        freshness_seconds = 0
+    is_stale = int(str(latest.get("trade_date")) < received_at.date().isoformat() or freshness_seconds > 180)
     sql = """
     INSERT INTO stock_realtime_snapshot (
         code, source_code, name, trade_date, quote_time, latest_price, change_amount, pct_chg,
-        bid_price, ask_price, pre_close, open_price, high_price, low_price, volume, amount, source
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL,%s,%s,%s,%s,%s,%s,%s)
+        bid_price, ask_price, pre_close, open_price, high_price, low_price, volume, amount,
+        batch_id, received_at, freshness_seconds, is_stale, source
+    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON DUPLICATE KEY UPDATE
         source_code=VALUES(source_code),
         name=VALUES(name),
@@ -273,6 +311,10 @@ def save_snapshot(code: str, rows: list[dict[str, Any]]) -> int:
         low_price=VALUES(low_price),
         volume=VALUES(volume),
         amount=VALUES(amount),
+        batch_id=VALUES(batch_id),
+        received_at=VALUES(received_at),
+        freshness_seconds=VALUES(freshness_seconds),
+        is_stale=VALUES(is_stale),
         source=VALUES(source)
     """
     values = (
@@ -290,6 +332,10 @@ def save_snapshot(code: str, rows: list[dict[str, Any]]) -> int:
         latest.get("low"),
         latest.get("volume"),
         latest.get("amount"),
+        batch_id,
+        received_at.strftime("%Y-%m-%d %H:%M:%S"),
+        freshness_seconds,
+        is_stale,
         latest.get("source") or SOURCE,
     )
     with mysql_conn(dict_cursor=False) as conn:
@@ -304,27 +350,66 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=90, help="Daily bars to keep in daily_kline.")
     args = parser.parse_args()
 
-    ensure_realtime_schema()
-    codes = args.codes or held_etf_codes()
-    result = {"codes": codes, "updated": [], "failed": []}
-    for code in codes:
-        try:
-            rows = fetch_etf_history(code, max(1, args.days))
-            daily_rows = save_daily_rows(rows)
-            snapshot_rows = save_snapshot(code, rows)
-            result["updated"].append(
-                {
-                    "code": code,
-                    "daily_rows": daily_rows,
-                    "snapshot_rows": snapshot_rows,
-                    "latest_trade_date": rows[-1]["trade_date"] if rows else None,
-                    "latest_price": rows[-1]["close"] if rows else None,
-                }
-            )
-        except Exception as exc:
-            result["failed"].append({"code": code, "error": str(exc)[:300]})
-    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-    return 0 if not result["failed"] else 1
+    lock_handle = acquire_mysql_advisory_lock(LOCK_NAME)
+    if lock_handle is None:
+        print(json.dumps({"status": "skipped", "reason": "previous_run_still_running"}, ensure_ascii=False))
+        return 0
+
+    now = datetime.now()
+    run_id = f"portfolio_etf_quote_{now.strftime('%Y%m%d_%H%M%S')}"
+    logger = TaskRunLogger()
+    logger_started = False
+    started = time.time()
+    try:
+        logger.start(TASK_NAME, run_id, {"days": args.days, "requested_codes": args.codes})
+        logger_started = True
+        codes = args.codes or held_etf_codes()
+        result = {"codes": codes, "updated": [], "failed": []}
+        for code in codes:
+            try:
+                rows = fetch_etf_history(code, max(1, args.days))
+                daily_rows = save_daily_rows(rows)
+                snapshot_rows = save_snapshot(code, rows, run_id)
+                result["updated"].append(
+                    {
+                        "code": code,
+                        "daily_rows": daily_rows,
+                        "snapshot_rows": snapshot_rows,
+                        "latest_trade_date": rows[-1]["trade_date"] if rows else None,
+                        "latest_price": rows[-1]["close"] if rows else None,
+                    }
+                )
+            except Exception as exc:
+                result["failed"].append({"code": code, "error": str(exc)[:300]})
+
+        status = "success" if not result["failed"] else "partial_success"
+        payload = {
+            **result,
+            "run_id": run_id,
+            "status": status,
+            "updated_count": len(result["updated"]),
+            "failed_count": len(result["failed"]),
+            "elapsed_seconds": round(time.time() - started, 2),
+        }
+        logger.finish(TASK_NAME, run_id, status, f"portfolio ETF quote updated={len(result['updated'])}, failed={len(result['failed'])}", payload)
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return 0 if not result["failed"] else 1
+    except Exception as exc:
+        payload = {
+            "run_id": run_id,
+            "status": "failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:500],
+            "elapsed_seconds": round(time.time() - started, 2),
+        }
+        if logger_started:
+            logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], payload)
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 1
+    finally:
+        release_error = release_mysql_advisory_lock(lock_handle)
+        if release_error:
+            print(json.dumps({"status": "warning", "reason": "release_lock_failed", "error": release_error}, ensure_ascii=False), file=sys.stderr)
 
 
 if __name__ == "__main__":

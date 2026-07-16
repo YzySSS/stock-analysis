@@ -18,7 +18,6 @@ import akshare as ak
 import pandas as pd
 import tushare as ts
 
-from app.orchestration.market_timing_schema import ensure_market_timing_schema
 from app.shared.db import mysql_conn
 from app.shared.task_log import TaskRunLogger
 
@@ -1326,7 +1325,6 @@ def main() -> None:
     parser.add_argument("--lookback-days", type=int, default=420)
     args = parser.parse_args()
 
-    ensure_market_timing_schema()
     trade_date = _parse_date(args.trade_date)
     start_date = (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=args.lookback_days)).strftime("%Y-%m-%d")
     token = os.getenv("TUSHARE_TOKEN")

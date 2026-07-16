@@ -3,17 +3,55 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
+from threading import Lock
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 import requests
 
-from app.shared.db import mysql_conn
-
 from app.error_learning.tracker import SelectionResultTracker
+from app.tracking.repository import TrackingRepository
 
 router = APIRouter(tags=["tracking"])
+_TRACKING_REPOSITORY = TrackingRepository()
+
+
+_TRACKING_SUMMARY_CACHE_TTL_SECONDS = 60.0
+_TRACKING_SUMMARY_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+_TRACKING_SUMMARY_CACHE_LOCK = Lock()
+
+
+def _tracking_summary_cache_key(
+    *,
+    run_id: Optional[str],
+    strategy_id: Optional[str],
+    selection_date: Optional[str],
+    instrument_type: str,
+    latest_only: bool,
+) -> tuple[Any, ...]:
+    return (run_id, strategy_id, selection_date, instrument_type, latest_only)
+
+
+def _get_cached_tracking_summary(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _TRACKING_SUMMARY_CACHE_LOCK:
+        cached = _TRACKING_SUMMARY_CACHE.get(key)
+        if not cached or cached[0] <= now:
+            _TRACKING_SUMMARY_CACHE.pop(key, None)
+            return None
+        return cached[1]
+
+
+def _cache_tracking_summary(key: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    with _TRACKING_SUMMARY_CACHE_LOCK:
+        _TRACKING_SUMMARY_CACHE[key] = (time.monotonic() + _TRACKING_SUMMARY_CACHE_TTL_SECONDS, payload)
+
+
+def _invalidate_tracking_summary_cache() -> None:
+    with _TRACKING_SUMMARY_CACHE_LOCK:
+        _TRACKING_SUMMARY_CACHE.clear()
 
 
 class TrackingStatsToggleRequest(BaseModel):
@@ -100,31 +138,12 @@ def _list_tracking_runs(
     selection_date: Optional[str] = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    sql = """
-    SELECT
-        sr.run_id,
-        sr.trade_date,
-        sr.strategy_id,
-        MAX(sr.created_at) AS created_at,
-        COUNT(*) AS item_count
-    FROM selection_result sr
-    INNER JOIN stock_basic sb ON sr.code = sb.code
-    WHERE sb.instrument_type = %s
-    """
-    params: list[Any] = [instrument_type]
-    if strategy_id:
-        sql += " AND sr.strategy_id = %s"
-        params.append(strategy_id)
-    if selection_date:
-        sql += " AND sr.trade_date = %s"
-        params.append(selection_date)
-    sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY sr.trade_date DESC, created_at DESC LIMIT %s"
-    params.append(limit)
-
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(sql, params)
-            return cursor.fetchall()
+    return _TRACKING_REPOSITORY.list_runs(
+        instrument_type=instrument_type,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        limit=limit,
+    )
 
 
 def _count_tracking_items(
@@ -133,62 +152,16 @@ def _count_tracking_items(
     selection_date: Optional[str] = None,
     run_id: Optional[str] = None,
     latest_only: bool = False,
+    include_in_stats_only: bool = False,
 ) -> int:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            if run_id:
-                cursor.execute(
-                    """
-                    SELECT COUNT(*) AS count
-                    FROM selection_result sr
-                    INNER JOIN stock_basic sb ON sr.code = sb.code
-                    WHERE sb.instrument_type = %s AND sr.run_id = %s
-                    """,
-                    (instrument_type, run_id),
-                )
-                row = cursor.fetchone() or {}
-                return int(row.get("count") or 0)
-            if selection_date:
-                sql = """
-                SELECT COUNT(DISTINCT sr.trade_date, sr.strategy_id, sr.code) AS count
-                FROM selection_result sr
-                INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sb.instrument_type = %s AND sr.trade_date = %s
-                """
-                params: list[Any] = [instrument_type, selection_date]
-                if strategy_id:
-                    sql += " AND sr.strategy_id = %s"
-                    params.append(strategy_id)
-                cursor.execute(sql, params)
-                row = cursor.fetchone() or {}
-                return int(row.get("count") or 0)
-            if latest_only:
-                latest_runs = _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id, limit=20)
-                if not latest_runs:
-                    return 0
-                latest_date = str(latest_runs[0].get("trade_date") or "")
-                if not latest_date:
-                    return 0
-                return _count_tracking_items(
-                    instrument_type=instrument_type,
-                    strategy_id=strategy_id,
-                    selection_date=latest_date,
-                )
-            sql = """
-            SELECT COUNT(DISTINCT sr.trade_date, sr.strategy_id, sr.code) AS count
-            FROM selection_result sr
-            INNER JOIN stock_basic sb ON sr.code = sb.code
-            WHERE sb.instrument_type = %s
-            """
-            params = [instrument_type]
-            if strategy_id:
-                sql += " AND sr.strategy_id = %s"
-                params.append(strategy_id)
-            cursor.execute(sql, params)
-            row = cursor.fetchone() or {}
-            return int(row.get("count") or 0)
-
-
+    return _TRACKING_REPOSITORY.count_items(
+        instrument_type=instrument_type,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        run_id=run_id,
+        latest_only=latest_only,
+        include_in_stats_only=include_in_stats_only,
+    )
 def _build_strategy_summaries(items: list[dict]) -> list[dict]:
     grouped: dict[str, list[dict]] = {}
     for item in items:
@@ -211,6 +184,56 @@ def _build_strategy_summaries(items: list[dict]) -> list[dict]:
     return summaries
 
 
+def _compact_trade_plan(plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not plan:
+        return None
+    entry_zone = plan.get("entry_zone") or {}
+    stop_loss = plan.get("stop_loss") or {}
+    take_profit = plan.get("take_profit") or []
+    first_take_profit = take_profit[0] if take_profit else {}
+    return {
+        "entry_price": plan.get("entry_price"),
+        "entry_zone": {
+            "low": entry_zone.get("low"),
+            "high": entry_zone.get("high"),
+        },
+        "stop_loss": {"price": stop_loss.get("price")},
+        "take_profit": [{"price": first_take_profit.get("price")}],
+    }
+
+
+def _compact_tracking_item(item: dict[str, Any]) -> dict[str, Any]:
+    status = item.get("trade_plan_status") or {}
+    return {
+        "code": item.get("code"),
+        "name": item.get("name"),
+        "rank_no": item.get("rank_no"),
+        "score": item.get("score"),
+        "strategy_id": item.get("strategy_id"),
+        "strategy_display_name": item.get("strategy_display_name"),
+        "selection_date": item.get("selection_date"),
+        "selection_datetime": item.get("selection_datetime"),
+        "selected_open_price": item.get("selected_open_price"),
+        "selected_close_price": item.get("selected_close_price"),
+        "current_price": item.get("current_price"),
+        "price_change_pct": item.get("price_change_pct"),
+        "realtime_quote_time": item.get("realtime_quote_time"),
+        "tracking_days": item.get("tracking_days"),
+        "max_gain_pct": item.get("max_gain_pct"),
+        "max_drawdown_pct": item.get("max_drawdown_pct"),
+        "review_status": item.get("review_status"),
+        "include_in_stats": item.get("include_in_stats", True),
+        "trade_plan": _compact_trade_plan(item.get("trade_plan")),
+        "trade_plan_status": {
+            "status": status.get("status"),
+            "status_label": status.get("status_label"),
+            "completed": status.get("completed"),
+        }
+        if status
+        else None,
+    }
+
+
 def _tracking_payload(
     *,
     run_id: Optional[str] = None,
@@ -220,9 +243,28 @@ def _tracking_payload(
     offset: int = 0,
     instrument_type: str = "stock",
     latest_only: bool = False,
+    compact: bool = False,
+    include_runs: bool = True,
 ) -> dict:
-    tracker = SelectionResultTracker()
+    tracker = SelectionResultTracker(repository=_TRACKING_REPOSITORY)
     resolved_run_id = run_id
+    total = _count_tracking_items(
+        instrument_type=instrument_type,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        run_id=resolved_run_id,
+        latest_only=latest_only,
+    )
+    cache_key = _tracking_summary_cache_key(
+        run_id=resolved_run_id,
+        strategy_id=strategy_id,
+        selection_date=selection_date,
+        instrument_type=instrument_type,
+        latest_only=latest_only,
+    )
+    cached_summary = _get_cached_tracking_summary(cache_key)
+    if cached_summary is not None and cached_summary.get("_total") != total:
+        cached_summary = None
 
     page_records = tracker.build_latest_selection_snapshot(
         limit=limit,
@@ -234,48 +276,50 @@ def _tracking_payload(
         latest_only=latest_only,
     )
     items = tracker.to_dict_list(page_records)
-    total = _count_tracking_items(
-        instrument_type=instrument_type,
-        strategy_id=strategy_id,
-        selection_date=selection_date,
-        run_id=resolved_run_id,
-        latest_only=latest_only,
-    )
 
-    summary_records = tracker.build_latest_selection_snapshot(
-        limit=max(total, 1),
-        instrument_type=instrument_type,
-        run_id=resolved_run_id,
-        strategy_id=strategy_id,
-        selection_date=selection_date,
-        offset=0,
-        latest_only=latest_only,
-    )
-    summary_items = tracker.to_dict_list(summary_records)
+    if cached_summary is None:
+        summary_records = tracker.build_latest_selection_snapshot(
+            limit=max(total, 1),
+            instrument_type=instrument_type,
+            run_id=resolved_run_id,
+            strategy_id=strategy_id,
+            selection_date=selection_date,
+            offset=0,
+            latest_only=latest_only,
+            include_in_stats_only=True,
+        )
+        stats_items = tracker.to_dict_list(summary_records)
+        cached_summary = {
+            "_total": total,
+            "filtered_summary": {
+                **_build_tracking_summary(stats_items),
+                "total_count": total,
+                "excluded_count": total - len(stats_items),
+            },
+            "strategy_summaries": _build_strategy_summaries(stats_items),
+        }
+        _cache_tracking_summary(cache_key, cached_summary)
 
-    stats_items = _stats_items(summary_items)
     page_stats_items = _stats_items(items)
-
-    return {
+    response_items = [_compact_tracking_item(item) for item in items] if compact else items
+    payload = {
         "run_id": resolved_run_id,
         "strategy_id": strategy_id,
         "selection_date": selection_date,
         "summary": _build_tracking_summary(page_stats_items),
-        "filtered_summary": {
-            **_build_tracking_summary(stats_items),
-            "total_count": len(summary_items),
-            "excluded_count": len(summary_items) - len(stats_items),
-        },
-        "strategy_summaries": _build_strategy_summaries(stats_items),
-        "items": items,
+        "filtered_summary": cached_summary["filtered_summary"],
+        "strategy_summaries": cached_summary["strategy_summaries"],
+        "items": response_items,
         "pagination": {
             "total": total,
             "limit": limit,
             "offset": offset,
             "has_more": offset + len(items) < total,
         },
-        "available_runs": _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id),
     }
+    if include_runs:
+        payload["available_runs"] = _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id)
+    return payload
 
 
 def _set_tracking_include_in_stats(
@@ -286,21 +330,13 @@ def _set_tracking_include_in_stats(
     instrument_type: str,
     include_in_stats: bool,
 ) -> int:
-    with mysql_conn(dict_cursor=False) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE selection_result sr
-                INNER JOIN stock_basic sb ON sr.code = sb.code
-                SET sr.include_in_stats = %s
-                WHERE sr.code = %s
-                  AND sr.trade_date = %s
-                  AND sr.strategy_id = %s
-                  AND sb.instrument_type = %s
-                """,
-                (1 if include_in_stats else 0, code, selection_date, strategy_id, instrument_type),
-            )
-            return int(cursor.rowcount or 0)
+    return _TRACKING_REPOSITORY.set_include_in_stats(
+        code=code,
+        selection_date=selection_date,
+        strategy_id=strategy_id,
+        instrument_type=instrument_type,
+        include_in_stats=include_in_stats,
+    )
 
 
 def _compact_review_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -401,6 +437,8 @@ def get_latest_tracking(
     instrument_type: str = Query(default="stock"),
     strategy_id: Optional[str] = Query(default=None),
     selection_date: Optional[str] = Query(default=None),
+    compact: bool = Query(default=False),
+    include_runs: bool = Query(default=True),
 ) -> dict:
     return _tracking_payload(
         strategy_id=strategy_id,
@@ -409,6 +447,8 @@ def get_latest_tracking(
         offset=offset,
         instrument_type=instrument_type,
         latest_only=True,
+        compact=compact,
+        include_runs=include_runs,
     )
 
 
@@ -420,6 +460,8 @@ def get_tracking_by_run(
     limit: int = Query(default=10, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     instrument_type: str = Query(default="stock"),
+    compact: bool = Query(default=False),
+    include_runs: bool = Query(default=True),
 ) -> dict:
     return _tracking_payload(
         run_id=run_id,
@@ -428,6 +470,8 @@ def get_tracking_by_run(
         limit=limit,
         offset=offset,
         instrument_type=instrument_type,
+        compact=compact,
+        include_runs=include_runs,
     )
 
 
@@ -438,36 +482,16 @@ def delete_tracking_item(
     strategy_id: str = Query(...),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
-    with mysql_conn(dict_cursor=False) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM selection_result sr
-                INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sr.code = %s
-                  AND sr.trade_date = %s
-                  AND sr.strategy_id = %s
-                  AND sb.instrument_type = %s
-                """,
-                (code, selection_date, strategy_id, instrument_type),
-            )
-            matched_count = int((cursor.fetchone() or [0])[0] or 0)
-            if matched_count <= 0:
-                raise HTTPException(status_code=404, detail="未找到可删除的复盘记录")
+    matched_count = _TRACKING_REPOSITORY.delete_item(
+        code=code,
+        selection_date=selection_date,
+        strategy_id=strategy_id,
+        instrument_type=instrument_type,
+    )
+    if matched_count <= 0:
+        raise HTTPException(status_code=404, detail="未找到可删除的复盘记录")
 
-            cursor.execute(
-                """
-                DELETE sr
-                FROM selection_result sr
-                INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sr.code = %s
-                  AND sr.trade_date = %s
-                  AND sr.strategy_id = %s
-                  AND sb.instrument_type = %s
-                """,
-                (code, selection_date, strategy_id, instrument_type),
-            )
+    _invalidate_tracking_summary_cache()
 
     return {
         "code": code,
@@ -495,6 +519,7 @@ def update_tracking_item_stats(
     )
     if matched_count <= 0:
         raise HTTPException(status_code=404, detail="未找到可更新的复盘记录")
+    _invalidate_tracking_summary_cache()
     return {
         "code": code,
         "selection_date": selection_date,
@@ -515,6 +540,7 @@ def run_tracking_deep_review(payload: TrackingDeepReviewRequest) -> dict:
         limit=max_items,
         offset=0,
         instrument_type=payload.instrument_type or "stock",
+        include_runs=False,
     )
     items = _stats_items(data.get("items") or [])
     if not items:
@@ -569,24 +595,7 @@ def get_tracking_filters(
             seen.add(value)
             seen_dates.append(value)
 
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT
-                    sr.strategy_id,
-                    MAX(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.strategy_display_name')), ''), sr.strategy_id)) AS strategy_display_name,
-                    COUNT(*) AS item_count,
-                    MAX(sr.created_at) AS last_created_at
-                FROM selection_result sr
-                INNER JOIN stock_basic sb ON sr.code = sb.code
-                WHERE sb.instrument_type = %s
-                GROUP BY sr.strategy_id
-                ORDER BY last_created_at DESC, sr.strategy_id ASC
-                """,
-                (instrument_type,),
-            )
-            strategy_rows = cursor.fetchall()
+    strategy_rows = _TRACKING_REPOSITORY.list_strategy_options(instrument_type)
 
     strategy_options = [
         {

@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import tushare as ts
 
-from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 from app.shared.db import mysql_conn
 from app.shared.task_log import TaskRunLogger
 
@@ -132,7 +131,6 @@ def main() -> None:
     parser.add_argument("--trade-date")
     parser.add_argument("--index-code", default="000300.SH")
     args = parser.parse_args()
-    ensure_market_sentiment_schema()
     trade_date = args.trade_date or _latest_trade_date()
     run_id = f"market_context_{trade_date.replace('-', '')}_{args.index_code.replace('.', '')}"
     logger = TaskRunLogger()

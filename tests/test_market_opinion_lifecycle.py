@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import json
+import unittest
+from datetime import date, datetime
+
+from app.data_ingestion.market_opinion_lifecycle import (
+    MarketOpinionLifecyclePolicy,
+    retention_snapshot_ids,
+)
+from app.data_ingestion.market_opinion_repository import normalized_payload_values
+
+
+class MarketOpinionRetentionTests(unittest.TestCase):
+    def test_recent_trade_days_keep_intraday_and_older_days_keep_only_latest_snapshot(self):
+        rows = []
+        row_id = 1
+        for day in (date(2026, 7, 10), date(2026, 7, 13), date(2026, 7, 14)):
+            for hour in (10, 15):
+                rows.append(
+                    {
+                        "id": row_id,
+                        "trade_date": day,
+                        "as_of_datetime": datetime(day.year, day.month, day.day, hour, 0),
+                    }
+                )
+                row_id += 1
+
+        keep, prune, retained_dates = retention_snapshot_ids(
+            rows,
+            MarketOpinionLifecyclePolicy(intraday_trade_days=2, daily_trade_days=3),
+        )
+
+        self.assertEqual(retained_dates, [date(2026, 7, 14), date(2026, 7, 13), date(2026, 7, 10)])
+        self.assertEqual(set(keep), {2, 3, 4, 5, 6})
+        self.assertEqual(prune, [1])
+
+    def test_policy_rejects_daily_retention_shorter_than_intraday(self):
+        with self.assertRaises(ValueError):
+            MarketOpinionLifecyclePolicy(intraday_trade_days=5, daily_trade_days=4).validate()
+
+
+class MarketOpinionNormalizationTests(unittest.TestCase):
+    def test_news_payloads_are_replaced_by_raw_references(self):
+        news = {
+            "raw_id": 88,
+            "title": "示例新闻",
+            "source_id": "source-a",
+            "impact_score": 72.5,
+            "signed_score": 72.5,
+            "timeliness_score": 90,
+        }
+        summary = {
+            "top_stocks": [
+                {
+                    "code": "sh.600000",
+                    "name": "浦发银行",
+                    "score": 80,
+                    "news_count": 1,
+                    "matched_news": [news],
+                    "custom_factor": 12.3,
+                }
+            ],
+            "top_news": [news],
+            "sources": ["source-a"],
+        }
+
+        stocks, news_refs, sources = normalized_payload_values(7, summary)
+
+        self.assertEqual(len(stocks), 1)
+        self.assertEqual(len(news_refs), 2)
+        self.assertEqual({row[1] for row in news_refs}, {"stock", "sector"})
+        self.assertTrue(all(row[4] == 88 for row in news_refs))
+        self.assertEqual(sources, [(7, 1, "source-a")])
+        stock_extra = json.loads(stocks[0][-1])
+        self.assertEqual(stock_extra, {"custom_factor": 12.3})
+        self.assertNotIn("matched_news", stock_extra)
+
+
+if __name__ == "__main__":
+    unittest.main()

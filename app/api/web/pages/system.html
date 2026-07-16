@@ -57,6 +57,17 @@
           <div id="system-baseline-panel" class="system-baseline-grid status-panel">加载中...</div>
         </section>
 
+        <section class="card system-schedule-console">
+          <div class="card-header">
+            <div>
+              <p class="card-kicker">Readiness</p>
+              <h2>Worker 与队列健康</h2>
+            </div>
+            <span id="system-readiness-overall" class="system-section-note">检查中...</span>
+          </div>
+          <div id="system-readiness-panel" class="system-task-grid status-panel">加载中...</div>
+        </section>
+
         <section class="system-ops-grid merged-task-monitor">
           <article class="card system-schedule-console">
             <div class="card-header">
@@ -88,12 +99,33 @@
             <div id="system-field-missing-panel" class="status-panel hidden"></div>
             <div id="system-shortfall-panel" class="status-panel hidden"></div>
           </article>
+          <article class="card system-note-card">
+            <div class="card-header compact-card-header">
+              <p class="card-kicker">Errors & Retention</p>
+              <h2>结构化错误与保留策略</h2>
+            </div>
+            <div id="system-job-error-panel" class="status-panel">加载中...</div>
+          </article>
+          <article class="card system-note-card">
+            <div class="card-header compact-card-header">
+              <p class="card-kicker">Realtime Storage</p>
+              <h2>分钟行情分层</h2>
+            </div>
+            <div id="system-realtime-lifecycle-panel" class="status-panel">加载中...</div>
+          </article>
+          <article class="card system-note-card">
+            <div class="card-header compact-card-header">
+              <p class="card-kicker">Opinion Storage</p>
+              <h2>舆情快照去重</h2>
+            </div>
+            <div id="system-market-opinion-storage-panel" class="status-panel">加载中...</div>
+          </article>
         </section>
       </section>
     </main>
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/system.js?v=20260508a"></script>
+  <script src="/static/js/system.js?v=20260716e1"></script>
 </body>
 </html>

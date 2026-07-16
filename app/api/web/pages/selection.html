@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260611a" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260716c1" />
 </head>
 <body data-page="selection">
   <div class="app-shell dashboard-shell">
@@ -55,14 +55,15 @@
               <label for="instrument-type">股票池类型</label>
               <select id="instrument-type" class="visually-hidden-select">
                 <option value="stock">股票</option>
-                <option value="etf">ETF</option>
-                <option value="index">指数</option>
+                <option value="etf" disabled>ETF（数据链建设中）</option>
+                <option value="index" disabled>指数（数据链建设中）</option>
               </select>
               <div class="instrument-segments" data-instrument-segments>
                 <button class="active" type="button" data-instrument-value="stock">全市场</button>
-                <button type="button" data-instrument-value="etf">ETF</button>
-                <button type="button" data-instrument-value="index">指数</button>
+                <button type="button" data-instrument-value="etf" disabled aria-disabled="true" data-tooltip="ETF 选股数据与策略链建设中">ETF · 建设中</button>
+                <button type="button" data-instrument-value="index" disabled aria-disabled="true" data-tooltip="指数选股数据与策略链建设中">指数 · 建设中</button>
               </div>
+              <small class="instrument-support-note">当前仅开放股票选股；ETF 持仓行情不受影响。</small>
             </div>
 
             <div class="terminal-form-row board-row">
@@ -109,7 +110,11 @@
             </div>
 
             <div class="terminal-actions">
-              <button class="btn btn-primary run-main-btn" type="submit"><span>▶</span> 开始运行选股</button>
+              <button id="selection-run-submit" class="btn btn-primary run-main-btn" type="submit">
+                <span class="run-btn-idle-icon">▶</span>
+                <span class="run-btn-spinner" aria-hidden="true"></span>
+                <span class="run-btn-label">开始运行选股</span>
+              </button>
               <button id="refresh-strategies" class="btn btn-secondary" type="button">刷新策略</button>
             </div>
           </form>
@@ -145,6 +150,19 @@
               <div><span>最新运行时间</span><b id="selection-run-time">-</b></div>
               <div><span>达标数量</span><b id="selection-qualified-count">-</b></div>
               <div><span>平均得分</span><b id="selection-avg-score">-</b></div>
+            </div>
+          </div>
+          <div id="selection-live-run" class="selection-live-run" hidden>
+            <div class="selection-live-run-head">
+              <span id="selection-live-run-phase">准备运行</span>
+              <b id="selection-live-run-elapsed">00:00</b>
+            </div>
+            <div class="selection-live-progress" aria-hidden="true">
+              <i id="selection-live-run-progress"></i>
+            </div>
+            <div class="selection-live-run-foot">
+              <span id="selection-live-run-remaining">预计约 2 分钟</span>
+              <button id="selection-cancel-run" class="btn btn-secondary btn-small selection-cancel-run" type="button" hidden>取消任务</button>
             </div>
           </div>
           <div class="selection-history-mini">
@@ -234,6 +252,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260612price"></script>
-  <script src="/static/js/selection.js?v=20260612price"></script>
+  <script src="/static/js/selection.js?v=20260716c1"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import socket
@@ -10,8 +11,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence
 
+from pymysql.err import IntegrityError
+
+from app.backtest.policy import BACKTEST_METHODOLOGY_VERSION, research_disclosure
+from app.jobs.errors import record_job_error
+from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
 from app.shared.db import mysql_conn
+from app.shared.instrument_policy import SUPPORTED_BACKTEST_INSTRUMENT_TYPES, require_supported_instrument
 from app.stock_selection.selector import StockSelector
+from app.strategies.service import StrategyService
 
 
 @dataclass
@@ -30,6 +38,8 @@ class BacktestRequest:
     apply_execution_constraints: bool = False
     max_picks: Optional[int] = None
     score_threshold: Optional[float] = None
+    is_system_test: bool = False
+    validation_baseline_id: Optional[str] = None
 
 
 def _to_float(value: Any) -> float | None:
@@ -50,29 +60,93 @@ def _to_json(value: Any) -> str:
 class BacktestService:
     """V2 回测服务。
 
-    使用 factor_input_daily + daily_kline 的历史输入快照构造候选池，
-    收益口径沿用 P0 文档：
-    - 1d：当日开盘买入，下一交易日开盘卖出
-    - 3d：当日开盘买入，第三个后续交易日收盘卖出
+    使用 factor_input_daily + daily_kline 的历史输入快照构造候选池。
+    新任务统一采用收盘后才能确认的信号时点：
+    - 信号：T 日收盘后形成
+    - 1d：T+1 开盘买入，下一交易日开盘卖出
+    - 3d：T+1 开盘买入，持有三个交易日后收盘卖出
 
     注意：多因子舆情选股依赖 Tavily 精排；为避免历史回测消耗大量 Tavily 次数，
     当前暂不开放严格复刻回测。
     """
 
-    SUPPORTED_STRATEGIES = {
-        "lowvol_reversal",
-        "v13_three_factor",
-        "fund_chip_repair",
-        "quality_lowvol",
-        "leader_tactics",
-        "low_position_resonance",
-        "multi_timeframe_resonance",
-    }
-    DISABLED_STRATEGIES = {
-        "a_share_sentiment": "A股舆情选股 V2 依赖实时 market_opinion_v2，当前回测未注入历史舆情聚合，P0 阶段暂不支持回测。",
-    }
     MAX_BACKTEST_DAYS = 260
     STALE_RUNNING_SECONDS = 30 * 60
+    DEFAULT_MAX_ATTEMPTS = 2
+
+    def __init__(self, job_states: MySQLJobStateRepository | None = None) -> None:
+        self.job_states = job_states or MySQLJobStateRepository(
+            MySQLJobTable(table="backtest_run")
+        )
+
+    @staticmethod
+    def _stable_hash(value: Any) -> str:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _strategy_config_hash(cls, selector: StockSelector) -> str:
+        return cls._stable_hash(
+            {
+                "strategy_meta": selector.strategy_meta,
+                "strategy_config": getattr(selector.strategy, "config", {}),
+            }
+        )
+
+    @staticmethod
+    def _methodology_metadata(request: BacktestRequest) -> Dict[str, Any]:
+        return {
+            "methodology_version": BACKTEST_METHODOLOGY_VERSION,
+            "signal_timing": "T日收盘后形成信号",
+            "entry_timing": "T+1交易日开盘",
+            "exit_timing": {
+                "1d": "入场后的下一交易日开盘",
+                "3d": "含入场日在内持有三个交易日后收盘",
+                "triple_barrier_5d": "入场后五个交易日内止盈/止损/到期退出",
+                "observe_t3_daily": "入场后逐日观察至第三个交易日",
+            }.get(request.return_mode),
+            "fundamental_policy": "non_point_in_time_fundamentals_excluded",
+            "universe_policy": "available_factor_kline_history_with_listing_date_v2",
+            "known_limitations": [
+                "历史 ST 状态尚无完整逐日快照",
+                "已退市证券的完整历史主数据尚未接入",
+                "回测仍为 research-only 且未完成样本外验证",
+            ],
+        }
+
+    @staticmethod
+    def _exclude_non_point_in_time_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+        item = dict(row)
+        for field in (
+            "pe_tushare",
+            "pb_tushare",
+            "roe",
+            "roa",
+            "grossprofit_margin",
+            "netprofit_margin",
+            "revenue_yoy",
+            "profit_yoy",
+            "eps",
+            "completeness_score",
+        ):
+            item[field] = None
+        # stock_basic.is_st 是当前状态，不能用于历史信号日过滤。
+        item["is_st"] = False
+        return item
+
+    @staticmethod
+    def _fetch_data_cutoff(end_date: str) -> str | None:
+        sql = """
+        SELECT MAX(f.trade_date) AS data_cutoff_date
+        FROM factor_input_daily f
+        INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
+        WHERE f.trade_date <= %s
+        """
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (end_date,))
+                row = cursor.fetchone() or {}
+        return str(row.get("data_cutoff_date")) if row.get("data_cutoff_date") else None
 
     def submit(self, request: BacktestRequest) -> Dict[str, Any]:
         self._validate_request(request)
@@ -89,101 +163,111 @@ class BacktestService:
         if len(trade_dates) > self.MAX_BACKTEST_DAYS:
             raise ValueError(f"V2-P0 单次最多回测 {self.MAX_BACKTEST_DAYS} 个交易日，当前 {len(trade_dates)} 个")
 
+        idempotency_key = self._backtest_idempotency_key(request, selector)
+        existing = self._get_active_by_idempotency(idempotency_key)
+        if existing:
+            existing["deduplicated"] = True
+            return existing
+
         run_id = f"backtest_{request.strategy_id}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-        self._create_run(run_id, request, selector, datetime.now(), status="queued", progress_total_days=len(trade_dates))
+        try:
+            self._create_run(
+                run_id,
+                request,
+                selector,
+                datetime.now(),
+                status="queued",
+                progress_total_days=len(trade_dates),
+                idempotency_key=idempotency_key,
+            )
+        except IntegrityError as exc:
+            if exc.args and int(exc.args[0]) == 1062:
+                existing = self._get_active_by_idempotency(idempotency_key)
+                if existing:
+                    existing["deduplicated"] = True
+                    return existing
+            raise
         return self.get_run(run_id)
 
+    def _backtest_idempotency_key(self, request: BacktestRequest, selector: StockSelector) -> str:
+        return self._stable_hash(
+            {
+                "job_type": "backtest",
+                "request": request.__dict__,
+                "strategy_config_hash": self._strategy_config_hash(selector),
+            }
+        )
+
+    def _get_active_by_idempotency(self, idempotency_key: str) -> Dict[str, Any] | None:
+        with mysql_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT *
+                    FROM backtest_run
+                    WHERE active_idempotency_key=%s
+                      AND status IN ('queued','running')
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (idempotency_key,),
+                )
+                row = cursor.fetchone()
+        if not row:
+            return None
+        return self.get_run(str(row["run_id"]))
+
     def run_background(self, run_id: str) -> None:
-        run = self.get_run(run_id)
-        request_json = run.get("request_json") or {}
-        if isinstance(request_json, str):
-            request_json = json.loads(request_json)
-        request = BacktestRequest(**request_json)
         try:
+            run = self.get_run(run_id)
+            request_json = run.get("request_json") or {}
+            if isinstance(request_json, str):
+                request_json = json.loads(request_json)
+            request = BacktestRequest(**request_json)
             self._execute(run_id, request)
         except Exception as exc:
-            self._finish_run(run_id, "failed", 0, 0, 0, {}, str(exc))
+            self._finish_run(
+                run_id,
+                "failed",
+                0,
+                0,
+                0,
+                {},
+                str(exc),
+                self._backtest_error_code(exc),
+            )
 
     def claim_next_queued_run(self, worker_id: str | None = None) -> str | None:
         """Atomically claim the oldest queued run for the worker."""
-        worker_id = worker_id or self._default_worker_id()
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT run_id
-                    FROM backtest_run
-                    WHERE status = 'queued'
-                    ORDER BY id ASC
-                    LIMIT 1
-                    """
-                )
-                row = cursor.fetchone()
-                if not row:
-                    return None
-                run_id = row["run_id"]
-                cursor.execute(
-                    """
-                    UPDATE backtest_run
-                    SET status='running', worker_id=%s, locked_at=%s, worker_heartbeat_at=%s,
-                        started_at=%s, error_message=NULL
-                    WHERE run_id=%s AND status='queued'
-                    """,
-                    (
-                        worker_id,
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        run_id,
-                    ),
-                )
-                if cursor.rowcount != 1:
-                    return None
-                return run_id
+        return self.job_states.claim_next(
+            worker_id or self._default_worker_id(),
+            running_phase="回测执行中",
+        )
 
-    def recover_stale_running_runs(self, stale_seconds: int | None = None) -> int:
-        stale_seconds = stale_seconds or self.STALE_RUNNING_SECONDS
-        sql = """
-        UPDATE backtest_run
-        SET status='queued', worker_id=NULL, locked_at=NULL, worker_heartbeat_at=NULL,
-            error_message=CONCAT(COALESCE(error_message, ''), %s)
-        WHERE status='running'
-          AND cancel_requested=0
-          AND COALESCE(worker_heartbeat_at, started_at) < DATE_SUB(NOW(), INTERVAL %s SECOND)
-        """
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, ("\nRecovered from stale worker heartbeat.", stale_seconds))
-                return cursor.rowcount
+    def recover_stale_running_runs(self, stale_seconds: int | None = None) -> StaleRecoveryResult:
+        result = self.job_states.recover_stale(stale_seconds or self.STALE_RUNNING_SECONDS)
+        if result.failed:
+            record_job_error(
+                "backtest",
+                "backtest",
+                "stale_retry_exhausted",
+                "backtest worker heartbeat stale and max attempts exhausted",
+                count=result.failed,
+            )
+        return result
 
     def request_cancel(self, run_id: str) -> Dict[str, Any]:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE backtest_run
-                    SET cancel_requested=1, status='cancelled', finished_at=NOW(), estimated_seconds_left=0,
-                        worker_heartbeat_at=NOW(), error_message='cancel requested before worker started'
-                    WHERE run_id=%s AND status='queued'
-                    """,
-                    (run_id,),
-                )
-                cursor.execute(
-                    """
-                    UPDATE backtest_run
-                    SET cancel_requested=1, error_message='cancel requested'
-                    WHERE run_id=%s AND status='running'
-                    """,
-                    (run_id,),
-                )
+        status = self.job_states.request_cancel(run_id)
+        if status is None:
+            raise ValueError("backtest run not found")
         return self.get_run(run_id)
 
     def _is_cancel_requested(self, run_id: str) -> bool:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT cancel_requested FROM backtest_run WHERE run_id=%s", (run_id,))
-                row = cursor.fetchone() or {}
-        return bool(row.get("cancel_requested"))
+        return self.job_states.is_cancel_requested(run_id)
+
+    @staticmethod
+    def _backtest_error_code(exc: Exception) -> str:
+        return "invalid_request" if isinstance(exc, (TypeError, ValueError)) else "backtest_failed"
 
     @staticmethod
     def _default_worker_id() -> str:
@@ -198,18 +282,25 @@ class BacktestService:
             raise ValueError("backtest run not found")
         summary_json = row.get("summary_json")
         request_json = row.get("request_json")
+        methodology_json = row.get("methodology_json")
         if isinstance(summary_json, str):
             row["summary_json"] = json.loads(summary_json)
         if isinstance(request_json, str):
             row["request_json"] = json.loads(request_json)
+        if isinstance(methodology_json, str):
+            row["methodology_json"] = json.loads(methodology_json)
         return row
 
     def _validate_request(self, request: BacktestRequest) -> None:
-        if request.strategy_id in self.DISABLED_STRATEGIES:
-            raise ValueError(self.DISABLED_STRATEGIES[request.strategy_id])
-        if request.strategy_id not in self.SUPPORTED_STRATEGIES:
-            supported = " / ".join(sorted(self.SUPPORTED_STRATEGIES))
-            raise ValueError(f"回测中心当前支持 {supported}")
+        request.instrument_type = require_supported_instrument(
+            request.instrument_type,
+            operation="backtest",
+            supported=SUPPORTED_BACKTEST_INSTRUMENT_TYPES,
+        )
+        StrategyService().require_backtest_ready(
+            request.strategy_id,
+            instrument_type=request.instrument_type,
+        )
         if request.trade_strategy_id:
             mapped_mode = {
                 "next_open_1d": "1d",
@@ -231,6 +322,10 @@ class BacktestService:
             raise ValueError("slippage_bps 需在 0~100 之间")
         if request.stamp_tax_bps < 0 or request.stamp_tax_bps > 100:
             raise ValueError("stamp_tax_bps 需在 0~100 之间")
+        if request.validation_baseline_id and not request.is_system_test:
+            raise ValueError("validation_baseline_id 仅允许用于系统测试任务")
+        if request.validation_baseline_id and len(request.validation_baseline_id) > 80:
+            raise ValueError("validation_baseline_id 最长 80 个字符")
         # V2.1 supports adjusted return calculation when adj_factor_daily has
         # coverage for the requested date range.
 
@@ -279,6 +374,7 @@ class BacktestService:
                 self._finish_run(run_id, "success", len(trade_dates), len(all_picks), len(all_trades), summary)
 
             return {
+                **research_disclosure(BACKTEST_METHODOLOGY_VERSION),
                 "run_id": run_id,
                 "status": "success",
                 "strategy_id": request.strategy_id,
@@ -293,7 +389,16 @@ class BacktestService:
             }
         except Exception as exc:
             if save:
-                self._finish_run(run_id, "failed", 0, 0, 0, {}, str(exc))
+                self._finish_run(
+                    run_id,
+                    "failed",
+                    0,
+                    0,
+                    0,
+                    {},
+                    str(exc),
+                    self._backtest_error_code(exc),
+                )
             raise
 
     def _execute(self, run_id: str, request: BacktestRequest) -> None:
@@ -321,7 +426,16 @@ class BacktestService:
 
         for index, trade_date in enumerate(trade_dates, start=1):
             if self._is_cancel_requested(run_id):
-                self._finish_run(run_id, "cancelled", len(trade_dates), len(all_picks), len(all_trades), self._build_run_summary(daily_summaries, all_trades, request.return_mode, rejection_counts, len(all_picks), request), "cancel requested")
+                self._finish_run(
+                    run_id,
+                    "cancelled",
+                    len(trade_dates),
+                    len(all_picks),
+                    len(all_trades),
+                    self._build_run_summary(daily_summaries, all_trades, request.return_mode, rejection_counts, len(all_picks), request),
+                    "cancel requested",
+                    error_code="cancelled_by_user",
+                )
                 return
             candidates = self._load_candidates(selector, trade_date, request.instrument_type)
             selected = selector.run({"candidates": candidates})
@@ -372,7 +486,7 @@ class BacktestService:
                             INNER JOIN stock_basic sb ON sb.code = f.code
                             WHERE f.trade_date = %s
                               AND sb.instrument_type = 'stock'
-                              AND sb.is_delisted = 0
+                              AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
                               AND dk.open IS NOT NULL
                               AND dk.open > 0
                         ) AS expected_count
@@ -393,20 +507,20 @@ class BacktestService:
             sb.name,
             sb.industry,
             sb.instrument_type,
-            sb.is_st,
-            f.pe_tushare,
-            f.pb_tushare,
-            f.roe,
-            f.roa,
-            f.grossprofit_margin,
-            f.netprofit_margin,
-            f.revenue_yoy,
-            f.profit_yoy,
-            sb.eps,
+            0 AS is_st,
+            NULL AS pe_tushare,
+            NULL AS pb_tushare,
+            NULL AS roe,
+            NULL AS roa,
+            NULL AS grossprofit_margin,
+            NULL AS netprofit_margin,
+            NULL AS revenue_yoy,
+            NULL AS profit_yoy,
+            NULL AS eps,
             f.turnover_rate,
             f.volume_ratio,
             f.total_mv,
-            f.completeness_score,
+            NULL AS completeness_score,
             dk.open,
             dk.close,
             dk.amount,
@@ -459,7 +573,7 @@ class BacktestService:
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
           AND sb.instrument_type = %s
-          AND sb.is_delisted = 0
+          AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
           AND dk.open IS NOT NULL
           AND dk.open > 0
         ORDER BY sb.code
@@ -470,7 +584,7 @@ class BacktestService:
                 rows = cursor.fetchall()
         candidates: List[Dict[str, Any]] = []
         for row in rows:
-            item = selector._build_candidate(row)
+            item = selector._build_candidate(self._exclude_non_point_in_time_fields(row))
             item["open"] = _to_float(row.get("open"))
             item["close"] = _to_float(row.get("close"))
             candidates.append(item)
@@ -491,20 +605,20 @@ class BacktestService:
             sb.name,
             sb.industry,
             sb.instrument_type,
-            sb.is_st,
-            f.pe_tushare,
-            f.pb_tushare,
-            f.roe,
-            f.roa,
-            f.grossprofit_margin,
-            f.netprofit_margin,
-            f.revenue_yoy,
-            f.profit_yoy,
-            sb.eps,
+            0 AS is_st,
+            NULL AS pe_tushare,
+            NULL AS pb_tushare,
+            NULL AS roe,
+            NULL AS roa,
+            NULL AS grossprofit_margin,
+            NULL AS netprofit_margin,
+            NULL AS revenue_yoy,
+            NULL AS profit_yoy,
+            NULL AS eps,
             f.turnover_rate,
             f.volume_ratio,
             f.total_mv,
-            f.completeness_score,
+            NULL AS completeness_score,
             dk.open,
             dk.close,
             dk.amount,
@@ -599,7 +713,7 @@ class BacktestService:
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
           AND sb.instrument_type = %s
-          AND sb.is_delisted = 0
+          AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
           AND dk.open IS NOT NULL
           AND dk.open > 0
         ORDER BY sb.code
@@ -610,7 +724,7 @@ class BacktestService:
                 rows = cursor.fetchall()
         candidates: List[Dict[str, Any]] = []
         for row in rows:
-            item = selector._build_candidate(row)  # 复用 V1 候选口径，V2 后续再拆出公共 builder
+            item = selector._build_candidate(self._exclude_non_point_in_time_fields(row))  # 复用 V1 候选口径，V2 后续再拆出公共 builder
             item["open"] = _to_float(row.get("open"))
             item["close"] = _to_float(row.get("close"))
             candidates.append(item)
@@ -642,8 +756,8 @@ class BacktestService:
             "code": item.get("code"),
             "rank_no": item.get("rank_no"),
             "score": item.get("score"),
-            "entry_price": item.get("open"),
-            "entry_price_type": "open",
+            "entry_price": None,
+            "entry_price_type": "next_open",
             "factor_json": {
                 "factors": item.get("factors", {}),
                 "raw_metrics": item.get("explain", {}).get("raw_metrics", {}),
@@ -655,24 +769,26 @@ class BacktestService:
         if not picks:
             return [], {}
         codes = [p["code"] for p in picks if p.get("code")]
-        lookahead = 6 if request.return_mode == "triple_barrier_5d" else 4 if request.return_mode in {"3d", "observe_t3_daily"} else 2
+        lookahead = 6 if request.return_mode == "triple_barrier_5d" else 3 if request.return_mode in {"3d", "observe_t3_daily"} else 2
         future = self._fetch_future_bars(codes, trade_date, lookahead=lookahead)
         trades: List[Dict[str, Any]] = []
         rejection_counts: Dict[str, int] = {}
         for pick in picks:
             code = pick["code"]
             bars = future.get(code, [])
-            entry_price = _to_float(pick.get("entry_price"))
+            entry_bar = bars[0] if bars else None
+            entry_price = _to_float(entry_bar.get("open")) if entry_bar else None
             if entry_price is None or entry_price <= 0:
                 self._count_reason(rejection_counts, "missing_entry_price")
                 continue
-            entry_bar = bars[0] if bars else None
+            pick["entry_price"] = entry_price
+            pick["entry_price_type"] = "next_open"
             buy_block_reason = self._execution_block_reason(entry_bar, "buy") if request.apply_execution_constraints else None
             if buy_block_reason:
                 self._count_reason(rejection_counts, buy_block_reason)
                 continue
             one_day_bar = bars[1] if request.return_mode in {"1d", "observe_t3_daily"} and len(bars) > 1 else None
-            three_day_bar = bars[3] if request.return_mode in {"3d", "observe_t3_daily"} and len(bars) > 3 else None
+            three_day_bar = bars[2] if request.return_mode in {"3d", "observe_t3_daily"} and len(bars) > 2 else None
             triple_exit_bar = None
             triple_exit_price = None
             triple_exit_reason = None
@@ -721,7 +837,7 @@ class BacktestService:
                     "strategy_id": strategy_id,
                     "trade_date": trade_date,
                     "code": code,
-                    "entry_date": trade_date,
+                    "entry_date": str(entry_bar.get("trade_date")) if entry_bar else None,
                     "entry_price": entry_price,
                     "exit_date_1d": str(one_day_bar.get("trade_date")) if one_day_bar else None,
                     "exit_price_1d": exit_price_1d,
@@ -779,11 +895,10 @@ class BacktestService:
             return {}
         placeholders = ",".join(["%s"] * len(codes))
         sql = f"""
-        SELECT dk.code, sb.name, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
+        SELECT dk.code, NULL AS name, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
                prev.close AS prev_close,
                af.adj_factor
         FROM daily_kline dk
-        LEFT JOIN stock_basic sb ON sb.code = dk.code
         LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
         LEFT JOIN daily_kline prev ON prev.code = dk.code
           AND prev.trade_date = (
@@ -791,7 +906,7 @@ class BacktestService:
             FROM daily_kline p
             WHERE p.code = dk.code AND p.trade_date < dk.trade_date
           )
-        WHERE dk.code IN ({placeholders}) AND dk.trade_date >= %s
+        WHERE dk.code IN ({placeholders}) AND dk.trade_date > %s
         ORDER BY dk.code, dk.trade_date
         """
         params = list(codes) + [trade_date]
@@ -942,6 +1057,7 @@ class BacktestService:
                 }
             )
         return {
+            "methodology": self._methodology_metadata(request) if request else None,
             "return_mode": return_mode,
             "trade_days": len(daily),
             "trade_count": len(values),
@@ -1019,47 +1135,86 @@ class BacktestService:
         started_at: datetime,
         status: str = "running",
         progress_total_days: int = 0,
+        idempotency_key: str | None = None,
     ) -> None:
-        sql = """
-        INSERT INTO backtest_run (
-            run_id, strategy_id, trade_strategy_id, strategy_version, instrument_type, start_date, end_date,
-            return_mode, evaluation_mode, use_adjusted_price, commission_bps, stamp_tax_bps, slippage_bps,
-            execution_constraints_enabled, status, request_json, started_at,
-            progress_total_days, progress_done_days, progress_pct
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0)
-        """
+        methodology = self._methodology_metadata(request)
+        columns = (
+            "run_id",
+            "strategy_id",
+            "trade_strategy_id",
+            "strategy_version",
+            "instrument_type",
+            "start_date",
+            "end_date",
+            "return_mode",
+            "evaluation_mode",
+            "methodology_version",
+            "data_cutoff_date",
+            "strategy_config_hash",
+            "methodology_json",
+            "use_adjusted_price",
+            "commission_bps",
+            "stamp_tax_bps",
+            "slippage_bps",
+            "execution_constraints_enabled",
+            "is_system_test",
+            "validation_baseline_id",
+            "status",
+            "idempotency_key",
+            "active_idempotency_key",
+            "attempt_count",
+            "max_attempts",
+            "phase",
+            "request_json",
+            "started_at",
+            "progress_total_days",
+            "progress_done_days",
+            "progress_pct",
+        )
+        sql = f"INSERT INTO backtest_run ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})"
+        values = (
+            run_id,
+            request.strategy_id,
+            request.trade_strategy_id,
+            selector.strategy_meta.get("version"),
+            request.instrument_type,
+            request.start_date,
+            request.end_date,
+            request.return_mode,
+            request.evaluation_mode,
+            BACKTEST_METHODOLOGY_VERSION,
+            self._fetch_data_cutoff(request.end_date),
+            self._strategy_config_hash(selector),
+            _to_json(methodology),
+            int(request.use_adjusted_price),
+            request.commission_bps,
+            request.stamp_tax_bps,
+            request.slippage_bps,
+            int(request.apply_execution_constraints),
+            int(request.is_system_test),
+            request.validation_baseline_id,
+            status,
+            idempotency_key,
+            idempotency_key if status == "queued" else None,
+            0,
+            self.DEFAULT_MAX_ATTEMPTS,
+            "任务已提交" if status == "queued" else "回测执行中",
+            _to_json(request.__dict__),
+            started_at.strftime("%Y-%m-%d %H:%M:%S"),
+            progress_total_days,
+            0,
+            0,
+        )
         with mysql_conn(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    sql,
-                    (
-                        run_id,
-                        request.strategy_id,
-                        request.trade_strategy_id,
-                        selector.strategy_meta.get("version"),
-                        request.instrument_type,
-                        request.start_date,
-                        request.end_date,
-                        request.return_mode,
-                        request.evaluation_mode,
-                        int(request.use_adjusted_price),
-                        request.commission_bps,
-                        request.stamp_tax_bps,
-                        request.slippage_bps,
-                        int(request.apply_execution_constraints),
-                        status,
-                        _to_json(request.__dict__),
-                        started_at.strftime("%Y-%m-%d %H:%M:%S"),
-                        progress_total_days,
-                    ),
-                )
+                cursor.execute(sql, values)
 
     def _mark_running(self, run_id: str, progress_total_days: int) -> None:
         sql = """
         UPDATE backtest_run
         SET status='running', progress_total_days=%s, progress_done_days=0,
             progress_pct=0, current_trade_date=NULL, estimated_seconds_left=NULL,
-            worker_heartbeat_at=%s,
+            worker_heartbeat_at=%s, phase='回测执行中', error_code=NULL,
             error_message=NULL, started_at=%s, finished_at=NULL
         WHERE run_id=%s
         """
@@ -1079,7 +1234,8 @@ class BacktestService:
         sql = """
         UPDATE backtest_run
         SET progress_done_days=%s, progress_total_days=%s, progress_pct=%s,
-            current_trade_date=%s, estimated_seconds_left=%s, worker_heartbeat_at=%s
+            current_trade_date=%s, estimated_seconds_left=%s, worker_heartbeat_at=%s,
+            phase='回测执行中'
         WHERE run_id=%s
         """
         with mysql_conn(dict_cursor=False) as conn:
@@ -1126,24 +1282,42 @@ class BacktestService:
                         ],
                     )
 
-    def _finish_run(self, run_id: str, status: str, sample_days: int, total_picks: int, total_trades: int, summary: Dict[str, Any], error_message: str | None = None) -> None:
+    def _finish_run(
+        self,
+        run_id: str,
+        status: str,
+        sample_days: int,
+        total_picks: int,
+        total_trades: int,
+        summary: Dict[str, Any],
+        error_message: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        phase = {
+            "success": "运行完成",
+            "failed": "运行失败",
+            "cancelled": "已取消",
+        }.get(status, status)
         sql = """
         UPDATE backtest_run
-        SET status=%s, sample_days=%s, total_picks=%s, total_trades=%s,
+        SET status=%s, phase=%s, sample_days=%s, total_picks=%s, total_trades=%s,
             progress_done_days=CASE WHEN %s='success' THEN progress_total_days ELSE progress_done_days END,
             progress_pct=CASE WHEN %s='success' THEN 100 ELSE progress_pct END,
             estimated_seconds_left=CASE WHEN %s='success' THEN 0 ELSE estimated_seconds_left END,
             total_return_pct=%s, avg_return_pct=%s, max_drawdown_pct=%s, win_rate_pct=%s,
             worker_heartbeat_at=%s, estimated_seconds_left=CASE WHEN %s IN ('success','cancelled') THEN 0 ELSE estimated_seconds_left END,
-            summary_json=%s, error_message=%s, finished_at=%s
+            summary_json=%s, error_code=%s, error_message=%s, finished_at=%s,
+            active_idempotency_key=NULL
         WHERE run_id=%s
         """
+        updated = 0
         with mysql_conn(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     sql,
                     (
                         status,
+                        phase,
                         sample_days,
                         total_picks,
                         total_trades,
@@ -1157,8 +1331,12 @@ class BacktestService:
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         status,
                         _to_json(summary),
+                        error_code,
                         error_message,
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         run_id,
                     ),
                 )
+                updated = cursor.rowcount
+        if updated and status == "failed":
+            record_job_error("backtest", "backtest", error_code, error_message)

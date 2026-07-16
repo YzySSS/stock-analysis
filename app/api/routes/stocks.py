@@ -6,7 +6,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.data_ingestion.intraday_bar_sync import cached_bars, get_or_fetch_intraday_bars
+from app.data_ingestion.intraday_bar_sync import cached_bars, get_or_fetch_intraday_bars, normalize_code
+from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
+from app.data_ingestion.realtime_lifecycle import fetch_rollup_bars
 from app.shared.db import mysql_conn
 from app.shared.sentiment_scoring import enrich_opinion_news_item, score_source
 
@@ -358,6 +360,24 @@ def stock_intraday_bars(
         raise HTTPException(status_code=502, detail=f"分钟线补全失败: {type(exc).__name__}: {str(exc)[:180]}") from exc
 
 
+@router.get("/stocks/{code}/realtime-rollups")
+def stock_realtime_rollups(
+    code: str,
+    interval: int = Query(default=5),
+    trade_date: str | None = Query(default=None),
+    limit: int = Query(default=400, ge=1, le=5000),
+) -> dict:
+    try:
+        return fetch_rollup_bars(
+            normalize_code(code),
+            interval=interval,
+            trade_date=trade_date,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/stocks/{code}")
 def stock_detail(
     code: str,
@@ -677,7 +697,7 @@ def stock_detail(
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT sector_type, sector_name, as_of_datetime, sector_score, top_stocks_json, top_news_json
+                    SELECT id, payload_version, sector_type, sector_name, as_of_datetime, sector_score, top_stocks_json, top_news_json, source_json
                     FROM sector_opinion_daily
                     WHERE as_of_datetime = (SELECT MAX(as_of_datetime) FROM sector_opinion_daily)
                       AND sector_type = 'theme'
@@ -686,6 +706,7 @@ def stock_detail(
                     """
                 )
                 sector_rows = cursor.fetchall() or []
+        hydrate_sector_opinion_rows(sector_rows)
         for sector_row in sector_rows:
             try:
                 top_stocks = json.loads(sector_row.get("top_stocks_json") or "[]")

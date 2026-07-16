@@ -5,7 +5,9 @@ import re
 import time
 from fastapi import APIRouter
 
+from app.jobs.readiness import build_operational_readiness, recent_error_summaries
 from app.shared.db import mysql_conn, ping_mysql
+from app.shared.instrument_policy import STOCK_DAILY_COMPLETENESS_RATIO, STOCK_INSTRUMENT_TYPE
 
 router = APIRouter(tags=["system"])
 
@@ -14,39 +16,67 @@ _SYSTEM_STATUS_CACHE: dict | None = None
 _SYSTEM_STATUS_CACHE_AT = 0.0
 
 
-TRACKED_TASKS = [
-    "daily_kline_increment",
-    "daily_kline_backfill",
-    "daily_kline_realtime_eod_backfill",
-    "fundamental_sync",
-    "valuation_sync",
-    "stock_status_snapshot_refresh",
-    "factor_input_history_backfill",
-    "factor_input_daily_update",
-    "market_context_daily_update",
-    "stock_sentiment_daily_update",
-    "market_opinion_update",
-    "stock_realtime_snapshot_update",
-    "market_fund_flow_update",
+TASK_SCHEDULES = [
+    {"task_name": "stock_basic_sync", "task_label": "股票基础信息同步", "schedule": "每天 01:30"},
+    {"task_name": "daily_kline_increment", "task_label": "日线增量更新", "schedule": "每天 02:00"},
+    {"task_name": "adj_factor_daily_update", "task_label": "复权因子日更", "schedule": "每天 02:10"},
+    {"task_name": "daily_kline_backfill", "task_label": "历史日线补齐", "schedule": "每天 02:15"},
+    {"task_name": "moneyflow_daily_update", "task_label": "资金流日更", "schedule": "每天 02:20"},
+    {"task_name": "chip_daily_update", "task_label": "筹码数据日更", "schedule": "每天 02:30"},
+    {"task_name": "fundamental_sync", "task_label": "基本面补齐", "schedule": "每天 02:40"},
+    {"task_name": "valuation_sync", "task_label": "估值补齐", "schedule": "每天 02:50"},
+    {"task_name": "stock_status_snapshot_refresh", "task_label": "状态快照刷新", "schedule": "每天 03:05"},
+    {"task_name": "pe_baidu_valuation_backfill", "task_label": "百度 PE 估值补齐", "schedule": "交易日 03:10"},
+    {"task_name": "factor_input_daily_update", "task_label": "历史输入层日更", "schedule": "每天 03:20；交易日 18:30"},
+    {"task_name": "market_context_daily_update", "task_label": "市场强度日更", "schedule": "每天 03:35"},
+    {"task_name": "market_timing_daily_update", "task_label": "市场择时日更", "schedule": "每天 03:40；交易日 15:35"},
+    {"task_name": "strategy_factor_ci_daily_update", "task_label": "策略因子 CI 日更", "schedule": "每天 03:45；交易日 15:50"},
+    {"task_name": "stock_sentiment_daily_update", "task_label": "真实舆情日更", "schedule": "每天 03:50"},
+    {"task_name": "daily_kline_realtime_eod_backfill", "task_label": "日线收盘快照兜底", "schedule": "交易日 15:10"},
+    {"task_name": "stock_realtime_lifecycle", "task_label": "实时行情分层与保留", "schedule": "交易日 15:20"},
+    {"task_name": "market_opinion_update", "task_label": "热点舆情聚合", "schedule": "交易日 09:00-15:59 每 15 分钟"},
+    {"task_name": "market_opinion_lifecycle", "task_label": "舆情快照去重与保留", "schedule": "交易日 16:05"},
+    {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内判断交易时段"},
+    {"task_name": "portfolio_etf_quote_update", "task_label": "持仓 ETF 行情", "schedule": "交易日 09:00-15:59 每 5 分钟"},
+    {"task_name": "market_fund_flow_update", "task_label": "板块资金流快照", "schedule": "交易日 09:00-15:59 每 3 分钟"},
+    {"task_name": "ths_concept_hot_update", "task_label": "同花顺热点概念", "schedule": "交易日 09:00-15:59 每 30 分钟"},
+    {"task_name": "stock_realtime_moneyflow_update", "task_label": "个股实时资金流", "schedule": "交易日 09:00-15:59 每 5 分钟"},
+    {"task_name": "stock_popularity_update", "task_label": "股票热度榜", "schedule": "交易日 09:00-15:59 每 5 分钟"},
+    {"task_name": "factor_input_history_backfill", "task_label": "历史输入层回填", "schedule": "按需 / 后台批次"},
+    {"task_name": "job_retention", "task_label": "任务与错误保留治理", "schedule": "每天 04:15"},
 ]
 
-KLINE_LATEST_SAMPLE_LIMIT = 20
+TRACKED_TASKS = [item["task_name"] for item in TASK_SCHEDULES]
+TASK_NAME_LABELS = {item["task_name"]: item["task_label"] for item in TASK_SCHEDULES}
 
-TASK_NAME_LABELS = {
-    "daily_kline_increment": "日线增量更新",
-    "daily_kline_backfill": "历史日线补齐",
-    "daily_kline_realtime_eod_backfill": "日线收盘快照兜底",
-    "fundamental_sync": "基本面补齐",
-    "valuation_sync": "估值补齐",
-    "stock_status_snapshot_refresh": "状态快照刷新",
-    "factor_input_history_backfill": "历史输入层回填",
-    "factor_input_daily_update": "历史输入层日更",
-    "market_context_daily_update": "市场强度日更",
-    "stock_sentiment_daily_update": "真实舆情日更",
-    "market_opinion_update": "热点舆情聚合",
-    "stock_realtime_snapshot_update": "实时行情分钟快照",
-    "market_fund_flow_update": "板块资金流快照",
-}
+KLINE_LATEST_SAMPLE_LIMIT = 20
+TASK_RUNNING_STALE_SECONDS = 60 * 60
+
+LATEST_DATES_SQL = f"""
+SELECT
+    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='{STOCK_INSTRUMENT_TYPE}') AS total_stock_codes,
+    (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_available_trade_date,
+    (
+      SELECT grouped.trade_date
+      FROM (
+        SELECT trade_date, COUNT(*) AS row_count
+        FROM daily_kline
+        GROUP BY trade_date
+      ) grouped
+      WHERE grouped.row_count >= (
+        SELECT COUNT(*) * {STOCK_DAILY_COMPLETENESS_RATIO}
+        FROM stock_basic
+        WHERE instrument_type='{STOCK_INSTRUMENT_TYPE}'
+      )
+      ORDER BY grouped.trade_date DESC
+      LIMIT 1
+    ) AS daily_kline_latest_complete_trade_date,
+    (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at,
+    (SELECT MAX(fundamental_updated_at) FROM stock_basic) AS fundamental_latest_updated_at,
+    (SELECT MAX(valuation_updated_at) FROM stock_basic) AS valuation_latest_updated_at,
+    (SELECT MAX(created_at) FROM selection_result) AS selection_result_latest_created_at,
+    (SELECT MAX(trade_date) FROM selection_result) AS selection_result_latest_trade_date
+"""
 
 
 def _basic_data_ranges() -> dict:
@@ -119,9 +149,9 @@ def _coverage_stats() -> dict:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT
-                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock') AS total_stock_codes,
+                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='{STOCK_INSTRUMENT_TYPE}') AS total_stock_codes,
                     (SELECT COUNT(DISTINCT dk.code) FROM daily_kline dk INNER JOIN stock_basic sb ON dk.code = sb.code WHERE sb.instrument_type='stock') AS daily_kline_covered_codes,
                     (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (roe IS NOT NULL OR roa IS NOT NULL OR grossprofit_margin IS NOT NULL OR revenue_yoy IS NOT NULL)) AS fundamental_filled_codes,
                     (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND (pe_tushare IS NOT NULL OR pb_tushare IS NOT NULL)) AS valuation_filled_codes
@@ -350,31 +380,7 @@ def _fetch_stock_status_snapshot_map(trade_date: str) -> dict[str, dict]:
 def _latest_dates() -> dict:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock') AS total_stock_codes,
-                    (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_available_trade_date,
-                    (
-                      SELECT grouped.trade_date
-                      FROM (
-                        SELECT trade_date, COUNT(*) AS row_count
-                        FROM daily_kline
-                        GROUP BY trade_date
-                      ) grouped
-                      WHERE grouped.row_count >= (
-                        SELECT COUNT(*) * 0.95 FROM stock_basic WHERE instrument_type='stock'
-                      )
-                      ORDER BY grouped.trade_date DESC
-                      LIMIT 1
-                    ) AS daily_kline_latest_complete_trade_date,
-                    (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at,
-                    (SELECT MAX(fundamental_updated_at) FROM stock_basic) AS fundamental_latest_updated_at,
-                    (SELECT MAX(valuation_updated_at) FROM stock_basic) AS valuation_latest_updated_at,
-                    (SELECT MAX(created_at) FROM selection_result) AS selection_result_latest_created_at,
-                    (SELECT MAX(trade_date) FROM selection_result) AS selection_result_latest_trade_date
-                """
-            )
+            cursor.execute(LATEST_DATES_SQL)
             row = cursor.fetchone() or {}
             total_stock_codes = int(row.get("total_stock_codes") or 0)
             latest_available = row.get("daily_kline_latest_available_trade_date")
@@ -791,7 +797,11 @@ def _market_opinion_update_status(task_runs: list[dict]) -> dict | None:
 def _latest_task_runs() -> list[dict]:
     placeholders = ", ".join(["%s"] * len(TRACKED_TASKS))
     sql = f"""
-    SELECT t1.task_name, t1.run_id, t1.status, t1.started_at, t1.finished_at, t1.message, t1.metadata_json
+    SELECT t1.task_name, t1.run_id, t1.status, t1.started_at, t1.finished_at, t1.message, t1.metadata_json,
+           CASE
+             WHEN t1.status = 'running' THEN TIMESTAMPDIFF(SECOND, t1.started_at, NOW())
+             ELSE NULL
+           END AS running_age_seconds
     FROM task_run_log t1
     INNER JOIN (
         SELECT task_name, MAX(id) AS max_id
@@ -808,6 +818,8 @@ def _latest_task_runs() -> list[dict]:
     items = []
     for row in rows:
         metadata = _decode_metadata(row.get("metadata_json"))
+        running_age_seconds = int(row.get("running_age_seconds") or 0) if row.get("running_age_seconds") is not None else None
+        stale = row.get("status") == "running" and (running_age_seconds or 0) > TASK_RUNNING_STALE_SECONDS
         if row.get("task_name") == "market_opinion_update" and isinstance(metadata, dict):
             metadata = dict(metadata)
             if isinstance(metadata.get("errors"), dict):
@@ -820,7 +832,10 @@ def _latest_task_runs() -> list[dict]:
                 "task_name": row.get("task_name"),
                 "task_label": TASK_NAME_LABELS.get(row.get("task_name"), row.get("task_name")),
                 "run_id": row.get("run_id"),
-                "status": row.get("status"),
+                "status": "stale" if stale else row.get("status"),
+                "recorded_status": row.get("status"),
+                "stale": stale,
+                "running_age_seconds": running_age_seconds,
                 "started_at": str(row.get("started_at")) if row.get("started_at") else None,
                 "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
                 "message": _sanitize_status_text(row.get("message")) if row.get("task_name") == "market_opinion_update" else row.get("message"),
@@ -831,21 +846,151 @@ def _latest_task_runs() -> list[dict]:
 
 
 def _scheduled_tasks() -> list[dict]:
-    return [
-        {"task_name": "daily_kline_increment", "task_label": "日线增量更新", "schedule": "每天 02:00"},
-        {"task_name": "daily_kline_backfill", "task_label": "历史日线补齐", "schedule": "每天 02:15"},
-        {"task_name": "daily_kline_realtime_eod_backfill", "task_label": "日线收盘快照兜底", "schedule": "按需 / BaoStock 卡住或最新日线缺口时"},
-        {"task_name": "fundamental_sync", "task_label": "基本面补齐", "schedule": "每天 02:40"},
-        {"task_name": "valuation_sync", "task_label": "估值补齐", "schedule": "每天 02:50"},
-        {"task_name": "stock_status_snapshot_refresh", "task_label": "状态快照刷新", "schedule": "每天 03:05"},
-        {"task_name": "factor_input_history_backfill", "task_label": "历史输入层回填", "schedule": "按需 / 后台批次"},
-        {"task_name": "factor_input_daily_update", "task_label": "历史输入层日更", "schedule": "每天 03:20"},
-        {"task_name": "market_context_daily_update", "task_label": "市场强度日更", "schedule": "每天 03:35"},
-        {"task_name": "stock_sentiment_daily_update", "task_label": "真实舆情日更", "schedule": "每天 03:50"},
-        {"task_name": "market_opinion_update", "task_label": "热点舆情聚合", "schedule": "交易日 09:00-15:59 每 15 分钟"},
-        {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内 09:15 起尝试盘前竞价/盘中快照"},
-        {"task_name": "market_fund_flow_update", "task_label": "板块资金流快照", "schedule": "交易日 09:00-15:59 每 3 分钟"},
-    ]
+    return [dict(item) for item in TASK_SCHEDULES]
+
+
+def _realtime_lifecycle_summary() -> dict:
+    table_names = (
+        "stock_realtime_intraday",
+        "stock_realtime_bar_rollup",
+        "stock_realtime_intraday_tracked",
+    )
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT table_name, table_rows,
+                       ROUND((data_length + index_length) / 1024 / 1024, 2) AS allocated_mb
+                FROM information_schema.tables
+                WHERE table_schema=DATABASE() AND table_name IN (%s,%s,%s)
+                """,
+                table_names,
+            )
+            table_rows = {
+                (row.get("table_name") or row.get("TABLE_NAME")): {
+                    "approx_rows": int(row.get("table_rows") or row.get("TABLE_ROWS") or 0),
+                    "allocated_mb": float(row.get("allocated_mb") or row.get("ALLOCATED_MB") or 0),
+                }
+                for row in (cursor.fetchall() or [])
+            }
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT trade_date) AS trade_days,
+                       MIN(trade_date) AS min_trade_date,
+                       MAX(trade_date) AS max_trade_date
+                FROM stock_realtime_intraday
+                """
+            )
+            raw_range = cursor.fetchone() or {}
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS daily_partitions
+                FROM information_schema.partitions
+                WHERE table_schema=DATABASE() AND table_name='stock_realtime_intraday'
+                  AND partition_name IS NOT NULL AND partition_name <> 'p_future'
+                """
+            )
+            partition_count = int((cursor.fetchone() or {}).get("daily_partitions") or 0)
+            cursor.execute(
+                """
+                SELECT m.trade_date, m.interval_minutes, m.status, m.source_rows, m.source_codes,
+                       m.rollup_rows, m.rollup_codes, m.last_quote_minute, m.finished_at
+                FROM stock_realtime_rollup_manifest m
+                INNER JOIN (
+                    SELECT interval_minutes, MAX(trade_date) AS max_trade_date
+                    FROM stock_realtime_rollup_manifest
+                    GROUP BY interval_minutes
+                ) latest
+                  ON latest.interval_minutes=m.interval_minutes AND latest.max_trade_date=m.trade_date
+                ORDER BY m.interval_minutes
+                """
+            )
+            manifests = cursor.fetchall() or []
+    return {
+        "policy": {
+            "full_market_raw_trade_days": 2,
+            "rollup_trade_days": 90,
+            "tracked_raw_trade_days": 90,
+            "rollup_intervals_minutes": [5, 15],
+        },
+        "raw": {
+            **table_rows.get("stock_realtime_intraday", {}),
+            "trade_days": int(raw_range.get("trade_days") or 0),
+            "min_trade_date": str(raw_range.get("min_trade_date")) if raw_range.get("min_trade_date") else None,
+            "max_trade_date": str(raw_range.get("max_trade_date")) if raw_range.get("max_trade_date") else None,
+            "daily_partitions": partition_count,
+            "partitioned": partition_count > 0,
+        },
+        "rollup": table_rows.get("stock_realtime_bar_rollup", {}),
+        "tracked": table_rows.get("stock_realtime_intraday_tracked", {}),
+        "latest_manifests": [
+            {
+                **row,
+                "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+                "last_quote_minute": str(row.get("last_quote_minute")) if row.get("last_quote_minute") else None,
+                "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
+            }
+            for row in manifests
+        ],
+    }
+
+
+def _market_opinion_storage_summary() -> dict:
+    table_names = (
+        "sector_opinion_daily",
+        "sector_opinion_stock",
+        "sector_opinion_news_ref",
+        "sector_opinion_source_ref",
+    )
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT table_name, table_rows,
+                       ROUND((data_length + index_length) / 1024 / 1024, 2) AS allocated_mb
+                FROM information_schema.tables
+                WHERE table_schema=DATABASE() AND table_name IN (%s,%s,%s,%s)
+                """,
+                table_names,
+            )
+            tables = {}
+            for row in cursor.fetchall() or []:
+                name = row.get("table_name") or row.get("TABLE_NAME")
+                tables[name] = {
+                    "approx_rows": int(row.get("table_rows") or row.get("TABLE_ROWS") or 0),
+                    "allocated_mb": float(row.get("allocated_mb") or row.get("ALLOCATED_MB") or 0),
+                }
+            cursor.execute("SELECT MAX(as_of_datetime) AS max_as_of FROM sector_opinion_daily")
+            latest_as_of = (cursor.fetchone() or {}).get("max_as_of")
+            if latest_as_of:
+                cursor.execute(
+                    """
+                    SELECT payload_version, COUNT(*) AS rows_count
+                    FROM sector_opinion_daily
+                    WHERE as_of_datetime=%s
+                    GROUP BY payload_version
+                    """,
+                    (latest_as_of,),
+                )
+                latest_versions = cursor.fetchall() or []
+            else:
+                latest_versions = []
+    return {
+        "policy": {
+            "intraday_trade_days": 5,
+            "daily_trade_days": 90,
+            "payload_version": 2,
+        },
+        "latest_as_of": str(latest_as_of) if latest_as_of else None,
+        "latest_payload_versions": [
+            {
+                "payload_version": int(row.get("payload_version") or 0),
+                "rows": int(row.get("rows_count") or 0),
+            }
+            for row in latest_versions
+        ],
+        "tables": tables,
+    }
 
 
 @router.get("/system/status")
@@ -863,6 +1008,7 @@ def system_status() -> dict:
 
     mysql_info = ping_mysql()
     task_runs = _latest_task_runs()
+    readiness = build_operational_readiness()
     payload = {
         "status": "ok",
         "health": {
@@ -875,6 +1021,23 @@ def system_status() -> dict:
         "data_baseline": _data_baseline_summary(),
         "scheduled_tasks": _scheduled_tasks(),
         "task_runs": task_runs,
+        "readiness": readiness,
+        "job_error_summary": recent_error_summaries(),
+        "realtime_lifecycle": _realtime_lifecycle_summary(),
+        "market_opinion_storage": _market_opinion_storage_summary(),
+        "retention_policy": {
+            "task_run_log_detail_days": 90,
+            "selection_task_days": 90,
+            "backtest_system_test_days": 90,
+            "portfolio_raw_response_days": 30,
+            "portfolio_snapshot_days": 90,
+            "structured_error_summary_days": 365,
+            "realtime_full_market_raw_trade_days": 2,
+            "realtime_rollup_trade_days": 90,
+            "realtime_tracked_raw_trade_days": 90,
+            "market_opinion_intraday_trade_days": 5,
+            "market_opinion_daily_trade_days": 90,
+        },
         "market_opinion_update": _market_opinion_update_status(task_runs),
     }
     _SYSTEM_STATUS_CACHE = dict(payload)

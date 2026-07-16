@@ -1,0 +1,11 @@
+/root/.openclaw/workspace/stock-analysis/logs/*.log {
+    daily
+    rotate 14
+    maxsize 50M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

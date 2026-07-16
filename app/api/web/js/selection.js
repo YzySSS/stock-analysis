@@ -1,7 +1,267 @@
 let currentDefaultStrategy = null;
 let lastSelectionResponse = null;
 let hasExecutedSelection = false;
+let selectionRunTimer = null;
+let selectionRunStartedAt = null;
+let selectionRunBackendStatus = null;
 const savedSelectionKeys = new Set();
+const SELECTION_RUN_DURATION_KEY = 'selection.run.durationMs';
+const DEFAULT_SELECTION_RUN_ESTIMATE_MS = 110000;
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function formatRunDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getSelectionRunEstimateMs() {
+  const stored = Number(window.localStorage?.getItem(SELECTION_RUN_DURATION_KEY));
+  if (stored && !Number.isNaN(stored)) {
+    return clampNumber(stored * 1.25, 15000, 120000);
+  }
+  return DEFAULT_SELECTION_RUN_ESTIMATE_MS;
+}
+
+function rememberSelectionRunDuration(ms) {
+  if (!ms || Number.isNaN(ms)) return;
+  const previous = Number(window.localStorage?.getItem(SELECTION_RUN_DURATION_KEY));
+  const next = previous && !Number.isNaN(previous) ? previous * 0.65 + ms * 0.35 : ms;
+  window.localStorage?.setItem(SELECTION_RUN_DURATION_KEY, String(Math.round(clampNumber(next, 8000, 120000))));
+}
+
+function updateSelectionRunProgress() {
+  if (!selectionRunStartedAt) return;
+  const liveRun = qs('#selection-live-run');
+  const progress = qs('#selection-live-run-progress');
+  const elapsedNode = qs('#selection-live-run-elapsed');
+  const remainingNode = qs('#selection-live-run-remaining');
+  const phaseNode = qs('#selection-live-run-phase');
+  if (!liveRun || !progress || !elapsedNode || !remainingNode || !phaseNode) return;
+
+  const backend = selectionRunBackendStatus;
+  const elapsedMs = backend?.elapsed_seconds != null ? Number(backend.elapsed_seconds) * 1000 : Date.now() - selectionRunStartedAt;
+  const estimateMs = getSelectionRunEstimateMs();
+  const ratio = elapsedMs / Math.max(estimateMs, 1);
+  const backendProgress = Number(backend?.progress_pct);
+  const progressPct = Number.isFinite(backendProgress) && backendProgress > 0
+    ? clampNumber(backendProgress, 0, backend?.status === 'success' ? 100 : 96)
+    : ratio >= 1 ? 94 : clampNumber(8 + ratio * 78, 8, 90);
+  const remainingMs = backend?.estimated_seconds_left != null ? Number(backend.estimated_seconds_left) * 1000 : estimateMs - elapsedMs;
+  const phase = backend?.phase || (ratio < 0.18
+    ? '正在提交任务'
+    : ratio < 0.52
+      ? '读取全市场数据'
+      : ratio < 0.82
+        ? '计算因子和排序'
+        : '整理选股结果');
+
+  liveRun.hidden = false;
+  progress.style.width = `${progressPct}%`;
+  elapsedNode.textContent = formatRunDuration(elapsedMs);
+  phaseNode.textContent = phase;
+  remainingNode.textContent = remainingMs > 0
+    ? `预计还需约 ${formatRunDuration(remainingMs)}`
+    : `已超过预计 ${formatRunDuration(Math.abs(remainingMs))}，仍在计算`;
+}
+
+function selectionRunStatusLabel(status) {
+  return {
+    queued: '排队中',
+    running: '运行中',
+    success: '运行成功',
+    no_data: '数据不足',
+    failed: '运行失败',
+    cancelled: '已取消',
+  }[status] || status || '运行中';
+}
+
+function renderSelectionTaskStatus(status) {
+  if (!status) return;
+  selectionRunBackendStatus = status;
+  if (status.run_id && qs('#selection-run-id')) {
+    qs('#selection-run-id').value = status.run_id;
+  }
+  const state = qs('#selection-run-state');
+  if (state) {
+    state.textContent = selectionRunStatusLabel(status.status);
+    state.classList.remove('up', 'down', 'running');
+    if (status.status === 'success') state.classList.add('up');
+    else if (status.status === 'failed' || status.status === 'cancelled' || status.status === 'no_data') state.classList.add('down');
+    else state.classList.add('running');
+  }
+  const cancelButton = qs('#selection-cancel-run');
+  if (cancelButton) {
+    const cancellable = status.status === 'queued' || status.status === 'running';
+    cancelButton.hidden = !cancellable;
+    cancelButton.disabled = Boolean(status.cancel_requested);
+    cancelButton.textContent = status.cancel_requested ? '正在取消…' : '取消任务';
+  }
+  const runTime = qs('#selection-run-time');
+  if (runTime) {
+    runTime.textContent = status.started_at || status.created_at || '刚刚开始';
+  }
+  const count = qs('#selection-qualified-count');
+  if (count) {
+    count.textContent = status.status === 'success'
+      ? String(status.result_count ?? 0)
+      : status.status === 'queued'
+        ? '排队中'
+        : status.status === 'cancelled'
+          ? '已取消'
+          : '计算中';
+  }
+  updateSelectionRunProgress();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForSelectionRun(runId) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const status = await fetchJson(`/api/selection/runs/${encodeURIComponent(runId)}`);
+    renderSelectionTaskStatus(status);
+    if (status.status === 'success') return status;
+    if (status.status === 'cancelled') {
+      throw new Error('选股任务已取消');
+    }
+    if (status.status === 'no_data') {
+      throw new Error(status.error_message || '当前数据不足，任务未执行');
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error_message || '选股运行失败');
+    }
+    await sleep(status.status === 'queued' ? 1000 : 2000);
+  }
+  throw new Error('选股运行超时，请稍后在历史 run_id 中查询结果');
+}
+
+function setSelectionInputsDisabled(disabled) {
+  qsa('#selection-form input, #selection-form select, #selection-form button, #refresh-results, #refresh-selection-page').forEach((element) => {
+    element.disabled = disabled;
+  });
+}
+
+function startSelectionRunFeedback(button) {
+  selectionRunStartedAt = Date.now();
+  selectionRunBackendStatus = null;
+  clearInterval(selectionRunTimer);
+  document.body.classList.add('selection-is-running');
+  qs('.selection-run-panel')?.classList.add('is-running');
+  qs('.selection-run-status-card')?.classList.add('is-running');
+  if (button) {
+    button.classList.add('is-running');
+    button.setAttribute('aria-busy', 'true');
+    const label = button.querySelector('.run-btn-label');
+    if (label) label.textContent = '正在运行选股';
+  }
+  setSelectionInputsDisabled(true);
+  const cancelButton = qs('#selection-cancel-run');
+  if (cancelButton) {
+    cancelButton.hidden = true;
+    cancelButton.disabled = false;
+    cancelButton.textContent = '取消任务';
+  }
+  const state = qs('#selection-run-state');
+  if (state) {
+    state.textContent = '运行中';
+    state.classList.remove('up', 'down');
+    state.classList.add('running');
+  }
+  qs('#selection-run-time').textContent = '刚刚开始';
+  qs('#selection-qualified-count').textContent = '计算中';
+  qs('#selection-avg-score').textContent = '-';
+  qs('#selection-success-rate').textContent = '...';
+  qs('#selection-score-sparkline').innerHTML = '<text x="16" y="44" fill="#38bdf8" font-size="12">正在计算评分分布</text>';
+  updateSelectionRunProgress();
+  selectionRunTimer = setInterval(updateSelectionRunProgress, 500);
+}
+
+function stopSelectionRunFeedback(button, status = 'success') {
+  const elapsedMs = selectionRunStartedAt ? Date.now() - selectionRunStartedAt : 0;
+  if (status === 'success') rememberSelectionRunDuration(elapsedMs);
+  selectionRunStartedAt = null;
+  selectionRunBackendStatus = null;
+  clearInterval(selectionRunTimer);
+  selectionRunTimer = null;
+  document.body.classList.remove('selection-is-running');
+  qs('.selection-run-panel')?.classList.remove('is-running');
+  qs('.selection-run-status-card')?.classList.remove('is-running');
+  setSelectionInputsDisabled(false);
+  if (button) {
+    button.classList.remove('is-running');
+    button.removeAttribute('aria-busy');
+    const label = button.querySelector('.run-btn-label');
+    if (label) label.textContent = status === 'failed' ? '重新运行选股' : '开始运行选股';
+  }
+  const liveRun = qs('#selection-live-run');
+  if (liveRun) liveRun.hidden = true;
+}
+
+async function cancelSelectionRun() {
+  const runId = selectionRunBackendStatus?.run_id || (qs('#selection-run-id')?.value || '').trim();
+  if (!runId) return;
+  const button = qs('#selection-cancel-run');
+  if (button) {
+    button.disabled = true;
+    button.textContent = '正在取消…';
+  }
+  try {
+    const status = await fetchJson(`/api/selection/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+    renderSelectionTaskStatus(status);
+  } catch (error) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = '重试取消';
+    }
+  }
+}
+
+function renderSelectionRunningPlaceholder() {
+  const body = qs('#selection-results-body');
+  const summaryLine = qs('#selection-summary-line');
+  const cards = qs('#selection-result-cards');
+  if (summaryLine) summaryLine.textContent = '选股运行中：已收到点击，正在读取全市场候选池和实时行情。';
+  if (body) body.innerHTML = renderEmptyRow(14, '选股运行中，请稍等...');
+  if (cards) {
+    cards.classList.add('empty-state', 'selection-running-placeholder');
+    cards.innerHTML = `
+      <div class="selection-running-card">
+        <span class="selection-running-ring" aria-hidden="true"></span>
+        <div>
+          <strong>正在运行选股</strong>
+          <p>全市场候选池、实时行情、资金和舆情因子正在计算。</p>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function renderSelectionRunError(error) {
+  const message = error?.message || '运行失败';
+  const cancelled = message.includes('任务已取消');
+  const body = qs('#selection-results-body');
+  const summaryLine = qs('#selection-summary-line');
+  const cards = qs('#selection-result-cards');
+  const state = qs('#selection-run-state');
+  if (state) {
+    state.textContent = cancelled ? '已取消' : '运行失败';
+    state.classList.remove('up', 'running');
+    state.classList.add('down');
+  }
+  if (summaryLine) summaryLine.textContent = cancelled ? '本次选股任务已取消。' : `运行失败：${message}`;
+  if (body) body.innerHTML = renderEmptyRow(14, cancelled ? '本次选股任务已取消' : `运行失败：${message}`);
+  if (cards) {
+    cards.classList.add('empty-state');
+    cards.innerHTML = cancelled ? '本次选股任务已取消' : `运行失败：${escapeHtml(message)}`;
+  }
+}
 
 function buildSelectionPersistKey(item) {
   return [
@@ -104,10 +364,11 @@ function renderSelectionRunStatus(data = null, visibleItems = []) {
   const scores = visibleItems.map((item) => Number(item.score)).filter((value) => !Number.isNaN(value));
   const avgScore = scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null;
   qs('#selection-success-rate').textContent = successRate == null ? '-' : `${formatNumber(successRate, 0)}%`;
-  state.textContent = data ? (qualifiedCount ? '运行成功' : '无达标股') : '待运行';
-  state.classList.remove('up', 'down');
+  const isNoHistory = data?.status === 'no_history';
+  state.textContent = data ? (isNoHistory ? '暂无历史' : (qualifiedCount ? '运行成功' : '无达标股')) : '待运行';
+  state.classList.remove('up', 'down', 'running');
   if (data && qualifiedCount) state.classList.add('up');
-  if (data && !qualifiedCount) state.classList.add('down');
+  if (data && !qualifiedCount && !isNoHistory) state.classList.add('down');
   qs('#selection-run-time').textContent = summary.run_created_at || summary.updated_at || summary.latest_trade_date || '-';
   qs('#selection-qualified-count').textContent = data ? `${qualifiedCount} / ${originalCount || 0}` : '-';
   qs('#selection-avg-score').textContent = formatNumber(avgScore, 1);
@@ -368,12 +629,12 @@ function renderTradePlanBlock(plan = null, status = null) {
   `;
 }
 
-function renderSelectionResultCards(items = []) {
+function renderSelectionResultCards(items = [], emptyText = '暂无达标标的') {
   const container = qs('#selection-result-cards');
   if (!container) return;
   if (!items.length) {
     container.classList.add('empty-state');
-    container.innerHTML = '暂无达标标的';
+    container.innerHTML = escapeHtml(emptyText);
     return;
   }
   container.classList.remove('empty-state');
@@ -536,6 +797,7 @@ function renderSelectionResults(data) {
   const sortBy = qs('#selection-sort')?.value || 'rank_asc';
   const summary = data.summary || {};
   const originalItems = data.items || [];
+  const isNoHistory = data.status === 'no_history';
   let items = originalItems.filter((item) => Number(item.score ?? 0) >= minScore);
 
   fillIndustryOptions(originalItems);
@@ -550,7 +812,9 @@ function renderSelectionResults(data) {
 
   items = [...items].sort((a, b) => compareSelectionItems(sortBy, a, b));
 
-  summaryLine.textContent = `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
+  summaryLine.textContent = isNoHistory
+    ? (data.message || '当前条件下暂无真实历史选股结果。')
+    : `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
   const diagnostics = data.diagnostics || {};
   const v13Filter = diagnostics.v13_filter_summary || null;
   const v12Filter = diagnostics.v12_filter_summary || null;
@@ -572,8 +836,9 @@ function renderSelectionResults(data) {
   renderSelectionRunStatus(data, items);
 
   if (!originalItems.length) {
-    renderSelectionResultCards([]);
-    body.innerHTML = renderEmptyRow(14, '本次运行未产生任何入选结果');
+    const emptyText = isNoHistory ? '暂无历史选股结果' : '本次运行未产生任何入选结果';
+    renderSelectionResultCards([], emptyText);
+    body.innerHTML = renderEmptyRow(14, emptyText);
     return;
   }
 
@@ -803,10 +1068,13 @@ async function loadSelectionResults(runIdOverride = null) {
 async function runSelection(event) {
   event.preventDefault();
   const button = event.submitter || qs('#selection-form button[type="submit"]');
-  if (button) button.disabled = true;
+  let runSucceeded = false;
+  let finalResult = null;
+  startSelectionRunFeedback(button);
+  renderSelectionRunningPlaceholder();
 
   try {
-    const result = await fetchJson('/api/selection/run', {
+    const submitted = await fetchJson('/api/selection/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -816,13 +1084,24 @@ async function runSelection(event) {
         limit: Number(qs('#limit').value || 3),
         score_threshold: Number(qs('#selection-min-score').value || 60),
         save: false,
+        async_run: true,
       }),
     });
     hasExecutedSelection = true;
-    if (result.run_id) {
-      qs('#selection-run-id').value = result.run_id;
+    if (submitted.run_id) {
+      qs('#selection-run-id').value = submitted.run_id;
     }
-    const normalized = normalizeRunResponse(result);
+    if (submitted.status && submitted.run_id && !submitted.results && !submitted.result) {
+      renderSelectionTaskStatus(submitted);
+      const completed = await waitForSelectionRun(submitted.run_id);
+      finalResult = completed.result;
+    } else {
+      finalResult = submitted.result || submitted;
+    }
+    if (!finalResult) {
+      throw new Error('选股任务已完成，但没有返回结果，请用 run_id 查询状态');
+    }
+    const normalized = normalizeRunResponse(finalResult);
     lastSelectionResponse = normalized;
     (normalized.items || []).forEach((item) => {
       if (item.persisted_key) savedSelectionKeys.add(item.persisted_key);
@@ -831,8 +1110,12 @@ async function runSelection(event) {
     if (normalized.strategy) {
       renderStrategySummary(normalized.strategy);
     }
+    runSucceeded = true;
+  } catch (error) {
+    renderSelectionRunError(error);
   } finally {
-    if (button) button.disabled = false;
+    stopSelectionRunFeedback(button, runSucceeded ? 'success' : 'failed');
+    bindTooltips();
   }
 }
 
@@ -847,6 +1130,7 @@ async function refreshSelectionPage() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   qs('#selection-form').addEventListener('submit', runSelection);
+  qs('#selection-cancel-run')?.addEventListener('click', cancelSelectionRun);
   qs('#refresh-strategies').addEventListener('click', async () => {
     await loadStrategies();
   });
@@ -874,6 +1158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   qsa('[data-instrument-value]').forEach((button) => {
     button.addEventListener('click', async () => {
+      if (button.disabled) return;
       qs('#instrument-type').value = button.dataset.instrumentValue;
       syncInstrumentSegments();
       syncMarketBoardSegments();

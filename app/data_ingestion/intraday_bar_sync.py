@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from app.orchestration.intraday_bar_schema import ensure_intraday_bar_schema
 from app.shared.db import mysql_conn
 
 SOURCE = "akshare_stock_zh_a_hist_min_em"
@@ -213,7 +212,6 @@ def save_bars(bars: list[IntradayBar]) -> int:
 
 
 def get_or_fetch_intraday_bars(code: str, trade_date: str | None = None, refresh: bool = False) -> dict[str, Any]:
-    ensure_intraday_bar_schema()
     final_code = normalize_code(code)
     final_trade_date = trade_date or latest_trade_date_for_code(final_code) or date.today().isoformat()
     cached = [] if refresh else cached_bars(final_code, final_trade_date)

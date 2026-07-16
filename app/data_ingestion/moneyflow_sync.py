@@ -14,7 +14,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.db import mysql_conn
 
 load_dotenv(PROJECT_ROOT / ".env")
@@ -156,7 +155,6 @@ class MoneyflowSync:
         return len(rows)
 
     def run(self, start_date: str, end_date: str, pause_seconds: float = 0.0) -> dict:
-        ensure_v2_schema()
         import time
 
         trade_dates = self.fetch_trade_dates(start_date, end_date)

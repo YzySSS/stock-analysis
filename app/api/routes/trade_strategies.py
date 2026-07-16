@@ -5,7 +5,6 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.db import mysql_conn
 
 router = APIRouter(tags=["trade-strategies"])
@@ -40,7 +39,6 @@ def normalize_trade_strategy(row: dict) -> dict:
 
 @router.get("/trade-strategies")
 def list_trade_strategies() -> dict:
-    ensure_v2_schema()
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -56,7 +54,6 @@ def list_trade_strategies() -> dict:
 
 @router.get("/trade-strategies/{strategy_id}")
 def get_trade_strategy(strategy_id: str) -> dict:
-    ensure_v2_schema()
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(

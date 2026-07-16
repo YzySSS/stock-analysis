@@ -28,6 +28,37 @@ function backtestRunStrategyLabel(item) {
   return item?.strategy_display_name || backtestStrategyLabel(item?.strategy_id);
 }
 
+async function loadBacktestStrategies() {
+  const select = qs('#backtest-strategy-id');
+  const submit = qs('#backtest-form button[type="submit"]');
+  if (!select) return [];
+  const previousValue = select.value;
+  const data = await fetchJson('/api/strategies?instrument_type=stock');
+  const items = (data.strategies || []).filter((item) => item.backtest_ready === true);
+  items.forEach((item) => {
+    BACKTEST_STRATEGY_LABELS[item.id] = item.display_name || item.id;
+  });
+  if (!items.length) {
+    select.innerHTML = '<option value="">当前没有达到研究回测门槛的策略</option>';
+    select.disabled = true;
+    if (submit) submit.disabled = true;
+    return [];
+  }
+  select.innerHTML = items.map((item) => (
+    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.display_name || item.id)}（研究态 · ${item.validation_status === 'validated' ? '已验证' : '未验证'}）</option>`
+  )).join('');
+  const preferred = items.some((item) => item.id === previousValue)
+    ? previousValue
+    : items.some((item) => item.id === data.default_strategy)
+      ? data.default_strategy
+      : items[0].id;
+  select.value = preferred;
+  select.disabled = false;
+  if (submit) submit.disabled = false;
+  syncBacktestStrategyDefaults();
+  return items;
+}
+
 const BACKTEST_TRADE_STRATEGY_LABELS = {
   next_open_1d: '次日开盘卖出',
   hold_3d_close: '持有3日收盘',
@@ -380,7 +411,7 @@ function renderTradesPagination(meta = {}) {
 }
 
 function renderTradeHorizonDays(days = []) {
-  if (!days.length) return '<span class="muted">入选日/T+1/T+2/T+3/T+4 数据不足</span>'; 
+  if (!days.length) return '<span class="muted">入场日/入场+1/+2/+3/+4 数据不足</span>';
   return `
     <div class="backtest-horizon-grid">
       ${days.map((day) => `
@@ -410,7 +441,7 @@ function renderTrades(items = [], returnMode = currentBacktestReturnMode, meta =
   }
   const isSelectionDiagnostics = returnMode === 'observe_t3_daily';
   const is3d = returnMode === '3d' || returnMode === 'triple_barrier_5d' || isSelectionDiagnostics;
-  const horizonTitle = '选股专属回测：入选日 / T+1 / T+2 / T+3 / T+4 收盘与日内风险';
+  const horizonTitle = '选股专属回测：信号日后下一交易日入场，展示入场日 / +1 / +2 / +3 / +4 收盘与日内风险';
   body.innerHTML = items.map((item) => `
     <tr>
       <td>${escapeHtml(item.trade_date || '')}</td>
@@ -605,7 +636,7 @@ function pickDefaultBacktestRun(items = []) {
 }
 
 async function loadRuns({ autoLoadLatest = false } = {}) {
-  const data = await fetchJson('/api/backtest/runs?limit=20');
+  const data = await fetchJson('/api/backtest/runs?limit=20&compact=true');
   const items = data.items || [];
   renderRuns(items);
   updatePolling(items);
@@ -643,7 +674,9 @@ async function loadBacktestResult(runId, options = {}) {
 }
 
 async function refreshBacktestPage() {
-  await Promise.all([loadFactorStatus(), loadRuns({ autoLoadLatest: true })]);
+  await loadBacktestStrategies();
+  await loadFactorStatus();
+  await loadRuns({ autoLoadLatest: true });
 }
 
 async function runBacktest(event) {
@@ -682,7 +715,8 @@ async function runBacktest(event) {
     qs('#backtest-detail-section').style.display = '';
     renderCurve([]);
     renderTrades([], currentBacktestReturnMode, { total: 0, page: 1, total_pages: 0 });
-    await Promise.all([loadRuns(), loadFactorStatus()]);
+    await loadRuns();
+    await loadFactorStatus();
     if (messageShell) messageShell.hidden = true;
   } catch (error) {
     if (messageShell) messageShell.hidden = false;

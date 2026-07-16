@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
 
 DDL = [
@@ -122,7 +121,6 @@ def _index_exists(cursor, table: str, index_name: str) -> bool:
 
 
 def ensure_market_sentiment_schema() -> dict:
-    init_mysql_schema()
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             for sql in DDL:
@@ -136,7 +134,3 @@ def ensure_market_sentiment_schema() -> dict:
                     if not _index_exists(cursor, table, index_name):
                         cursor.execute(sql)
     return {"status": "ok", "tables": ["market_context_daily", "stock_news", "stock_sentiment_daily"]}
-
-
-if __name__ == "__main__":
-    print(ensure_market_sentiment_schema())

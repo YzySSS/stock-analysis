@@ -9,8 +9,12 @@ function strategyDisplayNameById(strategyId) {
 
 function strategyStatusClass(item = {}) {
   if (item.availability === 'runtime_ready' || item.runtime_ready) return 'status-ok';
-  if (item.availability === 'experimental' || item.availability === 'research') return 'status-warn';
+  if (item.availability === 'prototype' || item.availability === 'data_not_ready' || item.availability === 'research') return 'status-warn';
   return 'status-muted';
+}
+
+function capabilityBadge(ok, yesLabel, noLabel) {
+  return `<span class="badge ${ok ? 'status-ok' : 'status-muted'}">${escapeHtml(ok ? yesLabel : noLabel)}</span>`;
 }
 
 function renderStrategyCards(data) {
@@ -20,8 +24,11 @@ function renderStrategyCards(data) {
 
   qs('#strategies-default').textContent = strategyDisplayNameById(data.default_strategy) || '-';
   qs('#strategies-count').textContent = String(data.summary?.count ?? items.length ?? 0);
+  qs('#strategies-loadable-count').textContent = String(data.summary?.loadable_count ?? items.filter((item) => item.loadable).length);
+  qs('#strategies-data-ready-count').textContent = String(data.summary?.data_ready_count ?? items.filter((item) => item.data_ready).length);
   qs('#strategies-current-count').textContent = String(data.summary?.runtime_ready_count ?? data.summary?.current_count ?? 0);
-  qs('#strategies-legacy-count').textContent = String((data.summary?.experimental_count ?? 0) + (data.summary?.display_only_count ?? data.summary?.legacy_count ?? 0));
+  qs('#strategies-backtest-count').textContent = String(data.summary?.backtest_ready_count ?? items.filter((item) => item.backtest_ready).length);
+  qs('#strategies-validated-count').textContent = String(data.summary?.validated_count ?? items.filter((item) => item.validated).length);
 
   if (!items.length) {
     list.innerHTML = '<div class="empty-state">暂无策略数据</div>';
@@ -39,6 +46,12 @@ function renderStrategyCards(data) {
         </div>
         <h3>${escapeHtml(item.display_name || item.id)}</h3>
         <div class="strategy-hero-state"><i class="strategy-status-dot ${escapeHtml(item.availability || 'unknown')}"></i>${escapeHtml(item.availability_label || '-')}</div>
+        <div class="strategy-hero-status-row">
+          ${capabilityBadge(item.loadable, '可加载', '不可加载')}
+          ${capabilityBadge(item.data_ready, '数据就绪', '数据未就绪')}
+          ${capabilityBadge(item.backtest_ready, '研究回测', '回测关闭')}
+          ${capabilityBadge(item.validated, '已验证', '未验证')}
+        </div>
         <dl>
           <div><dt>版本</dt><dd>v${escapeHtml(item.version || '-')}</dd></div>
           <div><dt>模式</dt><dd>${escapeHtml(item.mode || 'current')}</dd></div>
@@ -86,7 +99,9 @@ function renderStrategyDetail(strategy = null) {
       <div><span>得分阈值</span><b>${strategy.score_threshold ?? '-'}</b></div>
       <div><span>最大持仓数</span><b>${strategy.max_picks ?? '-'}</b></div>
       <div><span>调仓频率</span><b>每日</b></div>
-      <div><span>风险敞口上限</span><b>${strategy.runtime_ready ? '8%' : '-'}</b></div>
+      <div><span>实时状态</span><b>${escapeHtml(strategy.runtime_status || '-')}</b></div>
+      <div><span>回测状态</span><b>${escapeHtml(strategy.backtest_status || '-')}</b></div>
+      <div><span>验证状态</span><b>${escapeHtml(strategy.validation_status || '-')}</b></div>
     </div>
     <div class="strategy-note-box">
       <strong>策略说明</strong>
@@ -112,23 +127,29 @@ function renderStrategyReadiness(strategy = null) {
     readiness.innerHTML = '<div class="empty-state">请选择策略</div>';
     return;
   }
-  const factors = strategy.factors || [];
-  const avgCoverage = factors.length ? factors.reduce((sum, item) => sum + (Number(item.coverage) || 0), 0) / factors.length : null;
+  const datasetChecks = (strategy.dataset_statuses || []).map((item) => ({
+    label: item.name,
+    status: Boolean(item.ready),
+    detail: `${item.coverage == null ? (item.row_count == null ? '-' : `${item.row_count} 条`) : formatPercent(item.coverage)} · ${item.latest_at || '-'}`,
+  }));
   const checks = [
-    { label: '行情数据', status: true, time: '09:30:00' },
-    { label: '财务因子', status: avgCoverage == null ? true : avgCoverage >= 80, time: '09:25:54' },
-    { label: '调仓/涨跌停', status: true, time: '09:30:00' },
-    { label: '风险模型', status: strategy.runtime_ready, warn: !strategy.runtime_ready, time: '09:20:11' },
+    { label: '策略代码可加载', status: Boolean(strategy.loadable), detail: strategy.load_error || '' },
+    { label: '标的类型兼容', status: Boolean(strategy.instrument_compatible), detail: (strategy.supported_instrument_types || []).join(' / ') || '-' },
+    ...datasetChecks,
+    { label: '实时选股可执行', status: Boolean(strategy.runtime_ready), detail: (strategy.runtime_reasons || [])[0] || strategy.runtime_status || '-' },
+    { label: '研究回测可执行', status: Boolean(strategy.backtest_ready), detail: (strategy.backtest_reasons || [])[0] || strategy.backtest_status || '-' },
+    { label: '交易有效性验证', status: Boolean(strategy.validated), detail: strategy.validation_status || '-' },
   ];
+  const reasons = strategy.readiness_reasons || strategy.runtime_reasons || [];
   readiness.innerHTML = `
     ${checks.map((item) => `
-      <div class="strategy-readiness-item ${item.warn ? 'warn' : ''}">
+      <div class="strategy-readiness-item ${item.status ? '' : 'warn'}">
         <span>${escapeHtml(item.label)}</span>
-        <b>${item.warn ? '⚠ 警告' : item.status ? '● 就绪' : '○ 待补齐'}</b>
-        <em>${escapeHtml(item.time)}</em>
+        <b>${item.status ? '● 就绪' : '○ 未就绪'}</b>
+        <em>${escapeHtml(item.time || item.detail || '-')}</em>
       </div>
     `).join('')}
-    <div class="strategy-warning-note">风险模型因子部分缺失时，会使用最近可用版本计算。</div>
+    <div class="strategy-warning-note">${escapeHtml(reasons[0] || strategy.evidence_note || '各能力状态均来自注册表声明与当前数据快照。')}</div>
   `;
 }
 
@@ -216,17 +237,8 @@ function renderStrategyTable(items = []) {
 async function loadStrategyDetail(strategyId) {
   const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId)}`);
   currentStrategyId = strategyId;
-  renderStrategyCards({
-    default_strategy: qs('#strategies-default').textContent,
-    summary: {
-      count: strategiesCache.length,
-      runtime_ready_count: strategiesCache.filter((item) => item.runtime_ready).length,
-      experimental_count: strategiesCache.filter((item) => item.availability === 'experimental').length,
-      display_only_count: strategiesCache.filter((item) => item.availability === 'display_only').length,
-      current_count: strategiesCache.filter((item) => item.mode === 'current').length,
-      legacy_count: strategiesCache.filter((item) => item.mode === 'legacy').length,
-    },
-    strategies: strategiesCache,
+  qsa('[data-strategy-card]').forEach((card) => {
+    card.classList.toggle('selected', card.getAttribute('data-strategy-card') === strategyId);
   });
   renderStrategyDetail(data.strategy || null);
   renderStrategyFactors(data.strategy || null);
@@ -259,8 +271,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderError(qs('#strategies-list'), `加载策略失败: ${error.message}`);
     qs('#strategies-default').textContent = '加载失败';
     qs('#strategies-count').textContent = '-';
+    qs('#strategies-loadable-count').textContent = '-';
+    qs('#strategies-data-ready-count').textContent = '-';
     qs('#strategies-current-count').textContent = '-';
-    qs('#strategies-legacy-count').textContent = '-';
+    qs('#strategies-backtest-count').textContent = '-';
+    qs('#strategies-validated-count').textContent = '-';
     renderStrategyDetail(null);
     renderStrategyFactors(null);
   }

@@ -3,12 +3,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 import tushare as ts
 
 from app.shared.db import mysql_conn
-from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.task_log import TaskRunLogger
 
 
@@ -45,9 +44,6 @@ class FactorInputHistorySync:
             raise RuntimeError("TUSHARE_TOKEN 未配置")
         self.pro = ts.pro_api(self.token)
         self.task_logger = TaskRunLogger()
-
-    def ensure_table(self) -> None:
-        ensure_v2_schema()
 
     @staticmethod
     def _daterange(start_date: str, end_date: str) -> List[str]:
@@ -190,9 +186,21 @@ class FactorInputHistorySync:
                 cursor.executemany(sql, data)
         return len(rows)
 
-    def run(self, start_date: str, end_date: str, limit_per_day: int | None = None, offset: int = 0) -> dict:
-        self.ensure_table()
-        trade_dates = self.fetch_trade_dates(start_date, end_date)
+    def run(
+        self,
+        start_date: str,
+        end_date: str,
+        limit_per_day: int | None = None,
+        offset: int = 0,
+        *,
+        trade_dates_override: Sequence[str] | None = None,
+        daily_basic_maps: Mapping[str, Mapping[str, Dict[str, float | None]]] | None = None,
+    ) -> dict:
+        trade_dates = (
+            list(trade_dates_override)
+            if trade_dates_override is not None
+            else self.fetch_trade_dates(start_date, end_date)
+        )
         codes = self.fetch_stock_codes(limit=limit_per_day, offset=offset)
         if not codes:
             return {
@@ -208,7 +216,11 @@ class FactorInputHistorySync:
         total_days = 0
         fundamental_map = self.fetch_stock_basic_snapshot(codes)
         for trade_date in trade_dates:
-            valuation_map = self.fetch_daily_basic_map(trade_date)
+            valuation_map = (
+                daily_basic_maps.get(trade_date, {})
+                if daily_basic_maps is not None
+                else self.fetch_daily_basic_map(trade_date)
+            )
             records: List[FactorInputDailyRecord] = []
             for code in codes:
                 normalized_code = code.split(".")[-1]

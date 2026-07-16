@@ -395,7 +395,13 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
     : '';
   renderSelectionDateOptions(selectionDates, effectiveSelectionDate);
 
-  const query = new URLSearchParams({ limit: String(limit), offset: String(offset), instrument_type: instrumentType });
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    instrument_type: instrumentType,
+    compact: 'true',
+    include_runs: 'false',
+  });
   if (runId) query.set('run_id', runId);
   if (strategyId) query.set('strategy_id', strategyId);
   if (effectiveSelectionDate) query.set('selection_date', effectiveSelectionDate);

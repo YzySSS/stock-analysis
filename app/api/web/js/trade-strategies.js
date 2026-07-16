@@ -3,12 +3,19 @@ let selectedTradeStrategy = null;
 function ruleSummary(rule = {}) {
   if (!rule || typeof rule !== 'object') return '-';
   const parts = [];
-  if (rule.entry_day) parts.push(`买入日：${rule.entry_day === 'selection_day' ? '入选日' : rule.entry_day}`);
+  if (rule.entry_day) {
+    const entryDayLabel = rule.entry_day === 'selection_day'
+      ? '入选日（旧口径）'
+      : rule.entry_day === 'next_trading_day'
+        ? '信号后下一交易日'
+        : rule.entry_day;
+    parts.push(`买入日：${entryDayLabel}`);
+  }
   if (rule.entry_price) parts.push(`买入价：${rule.entry_price === 'open' ? '开盘价' : rule.entry_price}`);
   if (rule.exit_day_offset != null) parts.push(`卖出偏移：${rule.exit_day_offset} 个交易日`);
   if (rule.exit_price) parts.push(`卖出价：${rule.exit_price === 'open' ? '开盘价' : rule.exit_price === 'close' ? '收盘价' : rule.exit_price}`);
-  if (Array.isArray(rule.observe_days)) parts.push(`观察窗口：${rule.observe_days.map((day) => `T+${day}`).join(' / ')}`);
-  if (rule.summary_exit_day_offset != null) parts.push(`汇总口径：T+${rule.summary_exit_day_offset} ${rule.summary_exit_price === 'close' ? '收盘价' : rule.summary_exit_price || ''}`);
+  if (Array.isArray(rule.observe_days)) parts.push(`观察窗口：${rule.observe_days.map((day) => day === 0 ? '入场日' : `入场+${day}`).join(' / ')}`);
+  if (rule.summary_exit_day_offset != null) parts.push(`汇总口径：入场+${rule.summary_exit_day_offset} ${rule.summary_exit_price === 'close' ? '收盘价' : rule.summary_exit_price || ''}`);
   return parts.join('；') || JSON.stringify(rule);
 }
 

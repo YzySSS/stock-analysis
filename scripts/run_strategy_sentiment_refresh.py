@@ -14,7 +14,6 @@ for path in [PROJECT_ROOT, SRC_ROOT]:
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 from app.shared.db import mysql_conn
 from app.shared.task_log import TaskRunLogger
 from app.stock_selection.selector import StockSelector
@@ -157,7 +156,6 @@ def main() -> None:
     parser.add_argument("--include-existing", action="store_true")
     args = parser.parse_args()
 
-    ensure_market_sentiment_schema()
     trade_date = args.trade_date or latest_trade_date()
     strategies = [item.strip() for item in args.strategies.split(",") if item.strip()]
     run_id = f"strategy_sentiment_{trade_date.replace('-', '')}_{datetime.now().strftime('%H%M%S')}"

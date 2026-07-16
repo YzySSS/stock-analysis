@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.orchestration.init_project import init_mysql_schema
 from app.shared.db import mysql_conn
 
 DDL = [
@@ -28,13 +27,8 @@ DDL = [
 
 
 def ensure_ths_concept_hot_schema() -> dict:
-    init_mysql_schema()
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             for ddl in DDL:
                 cursor.execute(ddl)
     return {"status": "ok", "tables": ["ths_concept_hot_snapshot"]}
-
-
-if __name__ == "__main__":
-    print(ensure_ths_concept_hot_schema())

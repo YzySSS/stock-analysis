@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import signal
 import sys
 import time
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,14 +17,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.orchestration.realtime_schema import ensure_realtime_schema
 from app.shared.db import mysql_conn
+from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 from app.shared.task_log import TaskRunLogger
 
 TASK_NAME = "stock_realtime_snapshot_update"
 LOCK_NAME = "stock_realtime_snapshot_update_lock"
 STATE_FILE = PROJECT_ROOT / "logs" / "realtime_snapshot_state.json"
 SOURCE = "akshare_stock_zh_a_spot"
+STALE_AFTER_SECONDS = 180
+
+
+class RealtimeFetchTimeout(TimeoutError):
+    pass
 
 
 @dataclass
@@ -43,6 +51,9 @@ class RealtimeRow:
     low_price: float | None
     volume: int | None
     amount: float | None
+    received_at: str
+    freshness_seconds: int
+    is_stale: int
 
 
 def load_state() -> dict:
@@ -133,11 +144,48 @@ def minute_floor(dt: datetime) -> datetime:
     return dt.replace(second=0, microsecond=0)
 
 
-def fetch_spot_rows(ak_module: Any, attempts: int, retry_seconds: float):
+@contextmanager
+def fetch_deadline(timeout_seconds: float):
+    timeout = max(float(timeout_seconds), 0.0)
+    if timeout <= 0:
+        yield
+        return
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def handle_timeout(_signum, _frame):
+        raise RealtimeFetchTimeout(f"stock_zh_a_spot exceeded {timeout:g}s hard timeout")
+
+    signal.signal(signal.SIGALRM, handle_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
+def fetch_spot_rows(
+    ak_module: Any,
+    attempts: int,
+    retry_seconds: float,
+    timeout_seconds: float,
+    *,
+    quiet_source_output: bool = True,
+):
     last_error: Exception | None = None
     for attempt in range(1, max(1, attempts) + 1):
         try:
-            return ak_module.stock_zh_a_spot()
+            with open(os.devnull, "w", encoding="utf-8") as sink:
+                output_context = (
+                    redirect_stdout(sink),
+                    redirect_stderr(sink),
+                ) if quiet_source_output else ()
+                with fetch_deadline(timeout_seconds):
+                    if output_context:
+                        with output_context[0], output_context[1]:
+                            return ak_module.stock_zh_a_spot()
+                    return ak_module.stock_zh_a_spot()
         except Exception as exc:
             last_error = exc
             if attempt >= max(1, attempts):
@@ -155,6 +203,7 @@ def convert_rows(df, now: datetime) -> list[RealtimeRow]:
         if not code:
             continue
         quote_dt = parse_quote_datetime(item.get("时间戳"), now)
+        freshness_seconds = max(int((now - quote_dt).total_seconds()), 0)
         rows.append(
             RealtimeRow(
                 code=code,
@@ -174,28 +223,17 @@ def convert_rows(df, now: datetime) -> list[RealtimeRow]:
                 low_price=to_float(item.get("最低")),
                 volume=to_int(item.get("成交量")),
                 amount=to_float(item.get("成交额")),
+                received_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+                freshness_seconds=freshness_seconds,
+                is_stale=1 if freshness_seconds > STALE_AFTER_SECONDS else 0,
             )
         )
     return rows
 
 
-def acquire_lock() -> bool:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT GET_LOCK(%s, 0) AS locked", (LOCK_NAME,))
-            row = cursor.fetchone() or {}
-            return int(row.get("locked") or 0) == 1
-
-
-def release_lock() -> None:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT RELEASE_LOCK(%s)", (LOCK_NAME,))
-
-
-def save_rows(rows: list[RealtimeRow], retention_days: int) -> dict:
+def save_rows(rows: list[RealtimeRow], batch_id: str) -> dict:
     if not rows:
-        return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_old_rows": 0}
+        return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_old_rows": 0, "retention_deferred": True}
 
     values = [
         (
@@ -215,6 +253,10 @@ def save_rows(rows: list[RealtimeRow], retention_days: int) -> dict:
             r.low_price,
             r.volume,
             r.amount,
+            batch_id,
+            r.received_at,
+            r.freshness_seconds,
+            r.is_stale,
             SOURCE,
         )
         for r in rows
@@ -238,6 +280,10 @@ def save_rows(rows: list[RealtimeRow], retention_days: int) -> dict:
             r.low_price,
             r.volume,
             r.amount,
+            batch_id,
+            r.received_at,
+            r.freshness_seconds,
+            r.is_stale,
             SOURCE,
         )
         for r in rows
@@ -246,45 +292,43 @@ def save_rows(rows: list[RealtimeRow], retention_days: int) -> dict:
     snapshot_sql = """
     INSERT INTO stock_realtime_snapshot (
         code, source_code, name, trade_date, quote_time, latest_price, change_amount, pct_chg,
-        bid_price, ask_price, pre_close, open_price, high_price, low_price, volume, amount, source
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        bid_price, ask_price, pre_close, open_price, high_price, low_price, volume, amount,
+        batch_id, received_at, freshness_seconds, is_stale, source
+    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON DUPLICATE KEY UPDATE
         source_code=VALUES(source_code), name=VALUES(name), trade_date=VALUES(trade_date), quote_time=VALUES(quote_time),
         latest_price=VALUES(latest_price), change_amount=VALUES(change_amount), pct_chg=VALUES(pct_chg),
         bid_price=VALUES(bid_price), ask_price=VALUES(ask_price), pre_close=VALUES(pre_close), open_price=VALUES(open_price),
-        high_price=VALUES(high_price), low_price=VALUES(low_price), volume=VALUES(volume), amount=VALUES(amount), source=VALUES(source)
+        high_price=VALUES(high_price), low_price=VALUES(low_price), volume=VALUES(volume), amount=VALUES(amount),
+        batch_id=VALUES(batch_id), received_at=VALUES(received_at), freshness_seconds=VALUES(freshness_seconds),
+        is_stale=VALUES(is_stale), source=VALUES(source)
     """
     intraday_sql = """
     INSERT INTO stock_realtime_intraday (
         code, source_code, name, trade_date, quote_time, quote_minute, latest_price, change_amount, pct_chg,
-        bid_price, ask_price, pre_close, open_price, high_price, low_price, volume, amount, source
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        bid_price, ask_price, pre_close, open_price, high_price, low_price, volume, amount,
+        batch_id, received_at, freshness_seconds, is_stale, source
+    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON DUPLICATE KEY UPDATE
         source_code=VALUES(source_code), name=VALUES(name), quote_time=VALUES(quote_time), latest_price=VALUES(latest_price),
         change_amount=VALUES(change_amount), pct_chg=VALUES(pct_chg), bid_price=VALUES(bid_price), ask_price=VALUES(ask_price),
         pre_close=VALUES(pre_close), open_price=VALUES(open_price), high_price=VALUES(high_price), low_price=VALUES(low_price),
-        volume=VALUES(volume), amount=VALUES(amount), source=VALUES(source)
+        volume=VALUES(volume), amount=VALUES(amount), batch_id=VALUES(batch_id), received_at=VALUES(received_at),
+        freshness_seconds=VALUES(freshness_seconds), is_stale=VALUES(is_stale), source=VALUES(source)
     """
-    today_text = date.today().isoformat()
-    latest_trade_date = max((r.trade_date for r in rows if r.trade_date), default=today_text)
-    calendar_cutoff = (date.today() - timedelta(days=max(retention_days - 1, 0))).isoformat()
-    if retention_days <= 1 and latest_trade_date <= today_text:
-        cutoff = max(calendar_cutoff, latest_trade_date)
-    else:
-        cutoff = calendar_cutoff
+    latest_trade_date = max((r.trade_date for r in rows if r.trade_date), default=None)
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.executemany(snapshot_sql, values)
             snapshot_rows = cursor.rowcount
             cursor.executemany(intraday_sql, intraday_values)
             intraday_rows = cursor.rowcount
-            cursor.execute("DELETE FROM stock_realtime_intraday WHERE trade_date < %s", (cutoff,))
-            deleted_old_rows = cursor.rowcount
     return {
         "snapshot_rows": snapshot_rows,
         "intraday_rows": intraday_rows,
-        "deleted_old_rows": deleted_old_rows,
-        "retention_cutoff": cutoff,
+        "deleted_old_rows": 0,
+        "retention_deferred": True,
+        "retention_task": "stock_realtime_lifecycle",
         "latest_trade_date": latest_trade_date,
     }
 
@@ -314,14 +358,20 @@ def mark_failure(state: dict, now: datetime, error: Exception, threshold: int, d
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="ignore trading time and degrade window")
-    parser.add_argument("--retention-days", type=int, default=1, help="intraday history retention days; default keeps today only")
+    parser.add_argument(
+        "--retention-days",
+        type=int,
+        default=2,
+        help="deprecated compatibility flag; retention is handled by the end-of-day lifecycle task",
+    )
     parser.add_argument("--failure-threshold", type=int, default=3)
     parser.add_argument("--degraded-minutes", type=int, default=5)
     parser.add_argument("--fetch-attempts", type=int, default=2, help="retry AkShare realtime fetch for transient source errors")
     parser.add_argument("--fetch-retry-seconds", type=float, default=2.0)
+    parser.add_argument("--fetch-timeout-seconds", type=float, default=50.0, help="hard timeout for each AkShare call")
+    parser.add_argument("--show-source-progress", action="store_true", help="show AkShare progress output for manual debugging")
     args = parser.parse_args()
 
-    ensure_realtime_schema()
     now = datetime.now()
     run_id = f"realtime_snapshot_{now.strftime('%Y%m%d_%H%M%S')}"
     logger = TaskRunLogger()
@@ -339,19 +389,26 @@ def main() -> None:
             print(json.dumps({"status": "skipped", **payload}, ensure_ascii=False))
             return
 
-    if not acquire_lock():
+    lock_handle = acquire_mysql_advisory_lock(LOCK_NAME)
+    if lock_handle is None:
         payload = {"reason": "previous_run_still_running"}
         print(json.dumps({"status": "skipped", **payload}, ensure_ascii=False))
         return
 
-    logger.start(TASK_NAME, run_id, {"retention_days": args.retention_days, "state": state})
     started = time.time()
     try:
+        logger.start(TASK_NAME, run_id, {"retention_days": args.retention_days, "state": state})
         import akshare as ak
 
-        df = fetch_spot_rows(ak, args.fetch_attempts, args.fetch_retry_seconds)
+        df = fetch_spot_rows(
+            ak,
+            args.fetch_attempts,
+            args.fetch_retry_seconds,
+            args.fetch_timeout_seconds,
+            quiet_source_output=not args.show_source_progress,
+        )
         rows = convert_rows(df, datetime.now())
-        db_result = save_rows(rows, retention_days=args.retention_days)
+        db_result = save_rows(rows, batch_id=run_id)
         elapsed = round(time.time() - started, 2)
         state = mark_success(state, datetime.now())
         latest_quote_time = max((r.quote_time for r in rows), default=None)
@@ -381,7 +438,9 @@ def main() -> None:
         print(json.dumps(payload, ensure_ascii=False))
         raise
     finally:
-        release_lock()
+        release_error = release_mysql_advisory_lock(lock_handle)
+        if release_error:
+            print(json.dumps({"status": "warning", "reason": "release_lock_failed", "error": release_error}, ensure_ascii=False), file=sys.stderr)
 
 
 if __name__ == "__main__":

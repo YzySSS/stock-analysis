@@ -12,7 +12,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.orchestration.strategy_factor_ci_schema import ensure_strategy_factor_ci_schema
 from app.shared.db import mysql_conn
 from app.shared.strategy_loader import StrategyLoader
 from app.shared.task_log import TaskRunLogger
@@ -126,13 +125,15 @@ def fetch_forward_returns(trade_date: str, horizon_days: int) -> tuple[Dict[str,
     return returns, target_date
 
 
-def runtime_strategy_ids(requested: Optional[List[str]] = None) -> List[str]:
-    loader = StrategyLoader()
-    allowed = set(StrategyService.RUNTIME_READY_IDS)
+def runtime_strategy_ids(
+    requested: Optional[List[str]] = None,
+    instrument_type: str = "stock",
+) -> List[str]:
+    strategies = StrategyService().list_strategies(instrument_type=instrument_type)
     strategy_ids = [
         item.get("id")
-        for item in loader.registry.get("strategies", [])
-        if item.get("id") in allowed and bool(item.get("executable", True))
+        for item in strategies
+        if item.get("runtime_ready") and bool(item.get("executable", True))
     ]
     if requested:
         requested_set = set(requested)
@@ -272,7 +273,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    ensure_strategy_factor_ci_schema()
     trade_date = args.trade_date or latest_eligible_trade_date(args.horizon_days)
     run_id = build_run_id()
     logger = TaskRunLogger()
@@ -289,7 +289,7 @@ def main() -> None:
             logger.finish(TASK_NAME, run_id, "success", "no eligible trade date", payload)
             print(json.dumps(payload, ensure_ascii=False))
             return
-        strategy_ids = runtime_strategy_ids(args.strategy_id)
+        strategy_ids = runtime_strategy_ids(args.strategy_id, instrument_type=args.instrument_type)
         saved_records = 0
         strategy_summaries = []
         for strategy_id in strategy_ids:

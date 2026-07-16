@@ -7,12 +7,17 @@ async function loadSystemPage() {
     lastRun: qs('#system-last-run-panel'),
     baseline: qs('#system-baseline-panel'),
     baselineOverall: qs('#system-baseline-overall'),
+    readiness: qs('#system-readiness-panel'),
+    readinessOverall: qs('#system-readiness-overall'),
     coverage: qs('#system-coverage-panel'),
     gap: qs('#system-gap-panel'),
     fieldMissing: qs('#system-field-missing-panel'),
     shortfall: qs('#system-shortfall-panel'),
     taskRun: qs('#system-task-run-panel'),
     sentiment: qs('#system-sentiment-quality-panel'),
+    jobErrors: qs('#system-job-error-panel'),
+    realtimeLifecycle: qs('#system-realtime-lifecycle-panel'),
+    marketOpinionStorage: qs('#system-market-opinion-storage-panel'),
   };
 
   try {
@@ -23,6 +28,7 @@ async function loadSystemPage() {
     const taskRuns = data.task_runs || [];
     const schedules = data.scheduled_tasks || [];
     const marketOpinion = data.market_opinion_update || null;
+    const readiness = data.readiness || {};
     const taskMap = Object.fromEntries(taskRuns.map((item) => [item.task_name, item]));
 
     panels.api.innerHTML = renderTopMetricCard({
@@ -30,14 +36,14 @@ async function loadSystemPage() {
       title: 'API状态',
       state: data.status === 'ok' ? '正常' : '异常',
       stateClass: data.status === 'ok' ? 'ok' : 'error',
-      lines: [`响应时间 ${elapsedMs} ms`, `缓存 ${data.cache?.hit ? '命中' : '刷新'}`],
+      lines: [`响应时间 ${elapsedMs} ms`, `Readiness ${formatReadinessStatus(readiness.status)}`],
     });
     panels.db.innerHTML = renderTopMetricCard({
       icon: '▣',
       title: '数据库状态',
       state: data.health?.database ? '正常' : '异常',
       stateClass: data.health?.database ? 'ok' : 'error',
-      lines: [`连接池 18/50`, `缓存 ${data.cache?.ttl_seconds ?? '-'}s`],
+      lines: [`MySQL ${data.health?.version || '-'}`, `状态缓存 ${data.cache?.ttl_seconds ?? '-'}s`],
     });
     panels.latestDate.innerHTML = renderTopMetricCard({
       icon: '▦',
@@ -56,14 +62,18 @@ async function loadSystemPage() {
       title: '最后更新时间',
       state: findLastUpdate(latest, taskRuns),
       stateClass: 'neutral',
-      lines: [`本次耗时 ${elapsedMs}ms`, `任务数 ${taskRuns.length}`],
+      lines: [`本次耗时 ${elapsedMs}ms`, `有状态 ${taskRuns.length} / 已登记 ${schedules.length}`],
     });
 
     renderBaseline(data.data_baseline || {}, panels.baseline, panels.baselineOverall);
+    renderReadiness(readiness, panels.readiness, panels.readinessOverall);
     panels.coverage.innerHTML = renderScheduleGrid(schedules, taskMap, taskRuns, marketOpinion);
     if (panels.taskRun) panels.taskRun.innerHTML = '';
     panels.gap.innerHTML = renderGapNote();
     panels.sentiment.innerHTML = renderSentimentQuality(sentimentQuality);
+    panels.jobErrors.innerHTML = renderJobErrors(data.job_error_summary || [], data.retention_policy || {});
+    panels.realtimeLifecycle.innerHTML = renderRealtimeLifecycle(data.realtime_lifecycle || {});
+    panels.marketOpinionStorage.innerHTML = renderMarketOpinionStorage(data.market_opinion_storage || {});
     if (panels.fieldMissing) panels.fieldMissing.innerHTML = '';
     if (panels.shortfall) panels.shortfall.innerHTML = '';
   } catch (error) {
@@ -71,6 +81,142 @@ async function loadSystemPage() {
       if (panel && panel !== panels.baselineOverall) panel.innerHTML = `<div class="error-box">加载系统状态失败: ${escapeHtml(error.message)}</div>`;
     });
   }
+}
+
+function formatReadinessStatus(status) {
+  return ({ ready: '就绪', degraded: '降级', not_ready: '未就绪' })[status] || '未知';
+}
+
+function renderReadiness(readiness = {}, container, overallEl) {
+  const workers = readiness.workers || [];
+  const queues = Object.fromEntries((readiness.queues || []).map((item) => [item.job_type, item]));
+  const migrations = readiness.schema_migrations || {};
+  const status = readiness.status || 'not_ready';
+  if (overallEl) {
+    overallEl.textContent = `${formatReadinessStatus(status)}${readiness.reasons?.length ? ` · ${readiness.reasons.length} 项提示` : ''}`;
+    overallEl.className = `system-section-note ${status === 'ready' ? 'ok' : status === 'degraded' ? 'warn' : 'error'}`;
+  }
+  const migrationCard = `
+    <article class="system-task-card">
+      <div class="system-task-card-head">
+        <strong>Schema Migration</strong>
+        <span class="badge ${migrations.health === 'healthy' ? 'status-ok' : 'status-error'}">${migrations.health === 'healthy' ? '已就绪' : '待迁移'}</span>
+      </div>
+      <div class="system-task-schedule">目标版本 ${escapeHtml(migrations.target || '-')}</div>
+      <div class="system-task-times">
+        <span>已应用 ${escapeHtml(migrations.applied ?? '-')}</span>
+        <span>待执行 ${escapeHtml(migrations.pending ?? '-')}</span>
+      </div>
+      <div class="system-task-result">${migrations.pending_versions?.length ? `待执行 ${escapeHtml(migrations.pending_versions.join(', '))}` : '数据库结构已通过启动前检查'}</div>
+    </article>
+  `;
+  const workerCards = workers.map((worker) => {
+    const queue = queues[worker.worker_type] || {};
+    const healthClass = worker.health === 'healthy' && queue.health === 'healthy'
+      ? 'status-ok'
+      : worker.health === 'stale' || worker.health === 'missing' || queue.health === 'error'
+        ? 'status-error'
+        : 'status-warn';
+    const statusLabel = worker.health === 'healthy' ? (worker.process_status === 'running' ? '执行中' : '在线') : worker.health;
+    return `
+      <article class="system-task-card">
+        <div class="system-task-card-head">
+          <strong>${escapeHtml(worker.label || worker.worker_type)}</strong>
+          <span class="badge ${healthClass}">${escapeHtml(statusLabel || '-')}</span>
+        </div>
+        <div class="system-task-schedule">心跳 ${escapeHtml(worker.heartbeat_age_seconds ?? '-')} 秒前 · 阈值 ${escapeHtml(worker.stale_after_seconds ?? '-')} 秒</div>
+        <div class="system-task-times">
+          <span>排队 ${escapeHtml(queue.queued_count ?? 0)}</span>
+          <span>运行 ${escapeHtml(queue.running_count ?? 0)}</span>
+        </div>
+        <div class="system-task-result">
+          当前任务 ${escapeHtml(worker.current_job_id || '空闲')}
+          <div class="muted">失联 ${escapeHtml(queue.stale_running_count ?? 0)} · 24h失败 ${escapeHtml(queue.failed_24h_count ?? 0)}</div>
+        </div>
+      </article>
+    `;
+  }).join('');
+  const emptyWorkers = workers.length ? '' : '<div class="empty-state">暂无 worker 心跳；请检查对应 systemd 服务。</div>';
+  container.innerHTML = migrationCard + workerCards + emptyWorkers;
+}
+
+function renderJobErrors(items = [], policy = {}) {
+  const policyText = [
+    `任务明细 ${policy.task_run_log_detail_days ?? '-'} 天`,
+    `选股任务 ${policy.selection_task_days ?? '-'} 天`,
+    `系统回测 ${policy.backtest_system_test_days ?? '-'} 天`,
+    `AI原文 ${policy.portfolio_raw_response_days ?? '-'} 天`,
+    `错误汇总 ${policy.structured_error_summary_days ?? '-'} 天`,
+  ].join(' · ');
+  const errorRows = items.length
+    ? items.slice(0, 8).map((item) => `
+        <div class="system-error-summary-row">
+          <b>${escapeHtml(item.job_type || '-')} · ${escapeHtml(item.error_code || '-')}</b>
+          <span>${escapeHtml(item.occurrence_count ?? 0)} 次 · 最近 ${escapeHtml(item.last_seen_at || '-')}</span>
+          <small>${escapeHtml(item.last_message || '-')}</small>
+        </div>
+      `).join('')
+    : '<div class="empty-state">近 7 天暂无已聚合错误。</div>';
+  return `
+    <div class="system-gap-callout"><strong>保留口径</strong><p>${escapeHtml(policyText)}</p></div>
+    <div class="system-error-summary-list">${errorRows}</div>
+  `;
+}
+
+function renderRealtimeLifecycle(item = {}) {
+  const policy = item.policy || {};
+  const raw = item.raw || {};
+  const rollup = item.rollup || {};
+  const tracked = item.tracked || {};
+  const manifests = item.latest_manifests || [];
+  const manifestRows = manifests.length
+    ? manifests.map((manifest) => {
+        const statusClass = manifest.status === 'success' ? 'status-ok' : manifest.status === 'partial' ? 'status-warn' : 'status-error';
+        return `
+          <div class="system-error-summary-row">
+            <b>${escapeHtml(manifest.interval_minutes || '-')}m 汇总 · ${escapeHtml(manifest.trade_date || '-')}</b>
+            <span class="badge ${statusClass}">${escapeHtml(manifest.status || '-')}</span>
+            <small>${escapeHtml(manifest.rollup_rows ?? 0)} 条 · ${escapeHtml(manifest.rollup_codes ?? 0)} 只 · 行情截至 ${escapeHtml(manifest.last_quote_minute || '-')}</small>
+          </div>
+        `;
+      }).join('')
+    : '<div class="empty-state">暂无分钟汇总 manifest。</div>';
+  const partitionLabel = raw.partitioned ? `${raw.daily_partitions ?? 0} 个日分区` : '尚未分区';
+  return `
+    <div class="system-gap-callout">
+      <strong>原始 1m：${escapeHtml(raw.trade_days ?? 0)} 个交易日</strong>
+      <p>全市场保留 ${escapeHtml(policy.full_market_raw_trade_days ?? '-')} 日 · ${escapeHtml(partitionLabel)} · 约 ${escapeHtml(raw.allocated_mb ?? '-')} MiB</p>
+    </div>
+    <div class="system-gap-list">
+      <span>5m/15m 汇总保留 ${escapeHtml(policy.rollup_trade_days ?? '-')} 个交易日，当前约 ${escapeHtml(rollup.approx_rows ?? 0)} 行。</span>
+      <span>持仓/跟踪股 1m 保留 ${escapeHtml(policy.tracked_raw_trade_days ?? '-')} 个交易日，当前约 ${escapeHtml(tracked.approx_rows ?? 0)} 行。</span>
+    </div>
+    <div class="system-error-summary-list">${manifestRows}</div>
+  `;
+}
+
+function renderMarketOpinionStorage(item = {}) {
+  const policy = item.policy || {};
+  const tables = item.tables || {};
+  const parent = tables.sector_opinion_daily || {};
+  const stocks = tables.sector_opinion_stock || {};
+  const news = tables.sector_opinion_news_ref || {};
+  const versions = item.latest_payload_versions || [];
+  const latestV2 = versions.find((entry) => Number(entry.payload_version) === 2)?.rows || 0;
+  const versionText = versions.length
+    ? versions.map((entry) => `v${entry.payload_version}: ${entry.rows}`).join(' · ')
+    : '暂无快照';
+  return `
+    <div class="system-gap-callout">
+      <strong>最新快照 ${escapeHtml(item.latest_as_of || '-')}</strong>
+      <p>${escapeHtml(versionText)} · v2 关系化 ${escapeHtml(latestV2)} 行</p>
+    </div>
+    <div class="system-gap-list">
+      <span>盘中全量保留 ${escapeHtml(policy.intraday_trade_days ?? '-')} 个交易日，较老日期仅留日末快照至 ${escapeHtml(policy.daily_trade_days ?? '-')} 个交易日。</span>
+      <span>父快照约 ${escapeHtml(parent.approx_rows ?? 0)} 行 / ${escapeHtml(parent.allocated_mb ?? '-')} MiB。</span>
+      <span>股票关系约 ${escapeHtml(stocks.approx_rows ?? 0)} 行，新闻引用约 ${escapeHtml(news.approx_rows ?? 0)} 行。</span>
+    </div>
+  `;
 }
 
 function renderTopMetricCard({ icon, title, state, stateClass = 'neutral', lines = [] }) {
@@ -162,22 +308,33 @@ function renderScheduleGrid(schedules = [], taskMap = {}, taskRuns = [], marketO
 function renderTaskRunMetrics(run = {}, marketOpinion = null) {
   const meta = run.metadata || {};
   const metrics = [
+    meta.rows != null ? `数据 ${escapeHtml(meta.rows)} 行` : '',
     meta.success_codes != null ? `成功 ${escapeHtml(meta.success_codes)} / ${escapeHtml(meta.requested_codes ?? meta.limit ?? '-')}` : '',
     meta.updated != null ? `更新 ${escapeHtml(meta.updated)} / 扫描 ${escapeHtml(meta.scanned ?? '-')}` : '',
+    meta.updated_count != null ? `更新 ${escapeHtml(meta.updated_count)}` : '',
+    meta.failed_count != null ? `失败 ${escapeHtml(meta.failed_count)}` : '',
     meta.rows_synced != null ? `写入 ${escapeHtml(meta.rows_synced)} 行` : '',
     meta.failed != null ? `失败 ${escapeHtml(meta.failed)}` : '',
     meta.no_data != null ? `无数据 ${escapeHtml(meta.no_data)}` : '',
     marketOpinion?.source_count != null ? `源 ${escapeHtml(marketOpinion.source_count)}` : '',
     marketOpinion?.failed_source_count != null ? `失败源 ${escapeHtml(marketOpinion.failed_source_count)}` : '',
     marketOpinion?.sector_summary_count != null ? `热点 ${escapeHtml(marketOpinion.sector_summary_count)}` : '',
+    meta.source_used ? `来源 ${escapeHtml(meta.source_used)}` : '',
   ].filter(Boolean);
   const summary = metrics.length ? metrics.join(' · ') : '暂无额外指标';
-  if (!marketOpinion || !marketOpinion.failed_source_count) return summary;
-  const failedText = (marketOpinion.failed_sources || [])
-    .slice(0, 3)
-    .map((item) => `${item.source_id}: ${item.error}`)
-    .join('；');
-  return `${summary}<div class="muted">部分源失败：${escapeHtml(failedText || marketOpinion.message || '-')}</div>`;
+  const sourceErrors = meta.source_errors && typeof meta.source_errors === 'object'
+    ? Object.entries(meta.source_errors).slice(0, 3).map(([source, error]) => `${source}: ${error}`).join('；')
+    : '';
+  const opinionErrors = marketOpinion?.failed_source_count
+    ? (marketOpinion.failed_sources || []).slice(0, 3).map((item) => `${item.source_id}: ${item.error}`).join('；')
+    : '';
+  const failureText = run.status === 'failed' || run.status === 'stale'
+    ? (run.message || meta.error || (run.status === 'stale' ? '运行时间超过 1 小时，需检查或回收' : '任务失败'))
+    : '';
+  const detail = sourceErrors || opinionErrors || failureText;
+  if (!detail) return summary;
+  const prefix = run.status === 'failed' || run.status === 'stale' ? '异常' : '降级';
+  return `${summary}<div class="muted">${prefix}：${escapeHtml(detail)}</div>`;
 }
 
 function renderGapNote() {
@@ -224,6 +381,7 @@ function getStatusClass(status) {
   if (status === 'success') return 'status-ok';
   if (status === 'partial_success') return 'status-warn';
   if (status === 'failed') return 'status-error';
+  if (status === 'stale') return 'status-error';
   if (status === 'running') return 'status-warn';
   return 'status-muted';
 }

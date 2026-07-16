@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import math
 import os
 import re
+import threading
 from datetime import datetime, timedelta
 from decimal import InvalidOperation
 from pathlib import Path
 from typing import Any
 
 import requests
+from pymysql.err import IntegrityError
 
-from app.orchestration.portfolio_schema import ensure_portfolio_schema
-from app.shared.db import mysql_conn
+from app.jobs.errors import record_job_error
+from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
+from app.portfolio.repository import PortfolioRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 def _to_float(value: Any) -> float | None:
@@ -172,6 +180,14 @@ def _days_held(value: Any) -> int | None:
     return max((datetime.now() - buy_time).days, 0)
 
 
+def _is_exit_tradable(position: dict[str, Any], market: dict[str, Any]) -> bool:
+    buy_time = _parse_datetime(position.get("buy_datetime"))
+    quote_trade_date = _parse_datetime((market.get("quote") or {}).get("trade_date"))
+    if not buy_time or not quote_trade_date:
+        return True
+    return quote_trade_date.date() > buy_time.date()
+
+
 OUTCOME_HORIZONS = (1, 3, 5, 20)
 
 
@@ -221,8 +237,13 @@ def _technical_summary(rows: list[dict[str, Any]], current_price: float | None) 
     ma5 = _moving_average(closes, 5)
     ma10 = _moving_average(closes, 10)
     ma20 = _moving_average(closes, 20)
+    ma60 = _moving_average(closes, 60)
     high20 = max(highs[-20:]) if highs else None
     low20 = min(lows[-20:]) if lows else None
+    high60 = max(highs[-60:]) if len(highs) >= 60 else None
+    low60 = min(lows[-60:]) if len(lows) >= 60 else None
+    high120 = max(highs[-120:]) if len(highs) >= 100 else None
+    low120 = min(lows[-120:]) if len(lows) >= 100 else None
     atr14 = _atr(rows, 14)
 
     position_20d = None
@@ -253,16 +274,21 @@ def _technical_summary(rows: list[dict[str, Any]], current_price: float | None) 
         "ma5": _round_price(ma5),
         "ma10": _round_price(ma10),
         "ma20": _round_price(ma20),
+        "ma60": _round_price(ma60),
         "atr14": _round_price(atr14),
         "high20": _round_price(high20),
         "low20": _round_price(low20),
+        "high60": _round_price(high60),
+        "low60": _round_price(low60),
+        "high120": _round_price(high120),
+        "low120": _round_price(low120),
         "position_20d_pct": _round(position_20d),
         "trend_score": _round(trend_score, 1),
         "trend_label": trend_label,
     }
 
 
-def _fetch_etf_history(code: str, days: int = 90) -> list[dict[str, Any]]:
+def _fetch_etf_history(code: str, days: int = 120) -> list[dict[str, Any]]:
     digits = "".join(ch for ch in str(code or "") if ch.isdigit())
     if len(digits) != 6:
         return []
@@ -300,7 +326,329 @@ def _fetch_etf_history(code: str, days: int = 90) -> list[dict[str, Any]]:
         )
     return [row for row in rows if row.get("close") is not None]
 
-def _build_trade_plan(position: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
+
+def _support_strength_label(score: float | None) -> str:
+    if score is None:
+        return "待确认"
+    if score >= 82:
+        return "强支撑"
+    if score >= 62:
+        return "中支撑"
+    return "弱支撑"
+
+
+def _support_distance_score(distance_pct: float | None) -> float:
+    if distance_pct is None:
+        return 0.0
+    if distance_pct <= 3:
+        return 6.0
+    if distance_pct <= 8:
+        return 5.0
+    if distance_pct <= 15:
+        return 4.0
+    if distance_pct <= 25:
+        return 2.0
+    return 0.0
+
+
+def _valid_price_rows(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    valid: list[dict[str, Any]] = []
+    for row in rows or []:
+        close = _to_float(row.get("close"))
+        high = _to_float(row.get("high"))
+        low = _to_float(row.get("low"))
+        if close is None or high is None or low is None or close <= 0 or high <= 0 or low <= 0:
+            continue
+        valid.append(row)
+    return valid
+
+
+def _add_support_candidate(
+    candidates: list[dict[str, Any]],
+    *,
+    price: float | None,
+    current: float,
+    source: str,
+    reason: str,
+    base_score: float,
+) -> None:
+    value = _to_float(price)
+    if value is None or value <= 0 or value >= current:
+        return
+    distance_pct = (current - value) / current * 100
+    if distance_pct > 45:
+        return
+    candidates.append(
+        {
+            "price": value,
+            "source": source,
+            "reason": reason,
+            "base_score": base_score,
+            "distance_pct": distance_pct,
+        }
+    )
+
+
+def _near_count(rows: list[dict[str, Any]], price: float, tolerance: float) -> tuple[int, int | None, bool]:
+    touches = 0
+    last_idx: int | None = None
+    volume_confirm = False
+    amounts = [_to_float(row.get("amount")) for row in rows]
+    amounts = [value for value in amounts if value is not None and value > 0]
+    avg_amount = sum(amounts[-20:]) / min(len(amounts), 20) if amounts else None
+    for idx, row in enumerate(rows):
+        low = _to_float(row.get("low"))
+        high = _to_float(row.get("high"))
+        close = _to_float(row.get("close"))
+        amount = _to_float(row.get("amount"))
+        if low is None or high is None:
+            continue
+        touched = low - tolerance <= price <= high + tolerance or abs(low - price) <= tolerance or (close is not None and abs(close - price) <= tolerance)
+        if not touched:
+            continue
+        touches += 1
+        last_idx = idx
+        if avg_amount is not None and amount is not None and amount >= avg_amount * 1.18:
+            volume_confirm = True
+    return touches, last_idx, volume_confirm
+
+
+def _rebound_from_touch(rows: list[dict[str, Any]], price: float, last_idx: int | None) -> float | None:
+    if last_idx is None or price <= 0:
+        return None
+    highs = [_to_float(row.get("high")) for row in rows[last_idx:]]
+    highs = [value for value in highs if value is not None and value > 0]
+    if not highs:
+        return None
+    return max(0.0, (max(highs) - price) / price * 100)
+
+
+def _build_support_levels(
+    *,
+    current: float,
+    stop_loss: float,
+    technical: dict[str, Any],
+    market: dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    atr: float,
+) -> list[dict[str, Any]]:
+    rows = _valid_price_rows(history)
+    candidates: list[dict[str, Any]] = []
+    ma5 = _to_float(technical.get("ma5"))
+    ma10 = _to_float(technical.get("ma10"))
+    ma20 = _to_float(technical.get("ma20"))
+    ma60 = _to_float(technical.get("ma60"))
+    low20 = _to_float(technical.get("low20"))
+    low60 = _to_float(technical.get("low60"))
+    low120 = _to_float(technical.get("low120"))
+
+    _add_support_candidate(candidates, price=stop_loss, current=current, source="系统止损位", reason="纪律止损线", base_score=24)
+    for price, source, base_score in [
+        (ma5, "MA5", 28),
+        (ma10, "MA10", 32),
+        (ma20, "MA20", 38),
+        (ma60, "MA60", 42),
+        (low20, "20日低点", 42),
+        (low60, "60日低点", 48),
+        (low120, "120日低点", 50),
+    ]:
+        _add_support_candidate(candidates, price=price, current=current, source=source, reason=source, base_score=base_score)
+
+    chip = market.get("chip") or {}
+    for key, source, base_score in [
+        ("cost_15pct", "筹码15%成本", 42),
+        ("cost_50pct", "筹码中枢", 50),
+        ("weight_avg", "筹码加权成本", 48),
+    ]:
+        _add_support_candidate(candidates, price=_to_float(chip.get(key)), current=current, source=source, reason=source, base_score=base_score)
+
+    if rows:
+        recent = rows[-90:]
+        lows = [_to_float(row.get("low")) for row in recent]
+        highs = [_to_float(row.get("high")) for row in recent]
+        lows = [value for value in lows if value is not None and value > 0]
+        highs = [value for value in highs if value is not None and value > 0]
+
+        for window, source, base_score in [(30, "30日箱体下沿", 43), (60, "60日箱体下沿", 46)]:
+            sample = rows[-window:]
+            sample_lows = [_to_float(row.get("low")) for row in sample]
+            sample_highs = [_to_float(row.get("high")) for row in sample]
+            sample_lows = [value for value in sample_lows if value is not None and value > 0]
+            sample_highs = [value for value in sample_highs if value is not None and value > 0]
+            if sample_lows and sample_highs:
+                box_low = min(sample_lows)
+                box_high = max(sample_highs)
+                box_range_pct = (box_high - box_low) / box_low * 100 if box_low > 0 else None
+                if box_range_pct is not None and box_range_pct <= 35:
+                    _add_support_candidate(candidates, price=box_low, current=current, source=source, reason=f"{source}，区间振幅约 {box_range_pct:.1f}%", base_score=base_score)
+
+        swing_lows: list[dict[str, Any]] = []
+        for idx in range(2, len(recent) - 2):
+            low = _to_float(recent[idx].get("low"))
+            if low is None or low <= 0 or low >= current:
+                continue
+            neighborhood = [_to_float(recent[pos].get("low")) for pos in range(idx - 2, idx + 3)]
+            neighborhood = [value for value in neighborhood if value is not None and value > 0]
+            if not neighborhood or low > min(neighborhood):
+                continue
+            future_highs = [_to_float(row.get("high")) for row in recent[idx: min(idx + 16, len(recent))]]
+            future_highs = [value for value in future_highs if value is not None and value > 0]
+            rebound_pct = (max(future_highs) - low) / low * 100 if future_highs else 0
+            if rebound_pct < 2.0:
+                continue
+            swing_lows.append({"price": low, "idx": idx, "rebound_pct": rebound_pct, "trade_date": recent[idx].get("trade_date")})
+        swing_lows = sorted(swing_lows, key=lambda item: (item["rebound_pct"], item["idx"]), reverse=True)[:6]
+        for item in swing_lows:
+            date_part = f"({item['trade_date']})" if item.get("trade_date") else ""
+            _add_support_candidate(
+                candidates,
+                price=item["price"],
+                current=current,
+                source="日线结构低点",
+                reason=f"日线结构低点{date_part}，之后最大反弹约 {item['rebound_pct']:.1f}%",
+                base_score=48,
+            )
+
+        if len(recent) >= 30 and highs and lows:
+            high_idx = max(range(len(recent)), key=lambda idx: _to_float(recent[idx].get("high")) or 0)
+            low_range = recent[: high_idx + 1]
+            if len(low_range) >= 8:
+                low_idx = min(range(len(low_range)), key=lambda idx: _to_float(low_range[idx].get("low")) or float("inf"))
+                wave_low = _to_float(low_range[low_idx].get("low"))
+                wave_high = _to_float(recent[high_idx].get("high"))
+                if wave_low is not None and wave_high is not None and wave_low > 0 and wave_high / wave_low >= 1.08 and high_idx > low_idx:
+                    for ratio, label in [(0.382, "0.382"), (0.5, "0.5"), (0.618, "0.618")]:
+                        retrace = wave_high - (wave_high - wave_low) * ratio
+                        _add_support_candidate(
+                            candidates,
+                            price=retrace,
+                            current=current,
+                            source=f"上一波行情{label}回撤",
+                            reason=f"上一波 {wave_low:.3f}-{wave_high:.3f} 的 {label} 回撤位",
+                            base_score=47,
+                        )
+
+        prior = rows[:-20] if len(rows) > 40 else []
+        prior_highs = [_to_float(row.get("high")) for row in prior]
+        prior_highs = [value for value in prior_highs if value is not None and 0 < value < current]
+        if prior_highs:
+            previous_platform_high = max(prior_highs)
+            if current >= previous_platform_high * 1.01:
+                _add_support_candidate(
+                    candidates,
+                    price=previous_platform_high,
+                    current=current,
+                    source="前平台高点回踩",
+                    reason="突破前平台后回踩确认位",
+                    base_score=52,
+                )
+
+        recent_volume_rows = rows[-45:]
+        recent_volume_offset = len(rows) - len(recent_volume_rows)
+        for idx, row in enumerate(recent_volume_rows):
+            open_price = _to_float(row.get("open"))
+            close = _to_float(row.get("close"))
+            low = _to_float(row.get("low"))
+            amount = _to_float(row.get("amount"))
+            if open_price is None or close is None or low is None or open_price <= 0 or low >= current:
+                continue
+            day_gain = (close - open_price) / open_price * 100
+            absolute_idx = recent_volume_offset + idx
+            previous_amounts = [_to_float(item.get("amount")) for item in rows[max(0, absolute_idx - 20): absolute_idx]]
+            previous_amounts = [value for value in previous_amounts if value is not None and value > 0]
+            avg_amount = sum(previous_amounts) / len(previous_amounts) if previous_amounts else None
+            if day_gain >= 2.5 and amount is not None and (avg_amount is None or amount >= avg_amount * 1.25):
+                date_part = f"({row.get('trade_date')})" if row.get("trade_date") else ""
+                _add_support_candidate(candidates, price=low, current=current, source="放量阳线低点", reason=f"放量阳线低点{date_part}", base_score=47)
+
+    if not candidates:
+        return []
+
+    merge_gap = max(atr * 0.35, current * 0.006, 0.01)
+    groups: list[dict[str, Any]] = []
+    for candidate in sorted(candidates, key=lambda item: item["price"], reverse=True):
+        target = next((group for group in groups if abs(group["price"] - candidate["price"]) <= merge_gap), None)
+        if target is None:
+            groups.append({"price": candidate["price"], "items": [candidate]})
+        else:
+            target["items"].append(candidate)
+            best = max(target["items"], key=lambda item: (item["base_score"], -abs(current - item["price"])))
+            target["price"] = best["price"]
+
+    levels: list[dict[str, Any]] = []
+    score_rows = rows[-90:] if rows else []
+    for group in groups:
+        items = group["items"]
+        best = max(items, key=lambda item: (item["base_score"], -abs(current - item["price"])))
+        price = best["price"]
+        tolerance = max(atr * 0.45, price * 0.012, 0.01)
+        touches, last_idx, volume_confirm = _near_count(score_rows, price, tolerance) if score_rows else (0, None, False)
+        rebound_pct = _rebound_from_touch(score_rows, price, last_idx) if score_rows else None
+        distance_pct = (current - price) / current * 100
+        unique_sources = list(dict.fromkeys(item["source"] for item in sorted(items, key=lambda item: item["base_score"], reverse=True)))
+        confluence = len(unique_sources)
+        recency_score = 0.0
+        days_since_touch = None
+        if last_idx is not None and score_rows:
+            days_since_touch = len(score_rows) - 1 - last_idx
+            if days_since_touch <= 10:
+                recency_score = 4.0
+            elif days_since_touch <= 30:
+                recency_score = 3.0
+            elif days_since_touch <= 60:
+                recency_score = 2.0
+        score = best["base_score"]
+        if touches >= 4:
+            score += 12
+        elif touches >= 2:
+            score += 7
+        elif touches == 1:
+            score += 4
+        score += min(max(rebound_pct or 0, 0) * 0.55, 12)
+        score += 5 if volume_confirm else 0
+        score += min(max(confluence - 1, 0) * 7, 14)
+        score += _support_distance_score(distance_pct)
+        score += recency_score
+        score = max(0, min(100, score))
+        if confluence >= 2:
+            reason = " / ".join(unique_sources[:3]) + "共振"
+        else:
+            reason = best["reason"]
+        levels.append(
+            {
+                "price": _round_price(price),
+                "reason": reason,
+                "score": _round(score, 1),
+                "strength": "strong" if score >= 82 else "medium" if score >= 62 else "weak",
+                "strength_label": _support_strength_label(score),
+                "source": unique_sources,
+                "distance_pct": _round(distance_pct, 2),
+                "touches": touches,
+                "rebound_pct": _round(rebound_pct, 2),
+                "volume_confirm": volume_confirm,
+                "days_since_touch": days_since_touch,
+                "basis": [item["reason"] for item in items[:5]],
+            }
+        )
+
+    strong_levels = sorted(levels, key=lambda item: (item.get("score") or 0, -(item.get("distance_pct") or 99)), reverse=True)
+    nearby_levels = sorted(
+        [level for level in levels if (level.get("distance_pct") or 99) <= 3 and (level.get("score") or 0) >= 55],
+        key=lambda item: (item.get("distance_pct") or 99, -(item.get("score") or 0)),
+    )
+    ordered: list[dict[str, Any]] = []
+    if nearby_levels:
+        ordered.append(nearby_levels[0])
+    for level in strong_levels:
+        if any(level["price"] == item["price"] for item in ordered):
+            continue
+        ordered.append(level)
+        if len(ordered) >= 5:
+            break
+    return ordered[:5]
+
+
+def _build_trade_plan(position: dict[str, Any], market: dict[str, Any], history: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     strategy_id = position.get("strategy_id") or "short_term"
     cost = _to_float(position.get("cost_price"))
     current = market.get("current_price")
@@ -318,6 +666,7 @@ def _build_trade_plan(position: dict[str, Any], market: dict[str, Any]) -> dict[
     max_loss_pct = _to_float(position.get("max_loss_pct")) or 5.0
     is_short = strategy_id in {"short_term", "a_share_sentiment", "leader_tactics"}
     is_swing = strategy_id in {"swing", "lowvol_reversal", "quality_lowvol"}
+    exit_tradable = _is_exit_tradable(position, market)
 
     if current is None or cost is None or cost <= 0:
         return {
@@ -368,14 +717,6 @@ def _build_trade_plan(position: dict[str, Any], market: dict[str, Any]) -> dict[
         entry_low = min(anchor * 0.98, current - atr * 1.0)
         entry_high = min(current, anchor * 1.01)
 
-    support_candidates = [
-        (stop_loss, "系统止损位"),
-        (low20, "20日低点"),
-        (ma20, "MA20"),
-        (ma10, "MA10"),
-        (ma5, "MA5"),
-        (current - atr, "当前价-ATR"),
-    ]
     resistance_candidates = [
         (high20, "20日高点"),
         (ma5 if ma5 and ma5 > current else None, "MA5"),
@@ -384,13 +725,7 @@ def _build_trade_plan(position: dict[str, Any], market: dict[str, Any]) -> dict[
         (current + atr, "当前价+ATR"),
         (tp1, "止盈1"),
     ]
-    support_levels = [
-        {"price": _round_price(value), "reason": reason}
-        for value, reason in sorted(
-            ((value, reason) for value, reason in support_candidates if value is not None and value < current),
-            key=lambda item: abs(current - item[0]),
-        )[:3]
-    ]
+    support_levels = _build_support_levels(current=current, stop_loss=stop_loss, technical=technical, market=market, history=history, atr=atr)
     resistance_levels = [
         {"price": _round_price(value), "reason": reason}
         for value, reason in sorted(
@@ -460,6 +795,12 @@ def _build_trade_plan(position: dict[str, Any], market: dict[str, Any]) -> dict[
         action_label = "持有观察"
         risk_level = "elevated"
 
+    if not exit_tradable and action in {"stop_loss", "take_profit_1", "take_profit_2"}:
+        action = "watch"
+        action_label = "次交易日后可触发"
+        risk_level = "elevated" if risk_level == "high" else risk_level
+        reason.insert(0, "入选/买入当天不触发止盈止损，最早从下一个交易日开始按纪律执行。")
+
     invalid_conditions = [
         f"跌破止损位 {_round_price(stop_loss)}",
         "舆情热度连续转弱且资金净流出" if is_short else "跌破关键均线且无法收回",
@@ -479,6 +820,8 @@ def _build_trade_plan(position: dict[str, Any], market: dict[str, Any]) -> dict[
             {"level": 1, "price": _round_price(tp1), "suggestion": "减仓 30%-50%"},
             {"level": 2, "price": _round_price(tp2), "suggestion": "保留底仓或退出"},
         ],
+        "exit_tradable": exit_tradable,
+        "exit_rule": "入选/买入当天不触发止盈止损，最早从下一个交易日开始。",
         "trailing_stop": _round_price(trailing_stop),
         "risk_reward_ratio": _round((tp1 - current) / max(current - stop_loss, 0.01), 2) if tp1 > current else None,
         "reason": reason[:5],
@@ -499,6 +842,7 @@ def _build_discipline_alerts(item: dict[str, Any], ai_review: dict[str, Any] | N
     profile = _strategy_profile(item.get("strategy_id"), max_loss_pct)
     days_held = _days_held(item.get("buy_datetime"))
     action = plan.get("action")
+    exit_tradable = bool(plan.get("exit_tradable", True))
     ai_status = (ai_review or {}).get("status")
     ai_level = (ai_review or {}).get("decision_level") if ai_status == "ok" else None
     alerts: list[dict[str, Any]] = []
@@ -519,12 +863,14 @@ def _build_discipline_alerts(item: dict[str, Any], ai_review: dict[str, Any] | N
     if stop_loss is None:
         add("warning", "data_insufficient", "止损位不可用", "本地规则未能计算有效止损位，请先检查 K 线或成本价数据。")
 
-    if current is not None and stop_loss is not None:
+    if current is not None and stop_loss is not None and exit_tradable:
         if current <= stop_loss:
             add("critical", "stop_loss_breached", "已跌破纪律止损", f"当前价 {current:.3f} 已低于止损位 {stop_loss:.3f}，应优先处理风险。")
         elif current <= stop_loss * 1.015:
             gap_pct = (current - stop_loss) / stop_loss * 100
             add("warning", "near_stop_loss", "接近纪律止损", f"当前价距离止损位约 {gap_pct:.2f}%，盘中需重点盯防。")
+    elif current is not None and stop_loss is not None and current <= stop_loss:
+        add("info", "exit_not_tradable_yet", "当天不触发止损", "入选/买入当天只记录风险，不把止损视为可执行触发。")
 
     if action == "reduce":
         reasons = plan.get("reason") or []
@@ -533,7 +879,7 @@ def _build_discipline_alerts(item: dict[str, Any], ai_review: dict[str, Any] | N
 
     if return_pct is not None:
         threshold = float(profile["max_loss_pct"])
-        if return_pct <= -threshold:
+        if return_pct <= -threshold and exit_tradable:
             add("critical", "loss_limit_breached", "亏损超过策略阈值", f"{profile['label']}策略默认亏损阈值为 {threshold:.1f}%，当前收益 {return_pct:.2f}%。")
         elif return_pct <= -threshold * 0.8:
             add("warning", "near_loss_limit", "接近亏损阈值", f"当前亏损已接近 {profile['label']}策略纪律线，避免情绪化补仓。")
@@ -559,23 +905,30 @@ def _build_discipline_alerts(item: dict[str, Any], ai_review: dict[str, Any] | N
 
 
 class PortfolioService:
-    def __init__(self) -> None:
-        ensure_portfolio_schema()
+    DEFAULT_ADVICE_ESTIMATE_SECONDS = 100
+    DEFAULT_ADVICE_MAX_ATTEMPTS = 2
+    HEARTBEAT_SECONDS = 3.0
+    STALE_RUNNING_SECONDS = 5 * 60
+
+    def __init__(
+        self,
+        job_states: MySQLJobStateRepository | None = None,
+        repository: PortfolioRepository | None = None,
+    ) -> None:
+        self.job_states = job_states or MySQLJobStateRepository(
+            MySQLJobTable(table="portfolio_advice_run", id_column="id")
+        )
+        self.repository = repository or PortfolioRepository()
 
     def list_positions(self, include_inactive: bool = False) -> dict[str, Any]:
-        where = "" if include_inactive else "WHERE p.is_active = 1"
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    SELECT p.*
-                    FROM portfolio_position p
-                    {where}
-                    ORDER BY p.is_active DESC, p.updated_at DESC, p.id DESC
-                    """
-                )
-                rows = cursor.fetchall()
-        positions = [self._enrich_position(row) for row in rows]
+        rows = self.repository.list_positions(include_inactive)
+        contexts = self.repository.load_market_contexts(
+            [str(row.get("code")) for row in rows if row.get("code")]
+        )
+        positions = [
+            self._enrich_position(row, contexts.get(str(row.get("code")), {}))
+            for row in rows
+        ]
         self._attach_cached_ai_reviews(positions)
         self._attach_advice_outcomes(positions)
         return {"summary": self._summary(positions), "positions": positions}
@@ -596,30 +949,19 @@ class PortfolioService:
         max_loss_pct = _to_float(payload.get("max_loss_pct"))
         note = str(payload.get("note") or "").strip() or None
 
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                stock = self._stock_basic(cursor, code)
-                if not stock:
-                    raise ValueError(f"未找到股票代码: {code}")
-                cursor.execute(
-                    """
-                    INSERT INTO portfolio_position
-                        (code, name, strategy_id, cost_price, quantity, buy_datetime, target_style, max_loss_pct, note)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        code,
-                        stock.get("name"),
-                        strategy_id,
-                        cost_price,
-                        quantity,
-                        buy_datetime,
-                        target_style,
-                        max_loss_pct,
-                        note,
-                    ),
-                )
-                position_id = cursor.lastrowid
+        position_id, stock = self.repository.create_position(
+            code=code,
+            strategy_id=strategy_id,
+            cost_price=cost_price,
+            quantity=quantity,
+            buy_datetime=buy_datetime,
+            target_style=target_style,
+            max_loss_pct=max_loss_pct,
+            note=note,
+        )
+        if position_id is None or not stock:
+            raise ValueError(f"未找到股票代码: {code}")
+        self._refresh_new_position_quote(code, stock)
         return self.get_position(int(position_id))
 
     def update_position(self, position_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -632,34 +974,38 @@ class PortfolioService:
         if "quantity" in updates and int(updates["quantity"] or 0) <= 0:
             raise ValueError("持仓数量必须大于 0")
 
-        sets = ", ".join(f"{key} = %s" for key in updates)
-        values = list(updates.values())
-        values.append(position_id)
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(f"UPDATE portfolio_position SET {sets} WHERE id = %s", values)
-                if cursor.rowcount == 0:
-                    raise LookupError(f"持仓不存在: {position_id}")
+        if not self.repository.update_position(position_id, updates):
+            raise LookupError(f"持仓不存在: {position_id}")
         self._invalidate_advice(position_id, "持仓信息已调整，需要重新生成建议")
         return self.get_position(position_id)
 
     def delete_position(self, position_id: int) -> dict[str, Any]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("UPDATE portfolio_position SET is_active = 0 WHERE id = %s", (position_id,))
-                if cursor.rowcount == 0:
-                    raise LookupError(f"持仓不存在: {position_id}")
+        if not self.repository.deactivate_position(position_id):
+            raise LookupError(f"持仓不存在: {position_id}")
         self._invalidate_advice(position_id, "持仓已删除")
         return {"id": position_id, "is_active": False}
 
     def get_position(self, position_id: int) -> dict[str, Any]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM portfolio_position WHERE id = %s LIMIT 1", (position_id,))
-                row = cursor.fetchone()
-                if not row:
-                    raise LookupError(f"持仓不存在: {position_id}")
-        return self._enrich_position(row)
+        row = self.repository.get_position(position_id)
+        if not row:
+            raise LookupError(f"持仓不存在: {position_id}")
+        code = str(row.get("code") or "")
+        context = self.repository.load_market_contexts([code]).get(code, {})
+        return self._enrich_position(row, context)
+
+    def _refresh_new_position_quote(self, code: str, stock: dict[str, Any] | None) -> None:
+        if (stock or {}).get("instrument_type") != "etf":
+            return
+        try:
+            from scripts.run_portfolio_etf_quote_update import fetch_etf_history, save_daily_rows, save_snapshot
+
+            rows = fetch_etf_history(code, 90)
+            save_daily_rows(rows)
+            save_snapshot(code, rows)
+        except Exception:
+            # Quote refresh is best-effort; creating the position should not fail just
+            # because an external行情源 is temporarily unavailable.
+            return
 
     def create_advice_refresh_run(self, position_id: int, force: bool = False) -> dict[str, Any]:
         position = self.get_position(position_id)
@@ -670,108 +1016,202 @@ class PortfolioService:
                 self._expire_advice_run(int(cached["id"]), stale_reason)
             else:
                 return self._advice_run_payload(cached, queued=False)
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO portfolio_advice_run
-                        (position_id, code, status, decision_level, prompt_version, input_snapshot_json)
-                    VALUES (%s, %s, 'queued', %s, %s, %s)
-                    """,
-                    (
-                        position_id,
-                        position.get("code"),
-                        _decision_level_from_plan(position.get("trade_plan")),
-                        self._prompt_version(),
-                        _to_json(self._input_snapshot(position)),
-                    ),
-                )
-                run_id = cursor.lastrowid
-                cursor.execute("SELECT * FROM portfolio_advice_run WHERE id = %s", (run_id,))
-                row = cursor.fetchone()
-        return self._advice_run_payload(row, queued=True)
-
-    def refresh_advice_run(self, run_id: int) -> dict[str, Any]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM portfolio_advice_run WHERE id = %s LIMIT 1", (run_id,))
-                run = cursor.fetchone()
-                if not run:
-                    raise LookupError(f"持仓建议任务不存在: {run_id}")
-                cursor.execute(
-                    """
-                    UPDATE portfolio_advice_run
-                    SET status='running', started_at=%s, error_message=NULL
-                    WHERE id=%s
-                    """,
-                    (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_id),
-                )
+        snapshot = self._input_snapshot(position)
+        prompt_version = self._prompt_version()
+        idempotency_key = self._advice_idempotency_key(position_id, prompt_version, snapshot)
+        active_idempotency_key = self._active_advice_key(position_id)
+        existing = self._get_active_advice_run(active_idempotency_key)
+        if existing:
+            payload = self._advice_run_payload(existing, queued=True)
+            payload["deduplicated"] = True
+            return payload
         try:
-            position = self.get_position(int(run["position_id"]))
-            review, raw_response, model = self._generate_ai_review(position)
-            expires_at = datetime.now() + timedelta(minutes=_advice_ttl_minutes())
-            with mysql_conn() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        UPDATE portfolio_advice_run
-                        SET status='succeeded',
-                            decision_level=%s,
-                            model_name=%s,
-                            prompt_version=%s,
-                            input_snapshot_json=%s,
-                            raw_response=%s,
-                            parsed_review_json=%s,
-                            error_message=NULL,
-                            expires_at=%s,
-                            finished_at=%s
-                        WHERE id=%s
-                        """,
-                        (
-                            review.get("decision_level") or _decision_level_from_plan(position.get("trade_plan")),
-                            model,
-                            self._prompt_version(),
-                            _to_json(self._input_snapshot(position)),
-                            raw_response,
-                            _to_json(review),
-                            expires_at.strftime("%Y-%m-%d %H:%M:%S"),
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            run_id,
-                        ),
-                    )
-                    cursor.execute("SELECT * FROM portfolio_advice_run WHERE id = %s", (run_id,))
-                    row = cursor.fetchone()
-            return self._advice_run_payload(row, queued=False)
+            run_id = self.repository.create_advice_run(
+                position_id=position_id,
+                code=str(position.get("code") or ""),
+                idempotency_key=idempotency_key,
+                active_idempotency_key=active_idempotency_key,
+                max_attempts=self.DEFAULT_ADVICE_MAX_ATTEMPTS,
+                estimated_seconds_left=self.DEFAULT_ADVICE_ESTIMATE_SECONDS,
+                decision_level=_decision_level_from_plan(position.get("trade_plan")),
+                prompt_version=prompt_version,
+                input_snapshot_json=_to_json(snapshot),
+            )
+        except IntegrityError as exc:
+            if exc.args and int(exc.args[0]) == 1062:
+                existing = self._get_active_advice_run(active_idempotency_key)
+                if existing:
+                    payload = self._advice_run_payload(existing, queued=True)
+                    payload["deduplicated"] = True
+                    return payload
+            raise
+        return self.get_advice_run(run_id)
+
+    def get_advice_run(self, run_id: int) -> dict[str, Any]:
+        row = self._get_advice_run_row(run_id)
+        if not row:
+            raise LookupError(f"持仓建议任务不存在: {run_id}")
+        return self._advice_run_payload(row, queued=row.get("status") in {"queued", "running"})
+
+    def claim_next_advice_run(self, worker_id: str) -> str | None:
+        return self.job_states.claim_next(worker_id, running_phase="AI 建议生成中")
+
+    def recover_stale_advice_runs(self, stale_seconds: int | None = None) -> StaleRecoveryResult:
+        result = self.job_states.recover_stale(stale_seconds or self.STALE_RUNNING_SECONDS)
+        if result.failed:
+            record_job_error(
+                "portfolio_advice",
+                "portfolio_advice",
+                "stale_retry_exhausted",
+                "portfolio advice worker heartbeat stale and max attempts exhausted",
+                count=result.failed,
+            )
+        return result
+
+    def request_cancel_advice_run(self, run_id: int) -> dict[str, Any]:
+        status = self.job_states.request_cancel(str(run_id))
+        if status is None:
+            raise LookupError(f"持仓建议任务不存在: {run_id}")
+        return self.get_advice_run(run_id)
+
+    def run_claimed_advice(self, run_id: int | str, worker_id: str) -> None:
+        job_id = str(run_id)
+        stop_event = threading.Event()
+        cancel_seen = threading.Event()
+        heartbeat: threading.Thread | None = None
+        try:
+            if not self.job_states.owns_running_job(job_id, worker_id):
+                raise RuntimeError("worker does not own this running portfolio advice task")
+            run = self._get_advice_run_row(int(job_id))
+            if not run:
+                raise LookupError(f"持仓建议任务不存在: {job_id}")
+            snapshot = _json_loads(run.get("input_snapshot_json"))
+            self._validate_advice_snapshot(run, snapshot)
+            if self.job_states.finish_cancelled_if_requested(job_id, worker_id):
+                return
+
+            self._mark_advice_execution_stage(job_id, worker_id)
+            heartbeat = threading.Thread(
+                target=self._advice_worker_heartbeat,
+                args=(job_id, worker_id, stop_event, cancel_seen),
+                daemon=True,
+            )
+            heartbeat.start()
+            review, raw_response, model = self._generate_ai_review_from_snapshot(snapshot)
+            stop_event.set()
+            heartbeat.join(timeout=1)
+            if cancel_seen.is_set():
+                self.job_states.finish_cancelled_if_requested(job_id, worker_id)
+                return
+            if self.job_states.finish_cancelled_if_requested(job_id, worker_id):
+                return
+            self._finish_advice_success(job_id, worker_id, run, snapshot, review, raw_response, model)
         except Exception as exc:
-            with mysql_conn() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        UPDATE portfolio_advice_run
-                        SET status='failed', error_message=%s, finished_at=%s
-                        WHERE id=%s
-                        """,
-                        (str(exc)[:500], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), run_id),
-                    )
-                    cursor.execute("SELECT * FROM portfolio_advice_run WHERE id = %s", (run_id,))
-                    row = cursor.fetchone()
-            return self._advice_run_payload(row, queued=False)
+            stop_event.set()
+            if heartbeat:
+                heartbeat.join(timeout=1)
+            if self.job_states.finish_cancelled_if_requested(job_id, worker_id):
+                return
+            logger.exception("portfolio advice run failed run_id=%s", job_id)
+            self._finish_advice_failed(job_id, worker_id, self._advice_error_code(exc), str(exc))
+
+    def _get_advice_run_row(self, run_id: int) -> dict[str, Any] | None:
+        return self.repository.get_advice_run(run_id)
+
+    def _get_active_advice_run(self, active_idempotency_key: str) -> dict[str, Any] | None:
+        return self.repository.get_active_advice_run(active_idempotency_key)
+
+    @staticmethod
+    def _advice_idempotency_key(position_id: int, prompt_version: str, snapshot: dict[str, Any]) -> str:
+        material = json.dumps(
+            {
+                "job_type": "portfolio_advice",
+                "position_id": position_id,
+                "prompt_version": prompt_version,
+                "input_snapshot": snapshot,
+            },
+            ensure_ascii=False,
+            default=str,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _active_advice_key(position_id: int) -> str:
+        return hashlib.sha256(f"portfolio_advice:{position_id}".encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _validate_advice_snapshot(run: dict[str, Any], snapshot: Any) -> None:
+        if not isinstance(snapshot, dict):
+            raise ValueError("portfolio advice input snapshot is missing or invalid")
+        if int(snapshot.get("id") or 0) != int(run.get("position_id") or 0):
+            raise ValueError("portfolio advice input snapshot position does not match task")
+        if str(snapshot.get("code") or "") != str(run.get("code") or ""):
+            raise ValueError("portfolio advice input snapshot code does not match task")
+
+    def _advice_worker_heartbeat(
+        self,
+        run_id: str,
+        worker_id: str,
+        stop_event: threading.Event,
+        cancel_seen: threading.Event,
+    ) -> None:
+        while not stop_event.wait(self.HEARTBEAT_SECONDS):
+            if not self.job_states.heartbeat(run_id, worker_id):
+                logger.warning("portfolio advice heartbeat lost ownership run_id=%s worker_id=%s", run_id, worker_id)
+                return
+            if self.job_states.is_cancel_requested(run_id):
+                cancel_seen.set()
+
+    def _mark_advice_execution_stage(self, run_id: str, worker_id: str) -> None:
+        self.repository.mark_advice_execution_stage(run_id, worker_id)
+
+    def _finish_advice_success(
+        self,
+        run_id: str,
+        worker_id: str,
+        run: dict[str, Any],
+        snapshot: dict[str, Any],
+        review: dict[str, Any],
+        raw_response: str,
+        model: str,
+    ) -> None:
+        expires_at = datetime.now() + timedelta(minutes=_advice_ttl_minutes())
+        local_plan = snapshot.get("local_trade_plan") or {}
+        updated = self.repository.finish_advice_success(
+            run_id=run_id,
+            worker_id=worker_id,
+            decision_level=review.get("decision_level") or _decision_level_from_plan(local_plan),
+            model_name=model,
+            prompt_version=run.get("prompt_version") or self._prompt_version(),
+            input_snapshot_json=_to_json(snapshot),
+            raw_response=raw_response,
+            parsed_review_json=_to_json(review),
+            expires_at=expires_at.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        if not updated:
+            logger.warning("portfolio advice success ignored after ownership/status change run_id=%s", run_id)
+
+    def _finish_advice_failed(self, run_id: str, worker_id: str, error_code: str, error_message: str) -> None:
+        updated = self.repository.finish_advice_failed(run_id, worker_id, error_code, error_message)
+        if updated:
+            record_job_error("portfolio_advice", "portfolio_advice", error_code, error_message)
+
+    @staticmethod
+    def _advice_error_code(exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            return "invalid_request"
+        if isinstance(exc, requests.Timeout):
+            return "upstream_timeout"
+        if isinstance(exc, requests.HTTPError):
+            return "upstream_http_error"
+        if isinstance(exc, RuntimeError) and "API_KEY" in str(exc):
+            return "ai_configuration_missing"
+        return "portfolio_advice_failed"
 
     def evaluate_advice_outcomes(self, limit: int = 100, force: bool = False) -> dict[str, Any]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM portfolio_advice_run
-                    WHERE status = 'succeeded'
-                      AND finished_at IS NOT NULL
-                    ORDER BY finished_at DESC, id DESC
-                    LIMIT %s
-                    """,
-                    (max(1, int(limit)),),
-                )
-                runs = cursor.fetchall()
+        runs = self.repository.list_successful_advice_runs(limit)
 
         stats = {"runs": len(runs), "created_or_updated": 0, "skipped": 0, "errors": 0, "details": []}
         for run in runs:
@@ -804,17 +1244,7 @@ class PortfolioService:
 
         existing = set()
         if not force:
-            with mysql_conn() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        SELECT horizon_days
-                        FROM portfolio_advice_outcome
-                        WHERE advice_run_id = %s
-                        """,
-                        (advice_run_id,),
-                    )
-                    existing = {int(row["horizon_days"]) for row in cursor.fetchall()}
+            existing = self.repository.existing_outcome_horizons(advice_run_id)
 
         created_or_updated = 0
         skipped = 0
@@ -841,20 +1271,7 @@ class PortfolioService:
         return None
 
     def _future_kline_rows(self, code: str, base_trade_date: str, limit: int) -> list[dict[str, Any]]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT trade_date, open, high, low, close
-                    FROM daily_kline
-                    WHERE code = %s
-                      AND trade_date > %s
-                    ORDER BY trade_date ASC
-                    LIMIT %s
-                    """,
-                    (code, base_trade_date, int(limit)),
-                )
-                return cursor.fetchall()
+        return self.repository.future_kline_rows(code, base_trade_date, limit)
 
     def _build_outcome_payload(
         self,
@@ -985,112 +1402,21 @@ class PortfolioService:
         return "neutral", 50.0
 
     def _upsert_advice_outcome(self, outcome: dict[str, Any]) -> None:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO portfolio_advice_outcome
-                        (advice_run_id, position_id, code, decision_level, base_price, base_trade_date,
-                         evaluate_at, horizon_days, latest_price, return_pct, max_gain_pct, max_drawdown_pct,
-                         stop_loss_touched, take_profit_touched, support_broken, resistance_broken,
-                         outcome_label, quality_score, evidence_json)
-                    VALUES
-                        (%(advice_run_id)s, %(position_id)s, %(code)s, %(decision_level)s, %(base_price)s, %(base_trade_date)s,
-                         %(evaluate_at)s, %(horizon_days)s, %(latest_price)s, %(return_pct)s, %(max_gain_pct)s, %(max_drawdown_pct)s,
-                         %(stop_loss_touched)s, %(take_profit_touched)s, %(support_broken)s, %(resistance_broken)s,
-                         %(outcome_label)s, %(quality_score)s, %(evidence_json)s)
-                    ON DUPLICATE KEY UPDATE
-                        decision_level = VALUES(decision_level),
-                        base_price = VALUES(base_price),
-                        base_trade_date = VALUES(base_trade_date),
-                        evaluate_at = VALUES(evaluate_at),
-                        latest_price = VALUES(latest_price),
-                        return_pct = VALUES(return_pct),
-                        max_gain_pct = VALUES(max_gain_pct),
-                        max_drawdown_pct = VALUES(max_drawdown_pct),
-                        stop_loss_touched = VALUES(stop_loss_touched),
-                        take_profit_touched = VALUES(take_profit_touched),
-                        support_broken = VALUES(support_broken),
-                        resistance_broken = VALUES(resistance_broken),
-                        outcome_label = VALUES(outcome_label),
-                        quality_score = VALUES(quality_score),
-                        evidence_json = VALUES(evidence_json)
-                    """,
-                    outcome,
-                )
+        self.repository.upsert_advice_outcome(outcome)
 
-    def _stock_basic(self, cursor, code: str) -> dict[str, Any] | None:
-        cursor.execute(
-            """
-            SELECT code, name, industry, instrument_type, is_st, is_delisted
-            FROM stock_basic
-            WHERE code = %s
-            LIMIT 1
-            """,
-            (code,),
-        )
-        return cursor.fetchone()
-
-    def _enrich_position(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _enrich_position(
+        self,
+        row: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         code = row.get("code")
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                basic = self._stock_basic(cursor, code) or {}
-                cursor.execute(
-                    """
-                    SELECT latest_price, pct_chg, change_amount, pre_close, high_price, low_price,
-                           amount, trade_date, quote_time, updated_at, source
-                    FROM stock_realtime_snapshot
-                    WHERE code = %s
-                    LIMIT 1
-                    """,
-                    (code,),
-                )
-                quote = cursor.fetchone() or {}
-                cursor.execute(
-                    """
-                    SELECT trade_date, open, high, low, close, volume, amount
-                    FROM daily_kline
-                    WHERE code = %s
-                    ORDER BY trade_date DESC
-                    LIMIT 60
-                    """,
-                    (code,),
-                )
-                history = list(reversed(cursor.fetchall()))
-                cursor.execute(
-                    """
-                    SELECT trade_date, sentiment_score, news_count, filtered_news_count, credibility_avg, quality_avg
-                    FROM stock_sentiment_daily
-                    WHERE code = %s
-                    ORDER BY trade_date DESC
-                    LIMIT 1
-                    """,
-                    (code,),
-                )
-                sentiment = cursor.fetchone() or {}
-                cursor.execute(
-                    """
-                    SELECT trade_date, quote_time, net_amount, amount, pct_chg, turnover_rate
-                    FROM stock_realtime_moneyflow_snapshot
-                    WHERE code = %s
-                    LIMIT 1
-                    """,
-                    (code,),
-                )
-                moneyflow = cursor.fetchone() or {}
-                cursor.execute(
-                    """
-                    SELECT trade_date, his_low, his_high, cost_5pct, cost_15pct, cost_50pct,
-                           cost_85pct, cost_95pct, weight_avg, winner_rate
-                    FROM stock_chip_daily
-                    WHERE code = %s
-                    ORDER BY trade_date DESC
-                    LIMIT 1
-                    """,
-                    (code,),
-                )
-                chip = cursor.fetchone() or {}
+        context = context or {}
+        basic = context.get("basic") or {}
+        quote = context.get("quote") or {}
+        history = list(context.get("history") or [])
+        sentiment = context.get("sentiment") or {}
+        moneyflow = context.get("moneyflow") or {}
+        chip = context.get("chip") or {}
 
         if (
             basic.get("instrument_type") == "etf"
@@ -1176,7 +1502,7 @@ class PortfolioService:
                 "winner_rate": _round(_to_float(chip.get("winner_rate")), 2),
             },
         }
-        trade_plan = _build_trade_plan(row, market)
+        trade_plan = _build_trade_plan(row, market, history)
 
         item = {
             "id": int(row.get("id")),
@@ -1229,22 +1555,7 @@ class PortfolioService:
         }
 
     def _latest_valid_advice(self, position_id: int) -> dict[str, Any] | None:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM portfolio_advice_run
-                    WHERE position_id = %s
-                      AND status = 'succeeded'
-                      AND expires_at IS NOT NULL
-                      AND expires_at > NOW()
-                    ORDER BY expires_at DESC, id DESC
-                    LIMIT 1
-                    """,
-                    (position_id,),
-                )
-                return cursor.fetchone()
+        return self.repository.latest_valid_advice(position_id)
 
     def _advice_stale_reason(self, item: dict[str, Any], row: dict[str, Any]) -> str | None:
         if row.get("status") != "succeeded":
@@ -1306,17 +1617,7 @@ class PortfolioService:
         return None
 
     def _expire_advice_run(self, run_id: int, reason: str) -> None:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE portfolio_advice_run
-                    SET expires_at = LEAST(COALESCE(expires_at, NOW()), NOW()),
-                        error_message = %s
-                    WHERE id = %s
-                    """,
-                    (reason[:500], run_id),
-                )
+        self.repository.expire_advice_run(run_id, reason)
 
     def _attach_cached_ai_reviews(self, positions: list[dict[str, Any]]) -> None:
         if not positions:
@@ -1324,25 +1625,7 @@ class PortfolioService:
         ids = [int(item["id"]) for item in positions if item.get("id") is not None]
         if not ids:
             return
-        placeholders = ", ".join(["%s"] * len(ids))
-        latest_by_position: dict[int, dict[str, Any]] = {}
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    SELECT r.*
-                    FROM portfolio_advice_run r
-                    INNER JOIN (
-                        SELECT position_id, MAX(id) AS id
-                        FROM portfolio_advice_run
-                        WHERE position_id IN ({placeholders})
-                        GROUP BY position_id
-                    ) latest ON latest.id = r.id
-                    """,
-                    ids,
-                )
-                for row in cursor.fetchall():
-                    latest_by_position[int(row["position_id"])] = row
+        latest_by_position = self.repository.latest_advice_runs(ids)
 
         for item in positions:
             row = latest_by_position.get(int(item.get("id")))
@@ -1373,23 +1656,10 @@ class PortfolioService:
         ]
         if not run_ids:
             return
-        placeholders = ", ".join(["%s"] * len(run_ids))
-        outcomes_by_run: dict[int, list[dict[str, Any]]] = {}
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    SELECT *
-                    FROM portfolio_advice_outcome
-                    WHERE advice_run_id IN ({placeholders})
-                    ORDER BY advice_run_id, horizon_days
-                    """,
-                    run_ids,
-                )
-                rows = cursor.fetchall()
-        for row in rows:
-            run_id = int(row["advice_run_id"])
-            outcomes_by_run.setdefault(run_id, []).append(self._outcome_payload(row))
+        outcomes_by_run = {
+            run_id: [self._outcome_payload(row) for row in rows]
+            for run_id, rows in self.repository.advice_outcomes(run_ids).items()
+        }
 
         for item in positions:
             ai_review = item.get("ai_review") or {}
@@ -1449,6 +1719,9 @@ class PortfolioService:
             "model": row.get("model_name"),
             "prompt_version": row.get("prompt_version"),
             "decision_level": row.get("decision_level"),
+            "phase": row.get("phase"),
+            "progress_pct": _to_float(row.get("progress_pct")) or 0,
+            "cancel_requested": bool(row.get("cancel_requested")),
             "expires_at": expires_at,
             "run_id": int(row.get("id")) if row.get("id") is not None else None,
             "created_at": str(row.get("created_at")) if row.get("created_at") else None,
@@ -1475,7 +1748,10 @@ class PortfolioService:
                 "confidence": _round(_to_float(parsed.get("confidence")), 2),
             }
         if status in {"queued", "running"}:
-            return {**base, "message": "AI 持仓建议正在生成中。"}
+            message = "AI 持仓建议正在取消。" if row.get("cancel_requested") else "AI 持仓建议正在生成中。"
+            return {**base, "message": message}
+        if status == "cancelled":
+            return {**base, "message": "AI 持仓建议任务已取消，可重新刷新分析。"}
         if status == "failed":
             return {**base, "message": f"AI 持仓建议生成失败：{row.get('error_message') or '-'}"}
         return {**base, "message": "暂无可用 AI 持仓建议。"}
@@ -1489,38 +1765,43 @@ class PortfolioService:
             "code": row.get("code"),
             "status": row.get("status"),
             "queued": queued,
+            "deduplicated": False,
             "decision_level": row.get("decision_level"),
             "model": row.get("model_name"),
             "prompt_version": row.get("prompt_version"),
+            "phase": row.get("phase"),
+            "progress_pct": _to_float(row.get("progress_pct")) or 0,
+            "estimated_seconds_left": int(row.get("estimated_seconds_left")) if row.get("estimated_seconds_left") is not None else None,
+            "worker_id": row.get("worker_id"),
+            "worker_heartbeat_at": str(row.get("worker_heartbeat_at")) if row.get("worker_heartbeat_at") else None,
+            "cancel_requested": bool(row.get("cancel_requested")),
+            "attempt_count": int(row.get("attempt_count") or 0),
+            "max_attempts": int(row.get("max_attempts") or self.DEFAULT_ADVICE_MAX_ATTEMPTS),
+            "error_code": row.get("error_code"),
             "expires_at": str(row.get("expires_at")) if row.get("expires_at") else None,
             "error_message": row.get("error_message"),
+            "started_at": str(row.get("started_at")) if row.get("started_at") else None,
+            "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
             "created_at": str(row.get("created_at")) if row.get("created_at") else None,
             "updated_at": str(row.get("updated_at")) if row.get("updated_at") else None,
         }
 
     def _invalidate_advice(self, position_id: int, reason: str) -> None:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE portfolio_advice_run
-                    SET expires_at = LEAST(COALESCE(expires_at, NOW()), NOW()),
-                        error_message = COALESCE(error_message, %s)
-                    WHERE position_id = %s
-                      AND status = 'succeeded'
-                      AND (expires_at IS NULL OR expires_at > NOW())
-                    """,
-                    (reason[:500], position_id),
-                )
+        active_run_ids = self.repository.invalidate_advice(position_id, reason)
+        for run_id in active_run_ids:
+            self.job_states.request_cancel(str(run_id))
 
     def _generate_ai_review(self, item: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+        return self._generate_ai_review_from_snapshot(self._input_snapshot(item))
+
+    def _generate_ai_review_from_snapshot(self, snapshot: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
         _load_env_file()
         api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
         model = os.getenv("PORTFOLIO_DEEPSEEK_MODEL") or "deepseek-v4-pro"
         if not api_key:
             raise RuntimeError("未配置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY")
 
-        payload_items = [self._input_snapshot(item)]
+        payload_items = [snapshot]
 
         prompt = """
 你是A股/ETF持仓管理助手。请严格基于我提供的持仓数据生成持仓建议，不要编造不存在的数据。
@@ -1565,23 +1846,24 @@ critical_exit / reduce / hold_watch / add_allowed / no_action / data_insufficien
         parsed = _extract_json_object(content)
         review = None
         for candidate in parsed.get("items") or []:
-            if candidate.get("code") and str(candidate.get("code")) == str(item.get("code")):
+            if candidate.get("code") and str(candidate.get("code")) == str(snapshot.get("code")):
                 review = candidate
                 break
-            if candidate.get("id") is not None and int(candidate.get("id")) == int(item.get("id")):
+            if candidate.get("id") is not None and int(candidate.get("id")) == int(snapshot.get("id")):
                 review = candidate
                 break
         if not review:
             raise RuntimeError("DeepSeek 未返回该持仓分析")
-        if review.get("code") and str(review.get("code")) != str(item.get("code")):
+        if review.get("code") and str(review.get("code")) != str(snapshot.get("code")):
             raise RuntimeError("DeepSeek 返回股票代码与请求不一致")
-        level = review.get("decision_level") or _decision_level_from_plan(item.get("trade_plan"))
+        local_plan = snapshot.get("local_trade_plan") or {}
+        level = review.get("decision_level") or _decision_level_from_plan(local_plan)
         allowed_levels = {"critical_exit", "reduce", "hold_watch", "add_allowed", "no_action", "data_insufficient"}
         if level not in allowed_levels:
-            level = _decision_level_from_plan(item.get("trade_plan"))
+            level = _decision_level_from_plan(local_plan)
         normalized = {
-            "id": item.get("id"),
-            "code": item.get("code"),
+            "id": snapshot.get("id"),
+            "code": snapshot.get("code"),
             "summary": str(review.get("summary") or "")[:160],
             "analysis": [str(value)[:180] for value in (review.get("analysis") or [])[:5]],
             "risks": [str(value)[:180] for value in (review.get("risks") or [])[:5]],

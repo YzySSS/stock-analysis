@@ -69,14 +69,6 @@ class StockBasicSync:
             return None
         return f"{value[:4]}-{value[4:6]}-{value[6:8]}" if len(value) == 8 else value
 
-    def ensure_columns(self) -> None:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SHOW COLUMNS FROM stock_basic")
-                columns = {row[0] for row in cursor.fetchall()}
-                if "instrument_type" not in columns:
-                    cursor.execute("ALTER TABLE stock_basic ADD COLUMN instrument_type VARCHAR(16) DEFAULT 'other'")
-
     def fetch_stock_basic(self) -> List[StockBasicRecord]:
         df = self.pro.stock_basic(
             exchange="",
@@ -107,7 +99,6 @@ class StockBasicSync:
     def save_to_mysql(self, records: List[StockBasicRecord]) -> int:
         if not records:
             return 0
-        self.ensure_columns()
         sql = """
         INSERT INTO stock_basic (
             code, name, instrument_type, market, industry, is_st, is_delisted, listing_date
@@ -141,7 +132,6 @@ class StockBasicSync:
 
     def supplement_from_realtime_snapshot(self) -> int:
         """Add stock-like codes from AkShare realtime that Tushare has not listed yet."""
-        self.ensure_columns()
         sql = """
         INSERT INTO stock_basic (
             code, name, instrument_type, market, industry, is_st, is_delisted, listing_date

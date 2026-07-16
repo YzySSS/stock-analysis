@@ -10,18 +10,24 @@ router = APIRouter(tags=["strategies"])
 
 
 @router.get("/strategies")
-def list_strategies() -> dict:
+def list_strategies(instrument_type: str = Query(default="stock")) -> dict:
     service = StrategyService()
-    strategies = service.list_strategies()
+    strategies = service.list_strategies(instrument_type=instrument_type)
     return {
         "default_strategy": service.get_default_strategy_id(),
+        "instrument_type": instrument_type,
         "summary": {
             "count": len(strategies),
             "current_count": len([item for item in strategies if item.get("mode") == "current"]),
             "legacy_count": len([item for item in strategies if item.get("mode") == "legacy"]),
+            "loadable_count": len([item for item in strategies if item.get("loadable")]),
+            "data_ready_count": len([item for item in strategies if item.get("data_ready")]),
             "runtime_ready_count": len([item for item in strategies if item.get("runtime_ready")]),
-            "experimental_count": len([item for item in strategies if item.get("availability") == "experimental"]),
-            "display_only_count": len([item for item in strategies if item.get("availability") == "display_only"]),
+            "backtest_ready_count": len([item for item in strategies if item.get("backtest_ready")]),
+            "validated_count": len([item for item in strategies if item.get("validated")]),
+            "prototype_count": len([item for item in strategies if item.get("runtime_status") == "prototype"]),
+            "experimental_count": len([item for item in strategies if item.get("status") == "experimental"]),
+            "display_only_count": len([item for item in strategies if not item.get("runtime_ready")]),
         },
         "strategies": strategies,
     }

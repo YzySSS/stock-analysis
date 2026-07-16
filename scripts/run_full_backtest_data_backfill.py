@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.data_ingestion.daily_kline_sync import DailyKlineSync
 from app.data_ingestion.factor_input_history_sync import FactorInputDailyRecord, FactorInputHistorySync
-from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.db import mysql_conn
 from app.shared.task_log import TaskRunLogger
 
@@ -164,7 +163,6 @@ def fetch_daily_basic_map(pro: Any, trade_date: str) -> dict[str, dict[str, floa
 
 
 def run_factor_history(start_date: str, end_date: str, pause_seconds: float) -> dict[str, Any]:
-    ensure_v2_schema()
     token = os.getenv("TUSHARE_TOKEN")
     if not token:
         raise RuntimeError("TUSHARE_TOKEN 未配置")

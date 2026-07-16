@@ -5,12 +5,15 @@ from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional
 
 from app.error_learning.models import SelectionTrackingRecord
-from app.shared.db import mysql_conn
 from app.shared.sentiment_scoring import enrich_opinion_news_item
 from app.stock_selection.trade_plan import build_selection_trade_plan
+from app.tracking.repository import TrackingRepository
 
 
 class SelectionResultTracker:
+    def __init__(self, repository: TrackingRepository | None = None) -> None:
+        self.repository = repository or TrackingRepository()
+
     @staticmethod
     def _build_sentiment_context(metadata: Dict[str, Any], factor_scores: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         existing = metadata.get("sentiment_context")
@@ -56,6 +59,7 @@ class SelectionResultTracker:
         selection_date: Optional[str] = None,
         offset: int = 0,
         latest_only: bool = True,
+        include_in_stats_only: bool = False,
     ) -> List[SelectionTrackingRecord]:
         rows = self._fetch_from_selection_result(
             limit=limit,
@@ -65,11 +69,11 @@ class SelectionResultTracker:
             selection_date=selection_date,
             offset=offset,
             latest_only=latest_only,
+            include_in_stats_only=include_in_stats_only,
         )
         if rows:
             return [self._build_record_from_selection_result(row) for row in rows]
-        rows = self._fetch_from_stock_snapshot(limit=limit, instrument_type=instrument_type)
-        return [self._build_record_from_snapshot(row) for row in rows]
+        return []
 
     def _fetch_from_selection_result(
         self,
@@ -80,238 +84,18 @@ class SelectionResultTracker:
         selection_date: Optional[str] = None,
         offset: int = 0,
         latest_only: bool = True,
+        include_in_stats_only: bool = False,
     ) -> List[Dict[str, Any]]:
-        sql = """
-        SELECT
-            sr.run_id,
-            sr.run_id AS latest_run_id,
-            sr.rank_no,
-            sr.trade_date AS selection_date,
-            sr.created_at AS selection_datetime,
-            sr.strategy_id,
-            sr.code,
-            sr.score,
-            COALESCE(sr.include_in_stats, 1) AS include_in_stats,
-            sr.metadata_json,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            selected_dk.open AS selected_open_price,
-            selected_dk.close AS selected_close_price,
-            period_dk.max_high AS period_max_high,
-            period_dk.min_low AS period_min_low,
-            period_dk.trade_day_count AS trade_day_count,
-            COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
-            latest_dk.trade_date AS latest_trade_date,
-            latest_dk.close AS daily_current_price,
-            realtime.latest_price AS realtime_price,
-            realtime.pct_chg AS realtime_pct_chg,
-            realtime.quote_time AS realtime_quote_time,
-            realtime.trade_date AS realtime_trade_date,
-            realtime.high_price AS realtime_high_price,
-            realtime.low_price AS realtime_low_price,
-            COALESCE(realtime.latest_price, latest_dk.close) AS current_price
-        FROM selection_result sr
-        INNER JOIN stock_basic sb ON sr.code = sb.code
-        LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date
-        LEFT JOIN daily_kline metadata_selected_dk
-          ON sr.code = metadata_selected_dk.code
-         AND metadata_selected_dk.trade_date = CASE
-              WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL
-              ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d')
-             END
-        LEFT JOIN (
-            SELECT d1.code, d1.trade_date, d1.close
-            FROM daily_kline d1
-            INNER JOIN (
-                SELECT code, MAX(trade_date) AS max_date
-                FROM daily_kline
-                GROUP BY code
-            ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
-        ) latest_dk ON sr.code = latest_dk.code
-        LEFT JOIN stock_realtime_snapshot realtime ON sr.code = realtime.code
-        LEFT JOIN (
-            SELECT
-                period_price.selection_result_id,
-                MAX(period_price.high_price) AS max_high,
-                MIN(period_price.low_price) AS min_low,
-                COUNT(DISTINCT period_price.trade_date) AS trade_day_count
-            FROM (
-                SELECT
-                    sr_inner.id AS selection_result_id,
-                    dk.trade_date,
-                    MAX(dk.high) AS high_price,
-                    MIN(dk.low) AS low_price
-                FROM selection_result sr_inner
-                INNER JOIN daily_kline dk
-                 ON dk.code = sr_inner.code
-                 AND dk.trade_date > DATE(sr_inner.created_at)
-                 AND dk.trade_date <= (SELECT MAX(trade_date) FROM daily_kline)
-                 AND dk.high > 0
-                 AND dk.low > 0
-                GROUP BY sr_inner.id, dk.trade_date
-                UNION ALL
-                SELECT
-                    sr_inner.id AS selection_result_id,
-                    ri.trade_date,
-                    MAX(ri.latest_price) AS high_price,
-                    MIN(ri.latest_price) AS low_price
-                FROM selection_result sr_inner
-                INNER JOIN stock_realtime_intraday ri
-                 ON ri.code = sr_inner.code
-                 AND ri.quote_time >= sr_inner.created_at
-                 AND ri.latest_price IS NOT NULL
-                 AND ri.latest_price > 0
-                GROUP BY sr_inner.id, ri.trade_date
-            ) period_price
-            GROUP BY period_price.selection_result_id
-        ) period_dk ON sr.id = period_dk.selection_result_id
-        WHERE sb.instrument_type = %s
-        """
-        params: List[Any] = [instrument_type]
-        latest_business_key_sql = """
-            AND sr.id IN (
-                SELECT max_id
-                FROM (
-                    SELECT MAX(id) AS max_id
-                    FROM selection_result
-                    GROUP BY code, trade_date, strategy_id
-                ) latest_business_key
-            )
-        """
-        if run_id:
-            sql += " AND sr.run_id = %s"
-            params.append(run_id)
-            sql += " ORDER BY sr.rank_no ASC, sr.id ASC LIMIT %s"
-            params.append(limit)
-        elif selection_date:
-            sql += " AND sr.trade_date = %s"
-            params.append(selection_date)
-            if strategy_id:
-                sql += " AND sr.strategy_id = %s"
-                params.append(strategy_id)
-            sql += latest_business_key_sql
-            sql += " ORDER BY sr.trade_date DESC, sr.rank_no ASC, sr.id DESC LIMIT %s OFFSET %s"
-            params.extend([limit, offset])
-        elif not latest_only:
-            if strategy_id:
-                sql += " AND sr.strategy_id = %s"
-                params.append(strategy_id)
-            sql += latest_business_key_sql
-            sql += " ORDER BY sr.trade_date DESC, sr.rank_no ASC, sr.id DESC LIMIT %s OFFSET %s"
-            params.extend([limit, offset])
-        else:
-            latest_trade_date_sql = "SELECT MAX(sr2.trade_date) FROM selection_result sr2 INNER JOIN stock_basic sb2 ON sr2.code = sb2.code WHERE sb2.instrument_type = %s"
-            latest_params: List[Any] = [instrument_type]
-            if strategy_id:
-                latest_trade_date_sql += " AND sr2.strategy_id = %s"
-                latest_params.append(strategy_id)
-            sql = """
-            SELECT
-                sr.run_id,
-                sr.run_id AS latest_run_id,
-                sr.rank_no,
-                sr.trade_date AS selection_date,
-                sr.created_at AS selection_datetime,
-                sr.strategy_id,
-                sr.code,
-                sr.score,
-                COALESCE(sr.include_in_stats, 1) AS include_in_stats,
-                sr.metadata_json,
-                sb.name,
-                sb.industry,
-                sb.instrument_type,
-                selected_dk.open AS selected_open_price,
-                selected_dk.close AS selected_close_price,
-                period_dk.max_high AS period_max_high,
-                period_dk.min_low AS period_min_low,
-                period_dk.trade_day_count AS trade_day_count,
-                COALESCE(metadata_selected_dk.trade_date, latest_dk.trade_date) AS metric_trade_date,
-                latest_dk.trade_date AS latest_trade_date,
-                latest_dk.close AS daily_current_price,
-                realtime.latest_price AS realtime_price,
-                realtime.pct_chg AS realtime_pct_chg,
-                realtime.quote_time AS realtime_quote_time,
-                realtime.trade_date AS realtime_trade_date,
-                realtime.high_price AS realtime_high_price,
-                realtime.low_price AS realtime_low_price,
-                COALESCE(realtime.latest_price, latest_dk.close) AS current_price
-            FROM selection_result sr
-            INNER JOIN (
-                SELECT code, trade_date, strategy_id, MAX(id) AS max_id
-                FROM selection_result
-                WHERE trade_date = (""" + latest_trade_date_sql + """)
-            """
-            params = []
-            params.extend(latest_params)
-            if strategy_id:
-                sql += " AND strategy_id = %s"
-                params.append(strategy_id)
-            sql += " GROUP BY code, trade_date, strategy_id ) latest_sr ON sr.id = latest_sr.max_id "
-            sql += " INNER JOIN stock_basic sb ON sr.code = sb.code "
-            sql += " LEFT JOIN daily_kline selected_dk ON sr.code = selected_dk.code AND sr.trade_date = selected_dk.trade_date "
-            sql += " LEFT JOIN daily_kline metadata_selected_dk ON sr.code = metadata_selected_dk.code AND metadata_selected_dk.trade_date = CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')) IN ('', 'null') THEN NULL ELSE STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.raw_metrics.trade_date')), '%%Y-%%m-%%d') END "
-            sql += " LEFT JOIN ( SELECT d1.code, d1.trade_date, d1.close FROM daily_kline d1 INNER JOIN ( SELECT code, MAX(trade_date) AS max_date FROM daily_kline GROUP BY code ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date ) latest_dk ON sr.code = latest_dk.code "
-            sql += " LEFT JOIN stock_realtime_snapshot realtime ON sr.code = realtime.code "
-            sql += " LEFT JOIN ( SELECT period_price.selection_result_id, MAX(period_price.high_price) AS max_high, MIN(period_price.low_price) AS min_low, COUNT(DISTINCT period_price.trade_date) AS trade_day_count FROM ( SELECT sr_inner.id AS selection_result_id, dk.trade_date, MAX(dk.high) AS high_price, MIN(dk.low) AS low_price FROM selection_result sr_inner INNER JOIN daily_kline dk ON dk.code = sr_inner.code AND dk.trade_date > DATE(sr_inner.created_at) AND dk.trade_date <= (SELECT MAX(trade_date) FROM daily_kline) AND dk.high > 0 AND dk.low > 0 GROUP BY sr_inner.id, dk.trade_date UNION ALL SELECT sr_inner.id AS selection_result_id, ri.trade_date, MAX(ri.latest_price) AS high_price, MIN(ri.latest_price) AS low_price FROM selection_result sr_inner INNER JOIN stock_realtime_intraday ri ON ri.code = sr_inner.code AND ri.quote_time >= sr_inner.created_at AND ri.latest_price IS NOT NULL AND ri.latest_price > 0 GROUP BY sr_inner.id, ri.trade_date ) period_price GROUP BY period_price.selection_result_id ) period_dk ON sr.id = period_dk.selection_result_id "
-            sql += " WHERE sb.instrument_type = %s "
-            params.append(instrument_type)
-            sql += " ORDER BY sr.rank_no ASC, sr.id DESC LIMIT %s"
-            params.append(limit)
-
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, params)
-                return cursor.fetchall()
-
-    def _fetch_from_stock_snapshot(self, limit: int, instrument_type: str) -> List[Dict[str, Any]]:
-        sql = """
-        SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            sb.pe_tushare,
-            sb.pb_tushare,
-            sb.roe,
-            sb.roa,
-            sb.grossprofit_margin,
-            sb.netprofit_margin,
-            sb.revenue_yoy,
-            sb.profit_yoy,
-            dk.trade_date AS selection_date,
-            dk.open AS selected_open_price,
-            dk.close AS selected_close_price,
-            dk.trade_date AS latest_trade_date,
-            dk.close AS daily_current_price,
-            realtime.latest_price AS realtime_price,
-            realtime.pct_chg AS realtime_pct_chg,
-            realtime.quote_time AS realtime_quote_time,
-            realtime.trade_date AS realtime_trade_date,
-            realtime.high_price AS realtime_high_price,
-            realtime.low_price AS realtime_low_price,
-            COALESCE(realtime.latest_price, dk.close) AS current_price
-        FROM stock_basic sb
-        LEFT JOIN (
-            SELECT d1.code, d1.trade_date, d1.open, d1.close
-            FROM daily_kline d1
-            INNER JOIN (
-                SELECT code, MAX(trade_date) AS max_date
-                FROM daily_kline
-                GROUP BY code
-            ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
-        ) dk ON sb.code = dk.code
-        LEFT JOIN stock_realtime_snapshot realtime ON sb.code = realtime.code
-        WHERE sb.is_delisted = 0
-          AND sb.instrument_type = %s
-        ORDER BY (dk.trade_date IS NULL), dk.trade_date DESC, sb.code
-        LIMIT %s
-        """
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, (instrument_type, limit))
-                return cursor.fetchall()
-
+        return self.repository.list_selection_result_rows(
+            limit=limit,
+            instrument_type=instrument_type,
+            run_id=run_id,
+            strategy_id=strategy_id,
+            selection_date=selection_date,
+            offset=offset,
+            latest_only=latest_only,
+            include_in_stats_only=include_in_stats_only,
+        )
     @staticmethod
     def _to_float(value: Any) -> float | None:
         if value is None:
@@ -393,6 +177,7 @@ class SelectionResultTracker:
         period_max_high: float | None,
         period_min_low: float | None,
         current_price: float | None,
+        exit_tradable: bool = True,
     ) -> Optional[Dict[str, Any]]:
         if not isinstance(trade_plan, dict) or not trade_plan:
             return None
@@ -414,9 +199,11 @@ class SelectionResultTracker:
 
         status = {
             "status": "tracking",
-            "status_label": "计划跟踪中",
+            "status_label": "计划跟踪中" if exit_tradable else "待下一交易日触发",
             "entry_status": "entered",
             "entry_price": round(plan_entry_price, 3),
+            "exit_tradable": exit_tradable,
+            "exit_rule": "入选当天不触发止盈止损，最早从下一个交易日开始。",
             "completed": False,
             "completion_price": None,
             "completion_return_pct": None,
@@ -424,6 +211,8 @@ class SelectionResultTracker:
             "high_watermark": round(high_watermark, 3) if high_watermark is not None else None,
             "low_watermark": round(low_watermark, 3) if low_watermark is not None else None,
         }
+        if not exit_tradable:
+            return status
 
         completion_price = None
         completion_reason = None
@@ -522,7 +311,7 @@ class SelectionResultTracker:
         max_gain_pct = None
         max_drawdown_pct = None
         realtime_price_after_selection = realtime_price if (
-            not selection_datetime or (realtime_quote_dt is not None and realtime_quote_dt >= selection_datetime)
+            realtime_dt is not None and selection_dt is not None and realtime_dt > selection_dt
         ) else None
         period_max_high = self._combine_period_extreme(self._to_float(row.get("period_max_high")), realtime_price_after_selection, prefer_max=True)
         period_min_low = self._combine_period_extreme(self._to_float(row.get("period_min_low")), realtime_price_after_selection, prefer_max=False)
@@ -550,6 +339,7 @@ class SelectionResultTracker:
             period_max_high=period_max_high,
             period_min_low=period_min_low,
             current_price=current_price_for_return,
+            exit_tradable=bool(tracking_days is not None and tracking_days >= 1),
         )
         if trade_plan_status and trade_plan_status.get("completed"):
             frozen_price = self._to_float(trade_plan_status.get("completion_price"))

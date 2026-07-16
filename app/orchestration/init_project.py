@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.shared.db import mysql_conn, ping_mysql
+from app.shared.db import mysql_conn
 
 
 CORE_TABLE_DDL = [
@@ -20,6 +20,7 @@ CORE_TABLE_DDL = [
         netprofit_margin DECIMAL(12,4) DEFAULT NULL,
         revenue_yoy DECIMAL(12,4) DEFAULT NULL,
         profit_yoy DECIMAL(12,4) DEFAULT NULL,
+        eps DECIMAL(12,4) DEFAULT NULL,
         fundamental_period VARCHAR(16) DEFAULT NULL,
         fundamental_updated_at DATETIME DEFAULT NULL,
         is_st TINYINT(1) NOT NULL DEFAULT 0,
@@ -133,10 +134,14 @@ CORE_TABLE_DDL = [
         started_at DATETIME NOT NULL,
         finished_at DATETIME DEFAULT NULL,
         message TEXT,
+        error_code VARCHAR(64) DEFAULT NULL,
+        error_fingerprint CHAR(64) DEFAULT NULL,
         metadata_json JSON DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_task_name (task_name),
-        KEY idx_task_status (status)
+        KEY idx_task_status (status),
+        KEY idx_task_created_at (created_at),
+        KEY idx_task_status_created (status, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -171,19 +176,33 @@ CORE_TABLE_DDL = [
         return_mode VARCHAR(16) NOT NULL,
         use_adjusted_price TINYINT(1) NOT NULL DEFAULT 0,
         status VARCHAR(32) NOT NULL DEFAULT 'running',
+        idempotency_key CHAR(64) DEFAULT NULL,
+        active_idempotency_key CHAR(64) DEFAULT NULL,
+        worker_id VARCHAR(128) DEFAULT NULL,
+        locked_at DATETIME DEFAULT NULL,
+        worker_heartbeat_at DATETIME DEFAULT NULL,
+        cancel_requested TINYINT(1) NOT NULL DEFAULT 0,
+        attempt_count INT NOT NULL DEFAULT 0,
+        max_attempts INT NOT NULL DEFAULT 2,
+        phase VARCHAR(64) DEFAULT NULL,
         sample_days INT DEFAULT 0,
         total_picks INT DEFAULT 0,
         total_trades INT DEFAULT 0,
         request_json JSON DEFAULT NULL,
         summary_json JSON DEFAULT NULL,
+        error_code VARCHAR(64) DEFAULT NULL,
         error_message TEXT,
         started_at DATETIME NOT NULL,
         finished_at DATETIME DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_backtest_run_id (run_id),
+        UNIQUE KEY uniq_backtest_active_idempotency (active_idempotency_key),
         KEY idx_backtest_strategy (strategy_id),
         KEY idx_backtest_status (status),
+        KEY idx_backtest_claim (status, cancel_requested, id),
+        KEY idx_backtest_stale (status, worker_heartbeat_at),
+        KEY idx_backtest_idempotency (idempotency_key),
         KEY idx_backtest_date_range (start_date, end_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
@@ -256,6 +275,33 @@ CORE_TABLE_DDL = [
 ]
 
 
+STOCK_BASIC_COLUMN_MIGRATIONS = {
+    "instrument_type": "ALTER TABLE stock_basic ADD COLUMN instrument_type VARCHAR(16) DEFAULT 'other' AFTER name",
+    "market": "ALTER TABLE stock_basic ADD COLUMN market VARCHAR(16) DEFAULT NULL AFTER instrument_type",
+    "industry": "ALTER TABLE stock_basic ADD COLUMN industry VARCHAR(128) DEFAULT NULL AFTER market",
+    "pe_tushare": "ALTER TABLE stock_basic ADD COLUMN pe_tushare DECIMAL(12,4) DEFAULT NULL AFTER industry",
+    "pb_tushare": "ALTER TABLE stock_basic ADD COLUMN pb_tushare DECIMAL(12,4) DEFAULT NULL AFTER pe_tushare",
+    "valuation_updated_at": "ALTER TABLE stock_basic ADD COLUMN valuation_updated_at DATETIME DEFAULT NULL AFTER pb_tushare",
+    "roe": "ALTER TABLE stock_basic ADD COLUMN roe DECIMAL(12,4) DEFAULT NULL AFTER valuation_updated_at",
+    "roa": "ALTER TABLE stock_basic ADD COLUMN roa DECIMAL(12,4) DEFAULT NULL AFTER roe",
+    "grossprofit_margin": "ALTER TABLE stock_basic ADD COLUMN grossprofit_margin DECIMAL(12,4) DEFAULT NULL AFTER roa",
+    "netprofit_margin": "ALTER TABLE stock_basic ADD COLUMN netprofit_margin DECIMAL(12,4) DEFAULT NULL AFTER grossprofit_margin",
+    "revenue_yoy": "ALTER TABLE stock_basic ADD COLUMN revenue_yoy DECIMAL(12,4) DEFAULT NULL AFTER netprofit_margin",
+    "profit_yoy": "ALTER TABLE stock_basic ADD COLUMN profit_yoy DECIMAL(12,4) DEFAULT NULL AFTER revenue_yoy",
+    "eps": "ALTER TABLE stock_basic ADD COLUMN eps DECIMAL(12,4) DEFAULT NULL AFTER profit_yoy",
+    "fundamental_period": "ALTER TABLE stock_basic ADD COLUMN fundamental_period VARCHAR(16) DEFAULT NULL AFTER eps",
+    "fundamental_updated_at": "ALTER TABLE stock_basic ADD COLUMN fundamental_updated_at DATETIME DEFAULT NULL AFTER fundamental_period",
+    "is_st": "ALTER TABLE stock_basic ADD COLUMN is_st TINYINT(1) NOT NULL DEFAULT 0 AFTER fundamental_updated_at",
+    "is_delisted": "ALTER TABLE stock_basic ADD COLUMN is_delisted TINYINT(1) NOT NULL DEFAULT 0 AFTER is_st",
+    "listing_date": "ALTER TABLE stock_basic ADD COLUMN listing_date DATE DEFAULT NULL AFTER is_delisted",
+}
+
+
+STOCK_BASIC_INDEX_MIGRATIONS = {
+    "idx_instrument_type": "ALTER TABLE stock_basic ADD KEY idx_instrument_type (instrument_type)",
+}
+
+
 def _ensure_selection_result_unique_key(cursor) -> None:
     """Keep selection_result persistence scoped by run_id.
 
@@ -290,11 +336,18 @@ def init_mysql_schema() -> None:
         with conn.cursor() as cursor:
             for ddl in CORE_TABLE_DDL:
                 cursor.execute(ddl)
+            cursor.execute("SHOW COLUMNS FROM stock_basic")
+            stock_basic_columns = {str(row[0]) for row in cursor.fetchall()}
+            for column, ddl in STOCK_BASIC_COLUMN_MIGRATIONS.items():
+                if column not in stock_basic_columns:
+                    cursor.execute(ddl)
+            cursor.execute("SHOW INDEX FROM stock_basic")
+            stock_basic_indexes = {str(row[2]) for row in cursor.fetchall()}
+            for index, ddl in STOCK_BASIC_INDEX_MIGRATIONS.items():
+                if index not in stock_basic_indexes:
+                    cursor.execute(ddl)
             _ensure_selection_result_unique_key(cursor)
 
 
 if __name__ == "__main__":
-    info = ping_mysql()
-    print(f"Connected to MySQL: {info}")
-    init_mysql_schema()
-    print("Core schema initialized.")
+    raise SystemExit("Use `python -m app.orchestration.migrate --apply` for schema changes.")

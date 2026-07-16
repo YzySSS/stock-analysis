@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+from app.api.routes import tracking as tracking_route
+from app.tracking.repository import TrackingRepository
+
+
+class RecordingCursor:
+    def __init__(self, executions: list[tuple[str, Any]]) -> None:
+        self.executions = executions
+        self.rowcount = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql: str, params=None) -> None:
+        self.executions.append((" ".join(sql.split()), params))
+
+    @staticmethod
+    def fetchall():
+        return []
+
+    @staticmethod
+    def fetchone():
+        return {"count": 0}
+
+
+class RecordingConnection:
+    def __init__(self, executions: list[tuple[str, Any]]) -> None:
+        self.executions = executions
+
+    def cursor(self):
+        return RecordingCursor(self.executions)
+
+
+class RecordingConnectionFactory:
+    def __init__(self) -> None:
+        self.executions: list[tuple[str, Any]] = []
+
+    @contextmanager
+    def __call__(self, **_kwargs):
+        yield RecordingConnection(self.executions)
+
+
+class FakeTracker:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def build_latest_selection_snapshot(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        if kwargs.get("include_in_stats_only"):
+            return [
+                {
+                    "code": "sh.600000",
+                    "name": "浦发银行",
+                    "strategy_id": "strategy-a",
+                    "strategy_display_name": "策略A",
+                    "selection_date": "2026-07-15",
+                    "include_in_stats": True,
+                    "price_change_pct": 2.0,
+                    "max_gain_pct": 3.0,
+                    "max_drawdown_pct": -1.0,
+                    "review_status": "tracking",
+                }
+            ]
+        return [
+            {
+                "code": "sh.600000",
+                "name": "浦发银行",
+                "strategy_id": "strategy-a",
+                "strategy_display_name": "策略A",
+                "selection_date": "2026-07-15",
+                "include_in_stats": True,
+                "price_change_pct": 2.0,
+                "max_gain_pct": 3.0,
+                "max_drawdown_pct": -1.0,
+                "review_status": "tracking",
+            }
+        ]
+
+    @staticmethod
+    def to_dict_list(records):
+        return records
+
+
+class TrackingRepositoryTests(unittest.TestCase):
+    def test_enrichment_query_scopes_expensive_joins_to_target_page(self):
+        factory = RecordingConnectionFactory()
+        repository = TrackingRepository(connection_factory=factory)
+
+        rows = repository.list_selection_result_rows(
+            limit=10,
+            offset=20,
+            instrument_type="stock",
+            latest_only=False,
+        )
+
+        self.assertEqual(rows, [])
+        self.assertEqual(len(factory.executions), 1)
+        sql, params = factory.executions[0]
+        self.assertIn("WITH target_selection AS", sql)
+        self.assertIn("FROM target_selection target", sql)
+        self.assertIn("LIMIT %s OFFSET %s", sql)
+        self.assertEqual(params[-2:], [10, 20])
+
+    def test_count_latest_scope_uses_one_query_without_recursive_run_lookup(self):
+        factory = RecordingConnectionFactory()
+        repository = TrackingRepository(connection_factory=factory)
+
+        count = repository.count_items(
+            instrument_type="stock",
+            strategy_id="strategy-a",
+            latest_only=True,
+        )
+
+        self.assertEqual(count, 0)
+        self.assertEqual(len(factory.executions), 1)
+        self.assertIn("SELECT MAX(sr2.trade_date)", factory.executions[0][0])
+
+    def test_tracking_payload_pages_first_and_summarizes_only_statistical_rows(self):
+        fake_tracker = FakeTracker()
+        tracking_route._invalidate_tracking_summary_cache()
+        with patch.object(tracking_route, "SelectionResultTracker", return_value=fake_tracker), patch.object(
+            tracking_route,
+            "_count_tracking_items",
+            return_value=176,
+        ):
+            first = tracking_route._tracking_payload(
+                limit=10,
+                offset=20,
+                include_runs=False,
+            )
+            second = tracking_route._tracking_payload(
+                limit=10,
+                offset=20,
+                include_runs=False,
+            )
+
+        self.assertEqual(first["pagination"]["total"], 176)
+        self.assertEqual(first["filtered_summary"]["total_count"], 176)
+        self.assertEqual(first["filtered_summary"]["excluded_count"], 175)
+        self.assertEqual(fake_tracker.calls[0]["limit"], 10)
+        self.assertEqual(fake_tracker.calls[0]["offset"], 20)
+        self.assertFalse(fake_tracker.calls[0].get("include_in_stats_only", False))
+        self.assertEqual(fake_tracker.calls[1]["limit"], 176)
+        self.assertTrue(fake_tracker.calls[1]["include_in_stats_only"])
+        self.assertEqual(fake_tracker.calls[2]["limit"], 10)
+        self.assertEqual(len(fake_tracker.calls), 3)
+        self.assertEqual(second["filtered_summary"], first["filtered_summary"])
+
+    def test_route_and_tracker_have_no_direct_sql_connection(self):
+        for path in [
+            Path("app/api/routes/tracking.py"),
+            Path("app/error_learning/tracker.py"),
+        ]:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn("mysql_conn", source)
+            self.assertNotIn("SELECT ", source)
+
+
+if __name__ == "__main__":
+    unittest.main()
