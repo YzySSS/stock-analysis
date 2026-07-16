@@ -13,8 +13,8 @@ from pymysql.err import IntegrityError
 
 from app.jobs.errors import record_job_error
 from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
-from app.shared.db import mysql_conn
 from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, require_supported_instrument
+from app.stock_selection.repository import SelectionRepository
 from app.strategies.service import StrategyService
 
 
@@ -75,10 +75,15 @@ class SelectionRunService:
     STALE_RUNNING_SECONDS = 15 * 60
     DEFAULT_MAX_ATTEMPTS = 2
 
-    def __init__(self, job_states: MySQLJobStateRepository | None = None) -> None:
+    def __init__(
+        self,
+        job_states: MySQLJobStateRepository | None = None,
+        repository: SelectionRepository | None = None,
+    ) -> None:
         self.job_states = job_states or MySQLJobStateRepository(
             MySQLJobTable(table="selection_run")
         )
+        self.repository = repository or SelectionRepository()
 
     def submit(self, request: Dict[str, Any]) -> Dict[str, Any]:
         instrument_type = require_supported_instrument(
@@ -114,37 +119,19 @@ class SelectionRunService:
         run_id = f"selection_task_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         estimate = self._estimate_seconds(strategy_id=strategy_id, instrument_type=instrument_type)
         try:
-            with mysql_conn(dict_cursor=False) as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        INSERT INTO selection_run (
-                            run_id, strategy_id, instrument_type, market_board, max_picks, score_threshold,
-                            save_requested, status, idempotency_key, active_idempotency_key, idempotency_date,
-                            cancel_requested, attempt_count, max_attempts,
-                            phase, progress_pct, estimated_seconds_left, request_json
-                        ) VALUES (
-                            %s, %s, %s, %s, %s, %s,
-                            0, 'queued', %s, %s, %s,
-                            0, 0, %s,
-                            '任务已提交', 0, %s, %s
-                        )
-                        """,
-                        (
-                            run_id,
-                            strategy_id,
-                            instrument_type,
-                            request_payload.get("market_board"),
-                            effective_limit,
-                            request_payload.get("score_threshold"),
-                            idempotency_key,
-                            idempotency_key,
-                            idempotency_date,
-                            self.DEFAULT_MAX_ATTEMPTS,
-                            estimate,
-                            _to_json(request_payload),
-                        ),
-                    )
+            self.repository.create_run(
+                run_id=run_id,
+                strategy_id=strategy_id,
+                instrument_type=instrument_type,
+                market_board=request_payload.get("market_board"),
+                max_picks=effective_limit,
+                score_threshold=request_payload.get("score_threshold"),
+                idempotency_key=idempotency_key,
+                idempotency_date=idempotency_date,
+                max_attempts=self.DEFAULT_MAX_ATTEMPTS,
+                estimated_seconds_left=estimate,
+                request_json=_to_json(request_payload),
+            )
         except IntegrityError as exc:
             if exc.args and int(exc.args[0]) == 1062:
                 existing = self._get_active_by_idempotency(idempotency_key)
@@ -156,27 +143,13 @@ class SelectionRunService:
         return self.get_run(run_id, include_result=False)
 
     def get_run(self, run_id: str, include_result: bool = True) -> Dict[str, Any]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM selection_run WHERE run_id=%s", (run_id,))
-                row = cursor.fetchone()
+        row = self.repository.get_run(run_id)
         if not row:
             raise ValueError("selection run not found")
         return self._normalize_row(row, include_result=include_result)
 
     def list_runs(self, limit: int = 20) -> list[Dict[str, Any]]:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM selection_run
-                    ORDER BY id DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
-                rows = cursor.fetchall() or []
+        rows = self.repository.list_runs(limit)
         return [self._normalize_row(row, include_result=False) for row in rows]
 
     def claim_next_queued_run(self, worker_id: str) -> str | None:
@@ -247,11 +220,7 @@ class SelectionRunService:
             self._finish_failed(run_id, worker_id, error_code, str(exc))
 
     def _latest_data_trade_date(self) -> date:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT MAX(trade_date) AS trade_date FROM daily_kline")
-                row = cursor.fetchone() or {}
-        value = row.get("trade_date")
+        value = self.repository.latest_data_trade_date()
         if isinstance(value, datetime):
             return value.date()
         if isinstance(value, date):
@@ -272,44 +241,16 @@ class SelectionRunService:
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def _get_active_by_idempotency(self, idempotency_key: str) -> Dict[str, Any] | None:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT *
-                    FROM selection_run
-                    WHERE active_idempotency_key=%s
-                      AND status IN ('queued', 'running')
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (idempotency_key,),
-                )
-                return cursor.fetchone()
+        return self.repository.get_active_run_by_idempotency(idempotency_key)
 
     def _estimate_seconds(self, strategy_id: str, instrument_type: str) -> int:
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT AVG(TIMESTAMPDIFF(SECOND, started_at, finished_at)) AS avg_seconds
-                    FROM (
-                        SELECT started_at, finished_at
-                        FROM selection_run
-                        WHERE status='success'
-                          AND strategy_id=%s
-                          AND instrument_type=%s
-                          AND started_at IS NOT NULL
-                          AND finished_at IS NOT NULL
-                          AND TIMESTAMPDIFF(SECOND, started_at, finished_at) BETWEEN 2 AND %s
-                        ORDER BY id DESC
-                        LIMIT 12
-                    ) recent_runs
-                    """,
-                    (strategy_id, instrument_type, self.MAX_ESTIMATE_SECONDS),
-                )
-                row = cursor.fetchone() or {}
-        avg_seconds = _to_float(row.get("avg_seconds"))
+        avg_seconds = _to_float(
+            self.repository.average_recent_runtime(
+                strategy_id=strategy_id,
+                instrument_type=instrument_type,
+                max_seconds=self.MAX_ESTIMATE_SECONDS,
+            )
+        )
         if avg_seconds:
             return int(max(8, min(self.MAX_ESTIMATE_SECONDS, avg_seconds * 1.25)))
         return self.DEFAULT_ESTIMATE_SECONDS if strategy_id == "a_share_sentiment" else self.FAST_ESTIMATE_SECONDS
@@ -329,49 +270,26 @@ class SelectionRunService:
                 cancel_seen.set()
 
     def _mark_execution_stage(self, run_id: str, worker_id: str) -> None:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE selection_run
-                    SET phase='策略计算中', progress_pct=10, worker_heartbeat_at=NOW()
-                    WHERE run_id=%s AND status='running' AND worker_id=%s
-                    """,
-                    (run_id, worker_id),
-                )
+        self.repository.mark_execution_stage(run_id, worker_id)
 
     def _finish_success(self, run_id: str, worker_id: str, result: Dict[str, Any]) -> None:
         result_count = int(result.get("count") or len(result.get("results") or []))
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE selection_run
-                    SET status='success', phase='运行完成', progress_pct=100, estimated_seconds_left=0,
-                        result_count=%s, result_json=%s, error_code=NULL, error_message=NULL,
-                        finished_at=NOW(), worker_heartbeat_at=NOW(), active_idempotency_key=NULL
-                    WHERE run_id=%s AND status='running' AND worker_id=%s AND cancel_requested=0
-                    """,
-                    (result_count, _to_json(result), run_id, worker_id),
-                )
-                if cursor.rowcount != 1:
-                    logger.warning("selection success ignored after ownership/status change run_id=%s", run_id)
+        updated = self.repository.finish_success(
+            run_id=run_id,
+            worker_id=worker_id,
+            result_count=result_count,
+            result_json=_to_json(result),
+        )
+        if not updated:
+            logger.warning("selection success ignored after ownership/status change run_id=%s", run_id)
 
     def _finish_failed(self, run_id: str, worker_id: str, error_code: str, error_message: str) -> None:
-        updated = 0
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE selection_run
-                    SET status='failed', phase='运行失败', estimated_seconds_left=0,
-                        error_code=%s, error_message=%s, finished_at=NOW(),
-                        worker_heartbeat_at=NOW(), active_idempotency_key=NULL
-                    WHERE run_id=%s AND status='running' AND worker_id=%s
-                    """,
-                    (error_code, error_message[:2000], run_id, worker_id),
-                )
-                updated = cursor.rowcount
+        updated = self.repository.finish_failed(
+            run_id=run_id,
+            worker_id=worker_id,
+            error_code=error_code,
+            error_message=error_message,
+        )
         if updated:
             record_job_error("selection", "selection", error_code, error_message)
 

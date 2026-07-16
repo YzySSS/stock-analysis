@@ -83,10 +83,10 @@ class CapabilityPreflightTests(unittest.TestCase):
 
         service = object.__new__(SelectionRunService)
         service._estimate_seconds = lambda **_kwargs: self.fail("拒绝后不应估算任务时长")
+        service.repository = object()
         with patch("app.stock_selection.run_tasks.StrategyService", return_value=RejectingStrategyService()):
-            with patch("app.stock_selection.run_tasks.mysql_conn", side_effect=AssertionError("拒绝后不应写数据库")):
-                with self.assertRaisesRegex(ValueError, "prototype"):
-                    service.submit({"strategy_id": "quality_lowvol", "instrument_type": "stock", "limit": 3})
+            with self.assertRaisesRegex(ValueError, "prototype"):
+                service.submit({"strategy_id": "quality_lowvol", "instrument_type": "stock", "limit": 3})
 
     def test_backtest_uses_registry_capability_preflight(self):
         class RejectingStrategyService:

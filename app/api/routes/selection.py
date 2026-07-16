@@ -6,16 +6,17 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.routes.tracking import _invalidate_tracking_summary_cache
-from app.shared.db import mysql_conn
 from app.shared.instrument_policy import (
     SUPPORTED_SELECTION_INSTRUMENT_TYPES,
     UnsupportedInstrumentError,
     require_supported_instrument,
 )
+from app.stock_selection.repository import SelectionRepository
 from app.stock_selection.run_tasks import SelectionRunService
 from app.strategies.service import StrategyService
 
 router = APIRouter(tags=["selection"])
+selection_repository = SelectionRepository()
 
 
 class SelectionRunRequest(BaseModel):
@@ -113,59 +114,15 @@ def save_selection_item(payload: SelectionSaveItemRequest) -> dict:
 
 
 def _sample_size(instrument_type: str) -> int:
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) AS count FROM stock_basic WHERE instrument_type = %s", (instrument_type,))
-            row = cursor.fetchone() or {}
-            return int(row.get("count") or 0)
+    return selection_repository.count_instruments(instrument_type)
 
 
 def _latest_run_meta(instrument_type: str, run_id: Optional[str] = None, strategy_id: Optional[str] = None) -> dict:
-    sql = """
-    SELECT
-        sr.run_id,
-        sr.trade_date,
-        sr.strategy_id,
-        MAX(sr.created_at) AS created_at
-    FROM selection_result sr
-    INNER JOIN stock_basic sb ON sr.code = sb.code
-    WHERE sb.instrument_type = %s
-    """
-    params = [instrument_type]
-    if run_id:
-        sql += " AND sr.run_id = %s"
-        params.append(run_id)
-    elif strategy_id:
-        sql += """
-        AND sr.run_id = (
-            SELECT sr2.run_id
-            FROM selection_result sr2
-            INNER JOIN stock_basic sb2 ON sr2.code = sb2.code
-            WHERE sb2.instrument_type = %s
-              AND sr2.strategy_id = %s
-            ORDER BY sr2.created_at DESC, sr2.id DESC
-            LIMIT 1
-        )
-        """
-        params.extend([instrument_type, strategy_id])
-    else:
-        sql += """
-        AND sr.run_id = (
-            SELECT sr2.run_id
-            FROM selection_result sr2
-            INNER JOIN stock_basic sb2 ON sr2.code = sb2.code
-            WHERE sb2.instrument_type = %s
-            ORDER BY sr2.created_at DESC, sr2.id DESC
-            LIMIT 1
-        )
-        """
-        params.append(instrument_type)
-    sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY created_at DESC LIMIT 1"
-
-    with mysql_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(sql, params)
-            return cursor.fetchone() or {}
+    return selection_repository.latest_result_run_meta(
+        instrument_type,
+        run_id=run_id,
+        strategy_id=strategy_id,
+    )
 
 
 @router.get("/selection/results")

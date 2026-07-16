@@ -287,16 +287,17 @@ class JobRepository:
 - 舆情最近 5 个交易日保留盘中快照，更早日期只保留每日 EOD，最长 90 个交易日；只有保留集全部完成 V2 归一化才允许裁剪。
 - task/error retention 与 logrotate 已在 C3 提前完成；系统页现在能说明三类高增长数据的用途、保留期和任务状态。
 
-### E：模块边界与可复现部署（E1-E4 已完成）
+### E：模块边界与可复现部署（E1-E5 已完成）
 
 - 唯一 migration 入口和普通请求/Service/同步器运行时 DDL 清理已完成；16 个版本现库 ready，systemd/cron 均有启动前 check。
 - 空库 smoke 已提供生产库拒绝护栏和双执行幂等校验；因当前远端应用账号不能 provision 独立数据库，真实空库实跑等待测试库。
 - `PortfolioRepository` 已完成：Service 不再直连 MySQL，列表市场上下文改为固定 6 条批量查询，完整列表固定 9 条 SQL，新旧响应影子对比零差异。
 - `TrackingRepository` 已完成：route/Tracker 不再直连 MySQL，分页先圈定 ID 再计算本页极值，全局汇总只读取纳入统计样本；冷/缓存分页约从 7.77s/5.49s 降到 0.313s/0.049s。
 - `DashboardRepository` 已完成：route 不再含 SQL，市场概览/热点/情绪榜统一走 read repository；逐候选日线 N+1 批量化后 Dashboard SQL 约从 76 降到固定 17，完整响应影子对比零差异。
+- `SelectionRepository` 已完成：route、`StockSelector`、`SelectionRunService` 不再直连 MySQL，候选/舆情/结果/run SQL 统一收口；结果、任务和固定时点候选三组影子响应零差异。
 - readiness 数据新鲜度已按业务口径校准：历史输入层只与达到股票池 95% 覆盖的完整日线日期比较；ETF/零星盘中日线只记为 partial available，不再触发股票因子落后误报。
 - factor input 改为 18:30 收盘后补跑、03:20 兜底；Tushare `daily_basic` 每交易日只抓一次，低于 80% 覆盖的日期不写入并以 `partial_success` 暴露上游未就绪。
-- 下一步完成 Selection/Backtest Repository 边界。
+- 下一步完成 BacktestRepository 边界。
 - 清理脚本与 `app` 的反向依赖、旧入口和失联原型。
 - 真实空库 migration smoke 等待数据库侧提供独立测试库；禁止借生产库模拟。
 

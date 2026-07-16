@@ -1,6 +1,6 @@
 # 股票分析系统架构审计与整改计划（2026-07-15）
 
-> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层、舆情关系化新写入和生命周期调度已部署，历史舆情归一化/裁剪由收盘后后台任务执行；批次 E1 的唯一版本化 migration 入口以及 E2-E4 的 Portfolio/Tracking/Dashboard Repository 垂直切片均已部署。证书按当前决策暂缓。
+> 状态：总体方向已确认；批次 A/B/C 均已部署验证；批次 D 的分钟行情分层、舆情关系化新写入和生命周期调度已部署，历史舆情归一化/裁剪由收盘后后台任务执行；批次 E1 的唯一版本化 migration 入口以及 E2-E5 的 Portfolio/Tracking/Dashboard/Selection Repository 垂直切片均已部署。证书按当前决策暂缓。
 >
 > 本文保留 `docs/IMPROVEMENT_PLAN.md` 中“个人纪律型投研工作台、模块化单体、异步任务驱动、不做自动交易、不急拆微服务”的产品与架构定位，只更新当前整改优先级。
 >
@@ -441,7 +441,7 @@ validation_status: unvalidated
 1. `PortfolioRepository`：先解决列表 N+1 和 Service 过大。（E2 已完成）
 2. `TrackingRepository`：避免分页同时重新加载全量结果。（E3 已完成）
 3. `DashboardRepository`：统一市场快照查询和缓存。（E4 已完成）
-4. `SelectionRepository` / `BacktestRepository`：复用任务与结果查询。
+4. `SelectionRepository` / `BacktestRepository`：复用任务与结果查询。（SelectionRepository 已完成，BacktestRepository 待继续）
 
 原则：
 
@@ -883,3 +883,11 @@ backtest 也补齐到共享任务契约：
 15:10 收盘回填随后写入 5,522 条 2026-07-16 股票日线，此时因子层落后一天变成真实状态；现场只读验证 Tushare 当日 `daily_basic` 尚为 0 行，不能强写空因子。为闭合依赖，factor input 新增交易日 18:30 补跑，03:20 保留兜底；任务先按日期预取并要求至少 80% 源覆盖，未发布日期跳过并记 `partial_success`。同一任务的 Tushare 调用由“5 日 × 12 批≈60 次”降为“每日期一次≈5 次”。
 
 验证结果：全量回归 97 项通过；上线后 Dashboard compact 冷请求约 0.54 秒、缓存约 0.003 秒、完整响应约 0.43 秒。API 与三个 worker active、`NRestarts=0`、migration 16/16，三类队列均为 0；当前 readiness=`degraded` 但 `accepting_jobs=true`，唯一原因是当日上游待发布，18:30 将自动补跑。系统状态、readiness、health 和公网 health 均 200。下一垂直切片进入 `SelectionRepository / BacktestRepository`。
+
+### 2026-07-16：E5 SelectionRepository 已部署
+
+新增 `app/stock_selection/repository.py`，把选股结果元数据、候选池、舆情上下文、结果保存以及 selection run 的创建/查询/阶段完成 SQL，从 route、`StockSelector` 和 `SelectionRunService` 收口到 Repository。三者均不再导入 `mysql_conn`、不再直接执行 SQL；选股规则、候选映射、评分解释、任务状态机和用户按条保存语义仍留在原业务层。
+
+为避免边界移动顺手改口径，部署前冻结三组基线：selection results、selection runs，以及 `lowvol_reversal + 2026-07-16 15:05 + limit=10` 的候选包。新磁盘代码与旧线上进程在真实 ASGI 序列化下逐字段一致，三组最终 SHA-256 均相同；候选代码顺序和全部诊断字段未变化。Repository 对动态日期运算符和市场板块只接受白名单，并新增候选 SQL、保存去重事务及“业务层不得直连 MySQL”的回归。
+
+验证结果：全量回归增至 102 项，编译、migration 16/16、diff 检查通过；上线窗口三类队列为 0，可用内存约 2.2 GiB。selection worker 与 API 串行重启后均 active、`NRestarts=0`，本地 health/readiness/results/runs 均 200，selection worker healthy/idle、队列 0；公网 health 200、未认证 selection 401。readiness 仍为 `degraded + accepting_jobs=true`，唯一原因仍是当日 factor input 等待 18:30 上游补跑。下一垂直切片进入 `BacktestRepository`。

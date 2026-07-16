@@ -6,9 +6,9 @@ from datetime import datetime, time
 from typing import Any, Dict, List, Optional
 
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
-from app.shared.db import mysql_conn
 from app.shared.sentiment_scoring import enrich_opinion_news_item
 from app.shared.strategy_loader import StrategyLoader
+from app.stock_selection.repository import SelectionRepository
 from app.stock_selection.trade_plan import build_selection_trade_plan
 
 
@@ -47,8 +47,14 @@ class StockSelector:
         "bse": "北交所",
     }
 
-    def __init__(self, strategy_id: Optional[str] = None, strategy_overrides: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        strategy_id: Optional[str] = None,
+        strategy_overrides: Optional[Dict[str, Any]] = None,
+        repository: SelectionRepository | None = None,
+    ):
         self.loader = StrategyLoader()
+        self.repository = repository or SelectionRepository()
         self.strategy_id = strategy_id or self.loader.get_default_strategy_id()
         self.strategy_meta = self.loader.get_strategy_meta(self.strategy_id)
         self.strategy = self.loader.load_strategy(self.strategy_id)
@@ -117,15 +123,7 @@ class StockSelector:
     def market_board_filter_sql(cls, value: Optional[str]) -> tuple[str, str, str]:
         board = cls.normalize_market_board(value)
         label = cls.MARKET_BOARD_LABELS[board]
-        if board == "star":
-            return " AND sb.code LIKE 'sh.688%%' ", board, label
-        if board == "chinext":
-            return " AND sb.code LIKE 'sz.300%%' ", board, label
-        if board == "bse":
-            return " AND sb.code LIKE 'bj.%%' ", board, label
-        if board == "main":
-            return " AND ((sb.code LIKE 'sh.6%%' AND sb.code NOT LIKE 'sh.688%%') OR sb.code REGEXP '^sz\\.(000|001|002)') ", board, label
-        return "", board, label
+        return SelectionRepository.market_board_filter_sql(board), board, label
 
     @staticmethod
     def _normalize_0_100(value: float, low: float, high: float) -> float:
@@ -754,49 +752,14 @@ class StockSelector:
             (str(item.get("trade_date")) for item in candidates if item.get("trade_date")),
             default=None,
         )
-        if requested_as_of_dt:
-            as_of_text = requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S")
-            sql = """
-            SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
-                   news_count, source_count, stock_count, positive_news_count, negative_news_count,
-                   top_stocks_json, top_news_json, source_json
-            FROM sector_opinion_daily
-            WHERE as_of_datetime = (
-                SELECT MAX(as_of_datetime)
-                FROM sector_opinion_daily
-                WHERE as_of_datetime <= %s
-            )
-            ORDER BY sector_score DESC
-            LIMIT 30
-            """
-            params = (as_of_text,)
-        else:
-            sql = """
-            SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
-                   news_count, source_count, stock_count, positive_news_count, negative_news_count,
-                   top_stocks_json, top_news_json, source_json
-            FROM sector_opinion_daily
-            WHERE as_of_datetime = (
-                SELECT MAX(as_of_datetime)
-                FROM sector_opinion_daily
-                WHERE (%s IS NULL OR trade_date >= %s)
-            )
-            ORDER BY sector_score DESC
-            LIMIT 30
-            """
-            params = (latest_candidate_trade_date, latest_candidate_trade_date)
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, params)
-                sectors = cursor.fetchall() or []
-                cursor.execute(
-                    """
-                    SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
-                    FROM market_sector_fund_flow_snapshot
-                    WHERE quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
-                    """
-                )
-                fund_rows = cursor.fetchall() or []
+        sectors, fund_rows = self.repository.load_market_opinion_rows(
+            requested_as_of=(
+                requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S")
+                if requested_as_of_dt
+                else None
+            ),
+            latest_candidate_trade_date=latest_candidate_trade_date,
+        )
         hydrate_sector_opinion_rows(sectors)
 
         diagnostics.update({
@@ -977,179 +940,26 @@ class StockSelector:
         use_realtime = requested_as_of_dt is None and clock_mode == "intraday"
         use_current_popularity = requested_as_of_dt is None
         candidate_as_of_diagnostics: Dict[str, Any] = {}
-        daily_kline_latest_filter = ""
-        daily_kline_recent_filter = ""
-        daily_kline_window_filter = ""
-        cutoff_params: List[str] = []
+        daily_kline_operator: str | None = None
+        cutoff_date: str | None = None
         if requested_as_of_dt:
-            operator = "<=" if requested_as_of_dt.time() >= time(15, 5) else "<"
+            daily_kline_operator = "<=" if requested_as_of_dt.time() >= time(15, 5) else "<"
             cutoff_date = requested_as_of_dt.strftime("%Y-%m-%d")
-            daily_kline_latest_filter = f"WHERE trade_date {operator} %s"
-            daily_kline_recent_filter = f"WHERE trade_date {operator} %s"
-            daily_kline_window_filter = f"AND trade_date {operator} %s"
-            cutoff_params = [cutoff_date, cutoff_date, cutoff_date]
             candidate_as_of_diagnostics = {
                 "requested_as_of": requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "daily_kline_date_operator": operator,
+                "daily_kline_date_operator": daily_kline_operator,
                 "daily_kline_cutoff_date": cutoff_date,
             }
-        market_board_sql, normalized_market_board, market_board_label = self.market_board_filter_sql(market_board)
-        sql = """
-        SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            sb.is_st,
-            sb.pe_tushare,
-            sb.pb_tushare,
-            sb.roe,
-            sb.roa,
-            sb.grossprofit_margin,
-            sb.netprofit_margin,
-            sb.revenue_yoy,
-            sb.profit_yoy,
-            sb.eps,
-            dk.open,
-            dk.high,
-            dk.low,
-            dk.close,
-            dk.amount,
-            dk.trade_date,
-            COALESCE(lf.ma20, ma.ma20) AS ma20,
-            lf.ma60,
-            lf.close_5d,
-            COALESCE(lf.close_20d, ma.close_20d) AS close_20d,
-            lf.prev_close_1d,
-            COALESCE(lf.max_close_20, ma.max_close_20) AS max_close_20,
-            COALESCE(lf.min_close_20, ma.min_close_20) AS min_close_20,
-            COALESCE(lf.avg_amount_20, ma.avg_amount_20) AS avg_amount_20,
-            COALESCE(lf.kline_count_20, ma.kline_count_20) AS kline_count_20,
-            lf.kline_count_60,
-            lf.std_return_20,
-            lf.pct_chg_1d,
-            fid.turnover_rate,
-            lf.turnover_rate_5d_avg,
-            DATEDIFF(dk.trade_date, sb.listing_date) AS listed_days,
-            fid.volume_ratio,
-            fid.total_mv,
-            fid.completeness_score,
-            mf.net_mf_amount,
-            mf.net_mf_vol,
-            mf.buy_lg_amount,
-            mf.sell_lg_amount,
-            mf.buy_elg_amount,
-            mf.sell_elg_amount,
-            realtime.latest_price AS realtime_price,
-            realtime.pct_chg AS realtime_pct_chg,
-            realtime.pre_close AS realtime_pre_close,
-            realtime.open_price AS realtime_open,
-            realtime.high_price AS realtime_high,
-            realtime.low_price AS realtime_low,
-            realtime.amount AS realtime_amount,
-            realtime.quote_time AS realtime_quote_time,
-            realtime.trade_date AS realtime_trade_date,
-            realtime_mf.inflow_amount AS realtime_mf_inflow,
-            realtime_mf.outflow_amount AS realtime_mf_outflow,
-            realtime_mf.net_amount AS realtime_mf_net,
-            realtime_mf.amount AS realtime_mf_amount,
-            realtime_mf.turnover_rate AS realtime_mf_turnover_rate,
-            realtime_mf.quote_time AS realtime_mf_quote_time,
-            realtime_mf.trade_date AS realtime_mf_trade_date,
-            pop.source AS popularity_source,
-            pop.source_rank AS popularity_rank,
-            pop.source_score AS popularity_source_score,
-            pop.popularity_score,
-            pop.quote_time AS popularity_quote_time,
-            chip.his_low AS chip_his_low,
-            chip.his_high AS chip_his_high,
-            chip.cost_5pct AS chip_cost_5pct,
-            chip.cost_15pct AS chip_cost_15pct,
-            chip.cost_50pct AS chip_cost_50pct,
-            chip.cost_85pct AS chip_cost_85pct,
-            chip.cost_95pct AS chip_cost_95pct,
-            chip.weight_avg AS chip_weight_avg,
-            chip.winner_rate AS chip_winner_rate,
-            ssd.sentiment_score,
-            ssd.news_count,
-            mcd.market_strength,
-            mcd.market_state
-        FROM stock_basic sb
-        LEFT JOIN (
-            SELECT d1.code, d1.trade_date, d1.open, d1.high, d1.low, d1.close, d1.amount
-            FROM daily_kline d1
-            INNER JOIN (
-                SELECT code, MAX(trade_date) AS max_date
-                FROM daily_kline
-                {daily_kline_latest_filter}
-                GROUP BY code
-            ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
-        ) dk ON sb.code = dk.code
-        LEFT JOIN (
-            SELECT
-                code,
-                AVG(close) AS ma20,
-                MAX(CASE WHEN rn = 20 THEN close END) AS close_20d,
-                MAX(close) AS max_close_20,
-                MIN(close) AS min_close_20,
-                AVG(amount) AS avg_amount_20,
-                COUNT(*) AS kline_count_20
-            FROM (
-                SELECT
-                    code,
-                    trade_date,
-                    close,
-                    amount,
-                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
-                FROM daily_kline
-                WHERE trade_date >= (
-                    SELECT MIN(trade_date)
-                    FROM (
-                        SELECT DISTINCT trade_date
-                        FROM daily_kline
-                        {daily_kline_recent_filter}
-                        ORDER BY trade_date DESC
-                        LIMIT 30
-                    ) recent_trade_dates
-                )
-                {daily_kline_window_filter}
-            ) ranked
-            WHERE rn <= 20
-            GROUP BY code
-        ) ma ON sb.code = ma.code
-        LEFT JOIN lowvol_reversal_feature_daily lf ON lf.code = sb.code AND lf.trade_date = dk.trade_date
-        LEFT JOIN factor_input_daily fid ON fid.code = sb.code AND fid.trade_date = dk.trade_date
-        LEFT JOIN stock_moneyflow_daily mf ON mf.code = sb.code AND mf.trade_date = dk.trade_date
-        LEFT JOIN stock_realtime_snapshot realtime ON %s = 1 AND realtime.code = sb.code
-        LEFT JOIN stock_realtime_moneyflow_snapshot realtime_mf ON %s = 1 AND realtime_mf.code = sb.code
-        LEFT JOIN stock_popularity_snapshot pop ON %s = 1 AND pop.code = sb.code
-        LEFT JOIN stock_chip_daily chip ON chip.code = sb.code AND chip.trade_date = dk.trade_date
-        LEFT JOIN stock_sentiment_daily ssd ON sb.code = ssd.code
-          AND ssd.trade_date = (
-              SELECT MAX(s2.trade_date)
-              FROM stock_sentiment_daily s2
-              WHERE s2.code = sb.code
-                AND (dk.trade_date IS NULL OR s2.trade_date <= dk.trade_date)
-          )
-        LEFT JOIN market_context_daily mcd ON dk.trade_date = mcd.trade_date AND mcd.index_code = '000300.SH'
-        WHERE sb.is_delisted = 0
-          AND sb.instrument_type = %s
-          {market_board_filter}
-        ORDER BY (dk.trade_date IS NULL), dk.trade_date DESC, sb.code
-        """.format(
-            daily_kline_latest_filter=daily_kline_latest_filter,
-            daily_kline_recent_filter=daily_kline_recent_filter,
-            daily_kline_window_filter=daily_kline_window_filter,
-            market_board_filter=market_board_sql,
+        _, normalized_market_board, market_board_label = self.market_board_filter_sql(market_board)
+        rows = self.repository.load_candidate_rows(
+            daily_kline_operator=daily_kline_operator,
+            cutoff_date=cutoff_date,
+            use_realtime=use_realtime,
+            use_current_popularity=use_current_popularity,
+            instrument_type=instrument_type,
+            market_board=normalized_market_board,
+            candidate_limit=candidate_limit,
         )
-        params = cutoff_params + [1 if use_realtime else 0, 1 if use_realtime else 0, 1 if use_current_popularity else 0, instrument_type]
-        if candidate_limit:
-            sql += " LIMIT %s"
-            params.append(int(candidate_limit))
-        with mysql_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, params)
-                rows = cursor.fetchall()
 
         candidates = [self._build_candidate(row) for row in rows]
         opinion_diagnostics = self._attach_market_opinion_context(candidates)
@@ -1545,16 +1355,6 @@ class StockSelector:
             if snapshot.get("selected_price_trade_date") or item.get("trade_date")
         ]
         final_trade_date = trade_date or (result_trade_dates[0] if result_trade_dates else datetime.now().strftime("%Y-%m-%d"))
-        sql = """
-        INSERT INTO selection_result (
-            run_id, trade_date, strategy_id, code, score, rank_no, metadata_json
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            run_id = VALUES(run_id),
-            score = VALUES(score),
-            rank_no = VALUES(rank_no),
-            metadata_json = VALUES(metadata_json)
-        """
 
         payload = []
         for index, (item, price_snapshot) in enumerate(zip(results, price_snapshots), start=1):
@@ -1591,34 +1391,7 @@ class StockSelector:
                 )
             )
 
-        dedupe_sql = """
-        DELETE newer
-        FROM selection_result newer
-        INNER JOIN selection_result older
-          ON newer.run_id = older.run_id
-         AND newer.code = older.code
-         AND newer.id > older.id
-        WHERE newer.run_id = %s
-        """
-        tracking_dedupe_sql = """
-        DELETE older
-        FROM selection_result older
-        INNER JOIN selection_result newer
-          ON older.trade_date = newer.trade_date
-         AND older.strategy_id = newer.strategy_id
-         AND older.code = newer.code
-         AND older.id < newer.id
-        WHERE newer.trade_date = %s
-          AND newer.strategy_id = %s
-          AND newer.code = %s
-        """
-
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.executemany(sql, payload)
-                cursor.execute(dedupe_sql, (final_run_id,))
-                for _, trade_date_value, strategy_id_value, code_value, *_ in payload:
-                    cursor.execute(tracking_dedupe_sql, (trade_date_value, strategy_id_value, code_value))
+        self.repository.save_result_rows(payload=payload, run_id=final_run_id)
 
         return final_run_id
 
