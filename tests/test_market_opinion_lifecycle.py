@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import unittest
+from contextlib import contextmanager
 from datetime import date, datetime
+from unittest.mock import patch
 
 from app.data_ingestion.market_opinion_lifecycle import (
     MarketOpinionLifecyclePolicy,
+    normalize_retained_snapshots,
     retention_snapshot_ids,
 )
 from app.data_ingestion.market_opinion_repository import normalized_payload_values
@@ -41,6 +44,53 @@ class MarketOpinionRetentionTests(unittest.TestCase):
 
 
 class MarketOpinionNormalizationTests(unittest.TestCase):
+    def test_mixed_batch_updates_only_rows_still_requiring_normalization(self):
+        class FakeCursor:
+            def __init__(self):
+                self.executed = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql, params=None):
+                self.executed.append((sql, params))
+
+            def fetchall(self):
+                return [(2, None, None, None, 1)]
+
+        class FakeConnection:
+            def __init__(self, cursor):
+                self._cursor = cursor
+
+            def cursor(self):
+                return self._cursor
+
+        cursor = FakeCursor()
+
+        @contextmanager
+        def fake_mysql_conn(*_args, **_kwargs):
+            yield FakeConnection(cursor)
+
+        with (
+            patch("app.data_ingestion.market_opinion_lifecycle.mysql_conn", fake_mysql_conn),
+            patch("app.data_ingestion.market_opinion_lifecycle.delete_snapshot_payloads"),
+            patch("app.data_ingestion.market_opinion_lifecycle.insert_normalized_payload_values"),
+            patch(
+                "app.data_ingestion.market_opinion_lifecycle.normalized_payload_values",
+                return_value=([], [], []),
+            ),
+        ):
+            result = normalize_retained_snapshots([1, 2], batch_size=2)
+
+        update_sql, update_params = cursor.executed[-1]
+        self.assertIn("UPDATE sector_opinion_daily", update_sql)
+        self.assertEqual(update_sql.count("%s"), 1)
+        self.assertEqual(update_params, [2])
+        self.assertEqual(result["snapshots"], 1)
+
     def test_news_payloads_are_replaced_by_raw_references(self):
         news = {
             "raw_id": 88,

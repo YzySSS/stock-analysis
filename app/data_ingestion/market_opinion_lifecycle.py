@@ -139,6 +139,7 @@ def normalize_retained_snapshots(
                 if not rows:
                     continue
                 normalized_ids = [int(row[0]) for row in rows]
+                normalized_placeholders = ",".join(["%s"] * len(normalized_ids))
                 delete_snapshot_payloads(cursor, normalized_ids)
                 stock_values: list[tuple[Any, ...]] = []
                 news_values: list[tuple[Any, ...]] = []
@@ -160,7 +161,7 @@ def normalize_retained_snapshots(
                     UPDATE sector_opinion_daily
                     SET top_stocks_json=NULL, top_news_json=NULL, source_json=NULL,
                         payload_version=2, payload_migrated_at=NOW()
-                    WHERE id IN ({placeholders})
+                    WHERE id IN ({normalized_placeholders})
                     """,
                     normalized_ids,
                 )
