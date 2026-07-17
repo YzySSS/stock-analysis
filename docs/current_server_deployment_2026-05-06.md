@@ -361,6 +361,16 @@ PYTHONPATH=. .venv/bin/python -m app.orchestration.migrate --check
 - 全量 170 项 unittest、Python 编译、前端 JavaScript、migration 与 diff 检查通过。API 与三个 worker 均 active、`NRestarts=0`，readiness `ready / accepting_jobs=true`，migration `20/20`，三类队列为 0。
 - 本地 health、验证 API、回测页及静态 JS 均为 HTTP 200；公网 health 200，公网 `/backtest` 未认证返回预期 401。
 
+## 冻结策略失败归因工具（2026-07-18）
+
+- 新增只读 `StrategyFailureAttributionRepository/Service` 和 CLI，不新增 migration、表、cron、API 或 worker，也未修改低波/V13、Selector、Backtest Service/Repository 与股票池政策文件。
+- 两份前瞻协议实现指纹复核仍分别命中 `24d192...90e3` 与 `2a66e2...1b7f`，未被本切片污染。
+- 低波 1 日毛/净复利为 `-6.7309% / -43.4252%`，1/3/5 日总分 IC 全为负，归类为因子方向失败。
+- V13 1 日毛/净复利为 `+0.4824% / -39.0498%`，相邻日留存 `7.6072%`；3 日三个非重叠 offset 净收益为 `-5.7802% / -22.0879% / +12.0806%`，执行周期替换不稳健。
+- 12 个代表日完整候选重算显示原阈值通过比例中位数为低波 `38.91%`、V13 `66.55%`，第三与第四名分差仅 `0.07 / 0.09`；本轮未按历史结果抬阈值或挑最佳 offset。
+- 全量 176 项 unittest、Python 编译、真实 CLI、migration `20/20` 和冻结指纹检查通过。该工具为离线只读入口，无需重启在线服务。
+- 详细记录见 `docs/strategy_failure_attribution_2026-07-18.md`。
+
 ## Portfolio Repository 垂直切片（2026-07-16）
 
 持仓模块的 SQL 已从 `app/portfolio/service.py` 收口到 `app/portfolio/repository.py`。Service 继续负责行情兜底、技术指标、纪律规则、AI 建议、缓存失效与结果评分，不再直接打开 MySQL 连接。
