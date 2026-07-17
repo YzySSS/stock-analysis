@@ -24,6 +24,8 @@ REQUIRED_TABLES = {
     "stock_name_history",
     "stock_suspension_daily",
     "stock_status_pit_manifest",
+    "stock_fundamental_pit",
+    "fundamental_pit_manifest",
     "sector_opinion_daily",
     "sector_opinion_stock",
     "market_timing_signal_daily",

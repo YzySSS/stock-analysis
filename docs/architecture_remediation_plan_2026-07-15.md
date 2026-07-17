@@ -160,7 +160,9 @@ root crontab（当前约 25 条）
 
 B2 后新建任务统一使用 `close_signal_next_open_v2`：T 日收盘后形成信号、T+1 开盘成交；不再把 T 日收盘信息用于 T 日开盘。对 lowvol/v13 的历史回测明确排除没有公告日保障的基本面字段，并保存数据截止日、策略配置 hash 与方法论快照。历史 ST/退市主数据仍不完整，因此新结果也继续是 `research_only + validation_pending`，不能直接升级为策略有效性证据。
 
-2026-07-17 的 DQ3 已在 B2 之上补齐独立的 point-in-time 生命周期、名称/ST 区间、停复牌分区和历史退市行情层，新任务方法论升级为 `close_signal_next_open_pit_universe_v3`。回测区间内 101 只历史退市股票的行情/因子缺口已归零；仍有 `sh.689009` 无上游历史名称记录，且基本面公告日真相层尚未补齐，因此 `research_only + validation_pending + unvalidated` 的结论不变。
+2026-07-17 的 DQ3 已在 B2 之上补齐独立的 point-in-time 生命周期、名称/ST 区间、停复牌分区和历史退市行情层，新任务方法论升级为 `close_signal_next_open_pit_universe_v3`。回测区间内 101 只历史退市股票的行情/因子缺口已归零；仍有 `sh.689009` 无上游历史名称记录。
+
+同日 DQ4 又补齐按公告日和修订版本生效的基本面真相层，回测方法论升级为 `close_signal_next_open_pit_fundamentals_v4`。2022 年报至 2026 中报落库 100,423 个公告版本，12 个代表交易日 as-of 覆盖 100%；旧历史快照污染不再进入候选。指数成分历史和样本外验证仍未完成，因此 `research_only + validation_pending + unvalidated` 的结论不变。
 
 ### 3.5 任务与存储基线
 
@@ -952,3 +954,9 @@ DQ2 全量回归增至 127 项，migration 仍为 16/16 ready；真实 `data_qua
 历史股票池基线原有 101 只区间内退市股票，仅 14 只有行情/因子覆盖。后台回填后 98 只有日线与 `daily_basic`，另 3 只由两个接口同时确认区间内无市场活动，DQ3 待补缺口归零。历史行情 upsert 只更新市场列并保留已有基本面；开发过程中发现的 8,007 条存量基本面空写已按原 `stock_basic_snapshot` 口径恢复 7,967 条，剩余 40 条原本没有主数据，未猜值。最终字段级复核显示关键市场字段 `24,763 / 25,181` 行可用（98.34%），并将 95% 覆盖门槛写入 DQ3，避免“有行无值”被误判为 ready。
 
 BacktestRepository 现在按信号日连接生命周期和历史名称区间，退市前保留真实候选、退市日退出，且未知 ST 不回退当前状态。方法论版本升级为 `close_signal_next_open_pit_universe_v3`。真实 SQL 验证退市前/退市日边界符合预期；最终 DQ 为 `7 pass / 6 warn / 0 fail`，历史退市行情检查 pass，PIT 真相层仅因 `sh.689009` 保持 warn。全量 141 项回归、生产 migration 17/17、独立 smoke 库 0017 增量与第二遍幂等均通过。所有回测继续 `research_only / validation_pending / unvalidated`，本切片不声明策略有效。
+
+### 2026-07-17：DQ4 基本面公告日真相层已落地
+
+新增 migration `0018`，建立 `stock_fundamental_pit` 与 `fundamental_pit_manifest`。同步器通过 Tushare `fina_indicator_vip` 按报告期分页，保留报告期、公告日和修订版本；成熟报告期首刷需达到历史股票池 50%，重复刷新不得低于已有覆盖 80%。2022 年报至 2026 中报共落库 100,423 个版本、5,766 只股票，日期硬异常为 0；12 个代表交易日 as-of 覆盖 `61,970 / 61,970`。
+
+回测只使用信号日 `daily_basic` PE/PB 与公告日不晚于信号日的最新报告期，Service 再次 fail-closed 清除未知或未来财务版本；方法论升级为 `close_signal_next_open_pit_fundamentals_v4`。全市场 fallback SQL 相比原查询新增约 0.74 秒，主要耗时仍是既有 90 日窗口。最终 DQ4 为 `8 pass / 6 warn / 0 fail`，公告日检查 pass；149 项回归、生产/独立 smoke migration 18/18 与第二遍幂等均通过。所有回测继续 `research_only / validation_pending / unvalidated`。

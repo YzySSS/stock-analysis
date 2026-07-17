@@ -327,6 +327,16 @@ PYTHONPATH=. .venv/bin/python -m app.orchestration.migrate --check
 
 上线验证：79 项回归通过；API/三个 worker active、`NRestarts=0`，readiness 返回 `schema_migrations.health=healthy / 16 applied / 0 pending`；13:45 后的新一轮舆情、实时行情、热度与资金流任务在移除运行时 DDL 后继续成功/预期降级运行。
 
+## DQ4 公告日基本面部署（2026-07-17）
+
+- 生产与保留的独立 migration smoke 库均已增量应用 `0018`，最终 `18/18 ready`；smoke 库第二遍 `applied_now=0`。
+- 生产库 `stock_fundamental_pit` 已落库 2022 年报至 2026 中报共 `100,423` 个公告版本、`5,766` 只股票；`fundamental_pit_manifest` 的 15 个报告期全部 success。
+- crontab 新增每天 `04:40` 运行 `run_fundamental_pit_backfill.py --recent-periods 8`，核心 DQ 夜间审计顺延到 `04:55`；交易日 `18:45` 复核保持不变。
+- API 与 backtest worker 已串行重启，两个 unit 的 `ExecStartPre` 均验证 migration 18/18；selection/portfolio worker 未重启且保持健康。
+- system test `backtest_lowvol_reversal_20260717_180334_224827` 成功完成 2 个信号日、6 个 picks/6 笔交易，`methodology_version=close_signal_next_open_pit_fundamentals_v4`，并保持 `is_system_test=1 / research_only=true / validation_pending`。
+- 本地 health、system status、system 页面与回测结果均为 HTTP 200；公网 health 200，公网 `/system` 未认证返回预期 401。
+- DQ4 快照为 `8 pass / 6 warn / 0 fail`，公告日基本面检查自身为 pass；readiness 若在 18:30 因子日更前显示 degraded，仅表示 7 月 17 日日线已收盘而 factor input 暂停在 7 月 16 日，仍 `accepting_jobs=true`。
+
 ## Portfolio Repository 垂直切片（2026-07-16）
 
 持仓模块的 SQL 已从 `app/portfolio/service.py` 收口到 `app/portfolio/repository.py`。Service 继续负责行情兜底、技术指标、纪律规则、AI 建议、缓存失效与结果评分，不再直接打开 MySQL 连接。

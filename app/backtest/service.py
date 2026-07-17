@@ -7,7 +7,7 @@ import os
 import socket
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -110,32 +110,59 @@ class BacktestService:
                 "triple_barrier_5d": "入场后五个交易日内止盈/止损/到期退出",
                 "observe_t3_daily": "入场后逐日观察至第三个交易日",
             }.get(request.return_mode),
-            "fundamental_policy": "non_point_in_time_fundamentals_excluded",
+            "fundamental_policy": "tushare_daily_basic_t_day_plus_announcement_date_asof_v4",
             "universe_policy": "tushare_lifecycle_name_st_point_in_time_v3",
             "known_limitations": [
-                "历史状态源与退市股票行情覆盖必须以 DQ3 审计结果为准",
-                "DQ3 未覆盖的历史名称/ST 状态按未知并从候选中保守排除",
+                "历史状态、退市股票行情与公告日基本面覆盖必须以 DQ4 审计结果为准",
+                "DQ4 未覆盖的历史名称/ST 或基本面状态按未知处理，ST 状态继续 fail-closed",
+                "公告日只有日期粒度，按公告日不晚于信号日视为可在下一交易日开盘前获知",
                 "停牌日通过 Tushare 事件留痕，实际成交仍以行情和开盘价约束判定",
+                "指数成分变更历史尚未建模",
                 "回测仍为 research-only 且未完成样本外验证",
             ],
         }
 
     @staticmethod
-    def _exclude_non_point_in_time_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_point_in_time_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         item = dict(row)
-        for field in (
-            "pe_tushare",
-            "pb_tushare",
-            "roe",
-            "roa",
-            "grossprofit_margin",
-            "netprofit_margin",
-            "revenue_yoy",
-            "profit_yoy",
-            "eps",
-            "completeness_score",
-        ):
-            item[field] = None
+        item["completeness_score"] = None
+
+        def as_date(value: Any) -> date | None:
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            if not value:
+                return None
+            try:
+                return date.fromisoformat(str(value)[:10])
+            except ValueError:
+                return None
+
+        trade_date = as_date(item.get("trade_date"))
+        publish_date = as_date(item.get("fundamental_publish_date"))
+        period_end_date = as_date(item.get("fundamental_period"))
+        pit_fundamental_available = bool(item.get("pit_fundamental_available")) and bool(
+            trade_date
+            and publish_date
+            and period_end_date
+            and publish_date <= trade_date
+            and period_end_date <= trade_date
+        )
+        if not pit_fundamental_available:
+            for field in (
+                "roe",
+                "roa",
+                "grossprofit_margin",
+                "netprofit_margin",
+                "revenue_yoy",
+                "profit_yoy",
+                "eps",
+            ):
+                item[field] = None
+        item["pit_fundamental_available"] = pit_fundamental_available
+        item["pit_fundamental_unknown"] = not pit_fundamental_available
+
         # 只有名称历史区间命中时，is_st 才是信号日可知状态；绝不回退当前 stock_basic.is_st。
         # 未知状态 fail-closed，经策略已有的 ST 硬过滤排除，同时保留显式未知标记供审计。
         pit_status_available = bool(item.get("pit_status_available"))
@@ -458,7 +485,7 @@ class BacktestService:
         )
         candidates: List[Dict[str, Any]] = []
         for row in rows:
-            item = selector._build_candidate(self._exclude_non_point_in_time_fields(row))
+            item = selector._build_candidate(self._sanitize_point_in_time_fields(row))
             item["open"] = _to_float(row.get("open"))
             item["close"] = _to_float(row.get("close"))
             candidates.append(item)
@@ -481,7 +508,7 @@ class BacktestService:
         )
         candidates: List[Dict[str, Any]] = []
         for row in rows:
-            item = selector._build_candidate(self._exclude_non_point_in_time_fields(row))  # 复用 V1 候选口径，V2 后续再拆出公共 builder
+            item = selector._build_candidate(self._sanitize_point_in_time_fields(row))  # 复用 V1 候选口径，V2 后续再拆出公共 builder
             item["open"] = _to_float(row.get("open"))
             item["close"] = _to_float(row.get("close"))
             candidates.append(item)

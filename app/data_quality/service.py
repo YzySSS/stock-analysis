@@ -9,6 +9,7 @@ from app.data_quality.repository import DataQualityRepository
 
 STATUS_RANK = {"pass": 0, "warn": 1, "fail": 2}
 PIT_MARKET_FIELD_MIN_COVERAGE = 0.95
+PIT_FUNDAMENTAL_MIN_COVERAGE = 0.95
 
 
 def _count(payload: dict[str, Any], key: str) -> int:
@@ -83,6 +84,7 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
     kline = snapshot.get("daily_kline") or {}
     factor = snapshot.get("factor_input_daily") or {}
     point_in_time = snapshot.get("point_in_time_status") or {}
+    fundamental_pit = snapshot.get("point_in_time_fundamentals") or {}
     future = snapshot.get("future_rows") or {}
     upstream_attempts = snapshot.get("upstream_attempts") or {}
     active_stocks = _count(stock, "active_stock_rows")
@@ -335,6 +337,90 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
         )
     )
 
+    fundamental_table = fundamental_pit.get("table") or {}
+    fundamental_manifest = fundamental_pit.get("manifest") or {}
+    fundamental_coverage = fundamental_pit.get("coverage") or {}
+    fundamental_rows = _count(fundamental_table, "rows_count")
+    fundamental_codes = _count(fundamental_table, "distinct_codes")
+    fundamental_expected = _count(fundamental_coverage, "expected_rows")
+    fundamental_covered = _count(fundamental_coverage, "covered_rows")
+    fundamental_coverage_ratio = float(fundamental_coverage.get("coverage_ratio") or 0)
+    fundamental_hard_errors = sum(
+        _count(fundamental_table, key)
+        for key in (
+            "invalid_reporting_order_rows",
+            "future_announcement_rows",
+            "future_period_rows",
+        )
+    )
+    fundamental_ready = (
+        fundamental_rows > 0
+        and fundamental_expected > 0
+        and fundamental_hard_errors == 0
+        and fundamental_coverage_ratio >= PIT_FUNDAMENTAL_MIN_COVERAGE
+    )
+    if fundamental_rows <= 0 or fundamental_expected <= 0 or fundamental_hard_errors:
+        fundamental_status = "fail"
+    elif (
+        not fundamental_ready
+        or _count(fundamental_manifest, "successful_periods") <= 0
+        or _count(fundamental_manifest, "partial_periods") > 0
+        or _count(fundamental_manifest, "failed_periods") > 0
+    ):
+        fundamental_status = "warn"
+    else:
+        fundamental_status = "pass"
+    checks.append(
+        _check(
+            "point_in_time_fundamental_truth",
+            "point_in_time_fundamentals",
+            "基本面公告日真相层",
+            fundamental_status,
+            (
+                f"公告版本 {fundamental_rows} 条、{fundamental_codes} 只股票；"
+                f"{_count(fundamental_coverage, 'sample_dates')} 个代表交易日 as-of 覆盖 "
+                f"{fundamental_covered}/{fundamental_expected} 行"
+                f"（{fundamental_coverage_ratio * 100:.2f}%），"
+                f"最低覆盖日 {fundamental_coverage.get('worst_trade_date')}。"
+            ),
+            {
+                "history_start_date": fundamental_pit.get("history_start_date"),
+                "history_end_date": fundamental_pit.get("history_end_date"),
+                "rows_count": fundamental_rows,
+                "distinct_codes": fundamental_codes,
+                "min_announcement_date": fundamental_table.get("min_announcement_date"),
+                "max_announcement_date": fundamental_table.get("max_announcement_date"),
+                "min_period_end_date": fundamental_table.get("min_period_end_date"),
+                "max_period_end_date": fundamental_table.get("max_period_end_date"),
+                "empty_indicator_rows": _count(fundamental_table, "empty_indicator_rows"),
+                "invalid_reporting_order_rows": _count(
+                    fundamental_table,
+                    "invalid_reporting_order_rows",
+                ),
+                "future_announcement_rows": _count(
+                    fundamental_table,
+                    "future_announcement_rows",
+                ),
+                "future_period_rows": _count(fundamental_table, "future_period_rows"),
+                "manifest_periods": _count(fundamental_manifest, "manifest_periods"),
+                "successful_periods": _count(fundamental_manifest, "successful_periods"),
+                "partial_periods": _count(fundamental_manifest, "partial_periods"),
+                "failed_periods": _count(fundamental_manifest, "failed_periods"),
+                "sample_dates": _count(fundamental_coverage, "sample_dates"),
+                "expected_rows": fundamental_expected,
+                "covered_rows": fundamental_covered,
+                "missing_rows": _count(fundamental_coverage, "missing_rows"),
+                "coverage_ratio": fundamental_coverage_ratio,
+                "minimum_coverage_ratio": PIT_FUNDAMENTAL_MIN_COVERAGE,
+                "worst_trade_date": fundamental_coverage.get("worst_trade_date"),
+                "worst_coverage_ratio": fundamental_coverage.get("worst_coverage_ratio"),
+                "backtest_fundamental_ready": fundamental_ready,
+                "upstream_attempt": upstream_attempts.get("fundamental_pit") or {},
+            },
+            fundamental_pit.get("samples") or [],
+        )
+    )
+
     factor_date = _iso_date(dates.get("factor_input_trade_date"))
     factor_lag_days = (kline_date - factor_date).days if kline_date and factor_date else None
     if factor_lag_days is None:
@@ -454,9 +540,12 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
         _check(
             "factor_input_fundamental_fields",
             "factor_input_daily",
-            "因子基本面字段可用性",
+            "最新因子基本面快照可用性（非 PIT）",
             fundamental_status,
-            f"六项核心基本面字段全部为空 {missing_all_fundamental} 只，占有效股票 {fundamental_ratio:.2%}。",
+            (
+                f"最新截面六项核心基本面字段全部为空 {missing_all_fundamental} 只，"
+                f"占有效股票 {fundamental_ratio:.2%}；该项不代表历史 PIT 回测可用性。"
+            ),
             {
                 "missing_all_fundamental_rows": missing_all_fundamental,
                 "active_stock_rows": active_stocks,

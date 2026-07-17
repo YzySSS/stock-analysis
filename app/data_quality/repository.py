@@ -14,6 +14,7 @@ UPSTREAM_TASKS = {
     "factor_input_daily": ("factor_input_daily_update",),
     "stock_status_snapshot": ("stock_status_snapshot_refresh",),
     "stock_status_pit": ("stock_status_pit_backfill",),
+    "fundamental_pit": ("fundamental_pit_backfill",),
 }
 UPSTREAM_SOURCE_BY_TASK = {
     "daily_kline_realtime_eod_backfill": "stock_realtime_snapshot",
@@ -21,6 +22,7 @@ UPSTREAM_SOURCE_BY_TASK = {
     "factor_input_daily_update": "tushare_daily_basic",
     "stock_status_snapshot_refresh": "akshare",
     "stock_status_pit_backfill": "tushare_stock_basic+namechange+suspend_d",
+    "fundamental_pit_backfill": "tushare_fina_indicator_vip",
 }
 
 
@@ -114,6 +116,7 @@ class DataQualityRepository:
                 daily_kline = self._fetch_daily_kline(cursor, dates)
                 factor_input = self._fetch_factor_input(cursor, dates)
                 point_in_time = self._fetch_point_in_time_status(cursor, dates)
+                fundamental_pit = self._fetch_point_in_time_fundamentals(cursor, dates)
                 future_rows = self._fetch_future_rows(cursor)
 
                 daily_reference_dates = self._fetch_recent_daily_dates(
@@ -166,7 +169,7 @@ class DataQualityRepository:
                 )
 
         return {
-            "audit_version": "dq3",
+            "audit_version": "dq4",
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "history_lookback_trade_days": HISTORY_LOOKBACK_TRADE_DAYS,
             "dates": dates,
@@ -175,6 +178,7 @@ class DataQualityRepository:
             "daily_kline": daily_kline,
             "factor_input_daily": factor_input,
             "point_in_time_status": point_in_time,
+            "point_in_time_fundamentals": fundamental_pit,
             "future_rows": future_rows,
         }
 
@@ -673,6 +677,191 @@ class DataQualityRepository:
             "manifest": manifest,
             "historical_market_data": historical_market_data,
             "name_samples": name_samples,
+            "samples": samples,
+        }
+
+    def _fetch_point_in_time_fundamentals(
+        self,
+        cursor: Any,
+        dates: dict[str, Any],
+    ) -> dict[str, Any]:
+        start_date = dates.get("factor_input_min_trade_date")
+        end_date = dates.get("factor_input_trade_date")
+        if not start_date or not end_date:
+            return {
+                "history_start_date": start_date,
+                "history_end_date": end_date,
+                "table": {},
+                "manifest": {},
+                "coverage": {},
+                "coverage_by_date": [],
+                "samples": [],
+            }
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS rows_count,
+                COUNT(DISTINCT code) AS distinct_codes,
+                MIN(announcement_date) AS min_announcement_date,
+                MAX(announcement_date) AS max_announcement_date,
+                MIN(period_end_date) AS min_period_end_date,
+                MAX(period_end_date) AS max_period_end_date,
+                SUM(announcement_date < period_end_date) AS invalid_reporting_order_rows,
+                SUM(announcement_date > CURDATE()) AS future_announcement_rows,
+                SUM(period_end_date > CURDATE()) AS future_period_rows,
+                SUM(
+                    roe IS NULL AND roa IS NULL AND grossprofit_margin IS NULL
+                    AND netprofit_margin IS NULL AND revenue_yoy IS NULL
+                    AND profit_yoy IS NULL AND eps IS NULL
+                ) AS empty_indicator_rows
+            FROM stock_fundamental_pit
+            """
+        )
+        table = _normalize_row(cursor.fetchone())
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS manifest_periods,
+                SUM(status='success') AS successful_periods,
+                SUM(status='partial_success') AS partial_periods,
+                SUM(status='failed') AS failed_periods,
+                MIN(period_end_date) AS min_period_end_date,
+                MAX(period_end_date) AS max_period_end_date,
+                MAX(finished_at) AS latest_finished_at
+            FROM fundamental_pit_manifest
+            """
+        )
+        manifest = _normalize_row(cursor.fetchone())
+
+        cursor.execute(
+            """
+            SELECT MAX(trade_date) AS trade_date
+            FROM factor_input_daily
+            WHERE trade_date BETWEEN %s AND %s
+            GROUP BY YEAR(trade_date), QUARTER(trade_date)
+            ORDER BY trade_date
+            """,
+            (start_date, end_date),
+        )
+        representative_dates = [
+            str(row["trade_date"])
+            for row in (cursor.fetchall() or [])
+            if row.get("trade_date")
+        ]
+        representative_dates = sorted(
+            set([str(start_date), str(end_date), *representative_dates])
+        )
+        if len(representative_dates) > 12:
+            last_index = len(representative_dates) - 1
+            representative_dates = sorted(
+                {
+                    representative_dates[round(index * last_index / 11)]
+                    for index in range(12)
+                }
+            )
+
+        coverage_by_date: list[dict[str, Any]] = []
+        for trade_date in representative_dates:
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS expected_rows,
+                    SUM(
+                        EXISTS(
+                            SELECT 1
+                            FROM stock_fundamental_pit p
+                            WHERE p.code=f.code
+                              AND p.announcement_date <= f.trade_date
+                              AND p.period_end_date <= f.trade_date
+                              AND (
+                                  p.roe IS NOT NULL OR p.roa IS NOT NULL
+                                  OR p.grossprofit_margin IS NOT NULL
+                                  OR p.netprofit_margin IS NOT NULL
+                                  OR p.revenue_yoy IS NOT NULL
+                                  OR p.profit_yoy IS NOT NULL OR p.eps IS NOT NULL
+                              )
+                        )
+                    ) AS covered_rows
+                FROM factor_input_daily f
+                INNER JOIN stock_instrument_lifecycle l ON l.code=f.code
+                WHERE f.trade_date=%s
+                  AND l.instrument_type='stock'
+                  AND l.listing_date IS NOT NULL
+                  AND l.listing_date <= DATE_SUB(f.trade_date, INTERVAL 120 DAY)
+                  AND (l.delisting_date IS NULL OR l.delisting_date >= f.trade_date)
+                """,
+                (trade_date,),
+            )
+            coverage_row = _normalize_row(cursor.fetchone()) | {"trade_date": trade_date}
+            expected_rows = int(coverage_row.get("expected_rows") or 0)
+            covered_rows = int(coverage_row.get("covered_rows") or 0)
+            coverage_row["coverage_ratio"] = round(
+                covered_rows / expected_rows,
+                6,
+            ) if expected_rows else 0.0
+            coverage_by_date.append(coverage_row)
+
+        expected_rows = sum(int(row.get("expected_rows") or 0) for row in coverage_by_date)
+        covered_rows = sum(int(row.get("covered_rows") or 0) for row in coverage_by_date)
+        coverage_ratio = round(covered_rows / expected_rows, 6) if expected_rows else 0.0
+        worst = min(
+            coverage_by_date,
+            key=lambda row: float(row.get("coverage_ratio") or 0),
+            default={},
+        )
+        samples: list[dict[str, Any]] = []
+        worst_trade_date = worst.get("trade_date")
+        if worst_trade_date:
+            cursor.execute(
+                """
+                SELECT f.code, l.name, l.listing_date, l.delisting_date,
+                       %s AS trade_date,
+                       'fundamental_asof_missing' AS classification
+                FROM factor_input_daily f
+                INNER JOIN stock_instrument_lifecycle l ON l.code=f.code
+                WHERE f.trade_date=%s
+                  AND l.instrument_type='stock'
+                  AND l.listing_date IS NOT NULL
+                  AND l.listing_date <= DATE_SUB(f.trade_date, INTERVAL 120 DAY)
+                  AND (l.delisting_date IS NULL OR l.delisting_date >= f.trade_date)
+                  AND NOT EXISTS(
+                      SELECT 1
+                      FROM stock_fundamental_pit p
+                      WHERE p.code=f.code
+                        AND p.announcement_date <= f.trade_date
+                        AND p.period_end_date <= f.trade_date
+                        AND (
+                            p.roe IS NOT NULL OR p.roa IS NOT NULL
+                            OR p.grossprofit_margin IS NOT NULL
+                            OR p.netprofit_margin IS NOT NULL
+                            OR p.revenue_yoy IS NOT NULL
+                            OR p.profit_yoy IS NOT NULL OR p.eps IS NOT NULL
+                        )
+                  )
+                ORDER BY f.code
+                LIMIT %s
+                """,
+                (worst_trade_date, worst_trade_date, self.SAMPLE_LIMIT),
+            )
+            samples = _normalize_rows(cursor.fetchall())
+
+        return {
+            "history_start_date": str(start_date),
+            "history_end_date": str(end_date),
+            "table": table,
+            "manifest": manifest,
+            "coverage": {
+                "sample_dates": len(coverage_by_date),
+                "expected_rows": expected_rows,
+                "covered_rows": covered_rows,
+                "missing_rows": max(expected_rows - covered_rows, 0),
+                "coverage_ratio": coverage_ratio,
+                "worst_trade_date": worst_trade_date,
+                "worst_coverage_ratio": worst.get("coverage_ratio"),
+            },
+            "coverage_by_date": coverage_by_date,
             "samples": samples,
         }
 

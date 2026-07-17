@@ -9,7 +9,7 @@ from app.data_quality.service import evaluate_data_quality
 
 def healthy_snapshot() -> dict:
     return {
-        "audit_version": "dq3",
+        "audit_version": "dq4",
         "generated_at": "2026-07-17 04:05:00",
         "history_lookback_trade_days": 60,
         "upstream_attempts": {
@@ -22,6 +22,11 @@ def healthy_snapshot() -> dict:
                 "task_name": "factor_input_daily_update",
                 "status": "success",
                 "last_attempt_at": "2026-07-17 03:20:48",
+            },
+            "fundamental_pit": {
+                "task_name": "fundamental_pit_backfill",
+                "status": "success",
+                "last_attempt_at": "2026-07-17 04:40:48",
             },
         },
         "dates": {
@@ -125,6 +130,38 @@ def healthy_snapshot() -> dict:
             },
             "samples": [],
         },
+        "point_in_time_fundamentals": {
+            "history_start_date": "2024-01-02",
+            "history_end_date": "2026-07-16",
+            "table": {
+                "rows_count": 80000,
+                "distinct_codes": 5800,
+                "min_announcement_date": "2023-03-01",
+                "max_announcement_date": "2026-07-16",
+                "min_period_end_date": "2022-12-31",
+                "max_period_end_date": "2026-06-30",
+                "invalid_reporting_order_rows": 0,
+                "future_announcement_rows": 0,
+                "future_period_rows": 0,
+                "empty_indicator_rows": 0,
+            },
+            "manifest": {
+                "manifest_periods": 15,
+                "successful_periods": 15,
+                "partial_periods": 0,
+                "failed_periods": 0,
+            },
+            "coverage": {
+                "sample_dates": 12,
+                "expected_rows": 60000,
+                "covered_rows": 59000,
+                "missing_rows": 1000,
+                "coverage_ratio": 0.983333,
+                "worst_trade_date": "2024-01-02",
+                "worst_coverage_ratio": 0.97,
+            },
+            "samples": [],
+        },
         "future_rows": {
             "daily_kline": 0,
             "factor_input_daily": 0,
@@ -154,7 +191,7 @@ class DataQualityEvaluationTests(unittest.TestCase):
         result = evaluate_data_quality(healthy_snapshot())
 
         self.assertEqual(result["health"], "healthy")
-        self.assertEqual(result["counts"], {"pass": 13, "warn": 0, "fail": 0})
+        self.assertEqual(result["counts"], {"pass": 14, "warn": 0, "fail": 0})
 
     def test_actionable_gaps_are_warnings_with_small_bounded_counts(self):
         snapshot = healthy_snapshot()
@@ -190,7 +227,7 @@ class DataQualityEvaluationTests(unittest.TestCase):
         result = evaluate_data_quality(snapshot)
         check = next(item for item in result["checks"] if item["check_id"] == "daily_kline_coverage")
 
-        self.assertEqual(result["audit_version"], "dq3")
+        self.assertEqual(result["audit_version"], "dq4")
         self.assertEqual(check["metrics"]["persistent_samples"], 1)
         self.assertEqual(check["metrics"]["long_running_samples"], 1)
         self.assertEqual(check["metrics"]["max_consecutive_missing_trade_days"], 5)
@@ -279,6 +316,29 @@ class DataQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(check["status"], "warn")
         self.assertFalse(check["metrics"]["backtest_universe_ready"])
         self.assertEqual(check["metrics"]["market_field_min_coverage"], 0.95)
+
+    def test_low_point_in_time_fundamental_coverage_stays_research_warning(self):
+        snapshot = healthy_snapshot()
+        snapshot["point_in_time_fundamentals"]["coverage"].update(
+            {
+                "expected_rows": 60000,
+                "covered_rows": 54000,
+                "missing_rows": 6000,
+                "coverage_ratio": 0.9,
+                "worst_coverage_ratio": 0.85,
+            }
+        )
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item for item in result["checks"]
+            if item["check_id"] == "point_in_time_fundamental_truth"
+        )
+
+        self.assertEqual(result["health"], "warning")
+        self.assertEqual(check["status"], "warn")
+        self.assertFalse(check["metrics"]["backtest_fundamental_ready"])
+        self.assertEqual(check["metrics"]["minimum_coverage_ratio"], 0.95)
 
 
 if __name__ == "__main__":

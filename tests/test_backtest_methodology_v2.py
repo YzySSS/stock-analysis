@@ -97,23 +97,65 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
         self.assertEqual(trades[0]["exit_date_3d"], "2026-07-06")
         self.assertEqual(trades[0]["exit_price_3d"], 10.8)
 
-    def test_non_point_in_time_fundamentals_are_removed(self):
-        row = BacktestService._exclude_non_point_in_time_fields(
-            {"roe": 20, "pe_tushare": 10, "eps": 1.2, "is_st": True, "turnover_rate": 1.5}
+    def test_unknown_fundamentals_are_removed_but_t_day_valuation_is_kept(self):
+        row = BacktestService._sanitize_point_in_time_fields(
+            {
+                "trade_date": "2026-07-16",
+                "roe": 20,
+                "pe_tushare": 10,
+                "eps": 1.2,
+                "is_st": True,
+                "turnover_rate": 1.5,
+            }
         )
 
         self.assertIsNone(row["roe"])
-        self.assertIsNone(row["pe_tushare"])
+        self.assertEqual(row["pe_tushare"], 10)
         self.assertIsNone(row["eps"])
+        self.assertTrue(row["pit_fundamental_unknown"])
         self.assertTrue(row["is_st"])
         self.assertTrue(row["pit_status_unknown"])
         self.assertEqual(row["turnover_rate"], 1.5)
 
+    def test_announcement_date_fundamentals_are_kept_only_when_known_by_signal_day(self):
+        known = BacktestService._sanitize_point_in_time_fields(
+            {
+                "trade_date": "2026-07-16",
+                "fundamental_publish_date": "2026-04-29",
+                "fundamental_period": "2026-03-31",
+                "pit_fundamental_available": True,
+                "roe": 12.5,
+                "eps": 1.2,
+                "pit_status_available": True,
+                "is_st": False,
+            }
+        )
+        future = BacktestService._sanitize_point_in_time_fields(
+            {
+                "trade_date": "2026-07-16",
+                "fundamental_publish_date": "2026-08-01",
+                "fundamental_period": "2026-06-30",
+                "pit_fundamental_available": True,
+                "roe": 13.0,
+                "eps": 1.3,
+                "pit_status_available": True,
+                "is_st": False,
+            }
+        )
+
+        self.assertEqual(known["roe"], 12.5)
+        self.assertEqual(known["eps"], 1.2)
+        self.assertTrue(known["pit_fundamental_available"])
+        self.assertFalse(known["pit_fundamental_unknown"])
+        self.assertIsNone(future["roe"])
+        self.assertIsNone(future["eps"])
+        self.assertFalse(future["pit_fundamental_available"])
+
     def test_point_in_time_st_flag_is_preserved_only_with_interval_evidence(self):
-        historical = BacktestService._exclude_non_point_in_time_fields(
+        historical = BacktestService._sanitize_point_in_time_fields(
             {"is_st": True, "pit_status_available": True}
         )
-        current_only = BacktestService._exclude_non_point_in_time_fields(
+        current_only = BacktestService._sanitize_point_in_time_fields(
             {"is_st": True, "pit_status_available": False}
         )
 

@@ -126,7 +126,41 @@ class BacktestRepositoryTests(unittest.TestCase):
         self.assertIn("stock_name_history", sql)
         self.assertIn("f.trade_date < sil.delisting_date", sql)
         self.assertIn("nh.is_delisting_period", sql)
+        self.assertIn("stock_fundamental_pit", sql)
+        self.assertIn("fp2.announcement_date <= f.trade_date", sql)
+        self.assertIn("fp2.period_end_date <= f.trade_date", sql)
+        self.assertIn("fp2.period_end_date DESC", sql)
+        self.assertIn("f.pe_tushare", sql)
+        self.assertIn("pit_fundamental_available", sql)
         self.assertEqual(params, ("2026-07-16", "stock"))
+
+    def test_fallback_candidate_sql_uses_the_same_fundamental_asof_boundary(self):
+        cursor = FakeCursor(fetchall_values=[[]])
+        repository = BacktestRepository(connection_factory(cursor))
+
+        repository.load_candidate_rows(
+            trade_date="2026-07-16",
+            instrument_type="stock",
+            kline_window_start="2026-04-01",
+            factor_window_start="2026-07-01",
+        )
+
+        sql, params = cursor.executed[0]
+        self.assertIn("stock_fundamental_pit", sql)
+        self.assertIn("fp2.announcement_date <= f.trade_date", sql)
+        self.assertIn("fp2.period_end_date <= f.trade_date", sql)
+        self.assertIn("fp2.announcement_date DESC", sql)
+        self.assertEqual(
+            params,
+            (
+                "2026-04-01",
+                "2026-07-16",
+                "2026-07-01",
+                "2026-07-16",
+                "2026-07-16",
+                "stock",
+            ),
+        )
 
     def test_save_results_preserves_three_short_transaction_batches(self):
         cursor = FakeCursor()

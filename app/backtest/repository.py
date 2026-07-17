@@ -333,15 +333,19 @@ class BacktestRepository:
             END AS is_st,
             (nh.id IS NOT NULL) AS pit_status_available,
             COALESCE(nh.is_delisting_period, 0) AS is_delisting_period,
-            NULL AS pe_tushare,
-            NULL AS pb_tushare,
-            NULL AS roe,
-            NULL AS roa,
-            NULL AS grossprofit_margin,
-            NULL AS netprofit_margin,
-            NULL AS revenue_yoy,
-            NULL AS profit_yoy,
-            NULL AS eps,
+            f.pe_tushare,
+            f.pb_tushare,
+            fp.roe,
+            fp.roa,
+            fp.grossprofit_margin,
+            fp.netprofit_margin,
+            fp.revenue_yoy,
+            fp.profit_yoy,
+            fp.eps,
+            fp.period_end_date AS fundamental_period,
+            fp.announcement_date AS fundamental_publish_date,
+            fp.source AS fundamental_source,
+            (fp.id IS NOT NULL) AS pit_fundamental_available,
             f.turnover_rate,
             f.volume_ratio,
             f.total_mv,
@@ -389,6 +393,18 @@ class BacktestRepository:
         LEFT JOIN stock_name_history nh ON nh.code = f.code
           AND nh.start_date <= f.trade_date
           AND (nh.end_date IS NULL OR nh.end_date >= f.trade_date)
+        LEFT JOIN stock_fundamental_pit fp ON fp.id = (
+            SELECT fp2.id
+            FROM stock_fundamental_pit fp2
+            WHERE fp2.code=f.code
+              AND fp2.announcement_date <= f.trade_date
+              AND fp2.period_end_date <= f.trade_date
+            ORDER BY fp2.period_end_date DESC,
+                     fp2.announcement_date DESC,
+                     fp2.update_flag DESC,
+                     fp2.id DESC
+            LIMIT 1
+        )
         INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
         INNER JOIN lowvol_reversal_feature_daily lf ON lf.code = f.code AND lf.trade_date = f.trade_date
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
@@ -433,15 +449,19 @@ class BacktestRepository:
             END AS is_st,
             (nh.id IS NOT NULL) AS pit_status_available,
             COALESCE(nh.is_delisting_period, 0) AS is_delisting_period,
-            NULL AS pe_tushare,
-            NULL AS pb_tushare,
-            NULL AS roe,
-            NULL AS roa,
-            NULL AS grossprofit_margin,
-            NULL AS netprofit_margin,
-            NULL AS revenue_yoy,
-            NULL AS profit_yoy,
-            NULL AS eps,
+            f.pe_tushare,
+            f.pb_tushare,
+            fp.roe,
+            fp.roa,
+            fp.grossprofit_margin,
+            fp.netprofit_margin,
+            fp.revenue_yoy,
+            fp.profit_yoy,
+            fp.eps,
+            fp.period_end_date AS fundamental_period,
+            fp.announcement_date AS fundamental_publish_date,
+            fp.source AS fundamental_source,
+            (fp.id IS NOT NULL) AS pit_fundamental_available,
             f.turnover_rate,
             f.volume_ratio,
             f.total_mv,
@@ -489,6 +509,18 @@ class BacktestRepository:
         LEFT JOIN stock_name_history nh ON nh.code = f.code
           AND nh.start_date <= f.trade_date
           AND (nh.end_date IS NULL OR nh.end_date >= f.trade_date)
+        LEFT JOIN stock_fundamental_pit fp ON fp.id = (
+            SELECT fp2.id
+            FROM stock_fundamental_pit fp2
+            WHERE fp2.code=f.code
+              AND fp2.announcement_date <= f.trade_date
+              AND fp2.period_end_date <= f.trade_date
+            ORDER BY fp2.period_end_date DESC,
+                     fp2.announcement_date DESC,
+                     fp2.update_flag DESC,
+                     fp2.id DESC
+            LIMIT 1
+        )
         INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
         LEFT JOIN (
             SELECT

@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from app.jobs.schema import ensure_job_ops_schema
 from app.orchestration.feature_cache_schema import ensure_feature_cache_schema
+from app.orchestration.fundamental_pit_schema import ensure_fundamental_pit_schema
 from app.orchestration.init_project import init_mysql_schema
 from app.orchestration.intraday_bar_schema import ensure_intraday_bar_schema
 from app.orchestration.market_fund_flow_schema import ensure_market_fund_flow_schema
@@ -92,6 +93,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0015", "strategy factor CI schema", ensure_strategy_factor_ci_schema),
     Migration("0016", "worker runtime, job state and retention schema", ensure_job_ops_schema),
     Migration("0017", "point-in-time stock lifecycle and status schema", ensure_stock_status_pit_schema),
+    Migration("0018", "point-in-time fundamental announcement schema", ensure_fundamental_pit_schema),
 )
 
 
