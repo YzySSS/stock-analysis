@@ -22,6 +22,7 @@ from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflo
 from app.orchestration.realtime_schema import ensure_realtime_schema
 from app.orchestration.selection_run_schema import ensure_selection_run_schema
 from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
+from app.orchestration.stock_status_pit_schema import ensure_stock_status_pit_schema
 from app.orchestration.strategy_factor_ci_schema import ensure_strategy_factor_ci_schema
 from app.orchestration.ths_concept_hot_schema import ensure_ths_concept_hot_schema
 from app.orchestration.v2_schema import ensure_v2_schema
@@ -90,6 +91,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0014", "intraday bar schema", ensure_intraday_bar_schema),
     Migration("0015", "strategy factor CI schema", ensure_strategy_factor_ci_schema),
     Migration("0016", "worker runtime, job state and retention schema", ensure_job_ops_schema),
+    Migration("0017", "point-in-time stock lifecycle and status schema", ensure_stock_status_pit_schema),
 )
 
 

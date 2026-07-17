@@ -274,7 +274,7 @@ class JobRepository:
 ### B：capability 与可信回测
 
 - YAML 能力字段与动态 readiness。（B1 已完成并部署）
-- 信号时点、非 point-in-time 基本面隔离和历史股票池约束。（B2 已完成；历史 ST/退市快照仍是已知限制）
+- 信号时点、非 point-in-time 基本面隔离和历史股票池约束。（B2 + DQ3 已完成；仅 `sh.689009` 名称/ST 历史未知，指数成分变更历史尚未建模）
 - methodology/data cutoff/config hash 入库。（B2 已完成）
 - lowvol/v13 小窗口系统测试基线、资源护栏和可比性分级。（B3 已完成；仅工程验证，不升级 validation 状态）
 

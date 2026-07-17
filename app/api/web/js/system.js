@@ -342,6 +342,14 @@ function renderTaskRunMetrics(run = {}, marketOpinion = null) {
 function formatDataQualityGapSample(sample = {}) {
   const code = sample.code || '-';
   const details = [];
+  if (sample.classification === 'historical_universe_missing') {
+    const missing = [];
+    if (sample.missing_kline) missing.push('日线');
+    if (sample.missing_factor_input) missing.push('因子');
+    if (missing.length) details.push(`缺 ${missing.join('/')}`);
+    if (sample.delisting_date) details.push(`退市 ${sample.delisting_date}`);
+    return details.length ? `${code}：${details.join('；')}` : code;
+  }
   if (sample.consecutive_missing_trade_days != null) {
     const capped = sample.persistence_capped ? '+' : '';
     details.push(`连续 ${sample.consecutive_missing_trade_days}${capped} 个交易日`);
@@ -391,7 +399,7 @@ function renderDataQuality(item = {}) {
       <p>${escapeHtml((item.audit_version || 'dq1').toUpperCase())} 于 ${escapeHtml(item.generated_at)} 完成：通过 ${escapeHtml(counts.pass ?? 0)}，提示 ${escapeHtml(counts.warn ?? 0)}，失败 ${escapeHtml(counts.fail ?? 0)}。</p>
     </div>
     <div class="system-error-summary-list">${rows}</div>
-    <div class="muted">待处理样本最多回溯 ${escapeHtml(item.history_lookback_trade_days ?? '-')} 个交易日，并记录上次成功来源与最近上游尝试；PE 缺失仍不作为硬故障。页面只读取任务快照，不扫描行情大表。</div>
+    <div class="muted">待处理样本最多回溯 ${escapeHtml(item.history_lookback_trade_days ?? '-')} 个交易日，并记录上次成功来源与最近上游尝试；PIT 上市/ST/退市与停复牌覆盖也由离线任务核验。PE 缺失仍不作为硬故障，页面不扫描行情大表。</div>
   `;
 }
 

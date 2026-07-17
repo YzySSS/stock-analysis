@@ -115,6 +115,19 @@ class BacktestRepositoryTests(unittest.TestCase):
                 90,
             )
 
+    def test_candidate_sql_uses_point_in_time_lifecycle_and_name_intervals(self):
+        cursor = FakeCursor(fetchall_values=[[]])
+        repository = BacktestRepository(connection_factory(cursor))
+
+        repository.load_feature_candidate_rows("2026-07-16", "stock")
+
+        sql, params = cursor.executed[0]
+        self.assertIn("stock_instrument_lifecycle", sql)
+        self.assertIn("stock_name_history", sql)
+        self.assertIn("f.trade_date < sil.delisting_date", sql)
+        self.assertIn("nh.is_delisting_period", sql)
+        self.assertEqual(params, ("2026-07-16", "stock"))
+
     def test_save_results_preserves_three_short_transaction_batches(self):
         cursor = FakeCursor()
         repository = BacktestRepository(connection_factory(cursor))

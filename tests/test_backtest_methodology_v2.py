@@ -105,8 +105,22 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
         self.assertIsNone(row["roe"])
         self.assertIsNone(row["pe_tushare"])
         self.assertIsNone(row["eps"])
-        self.assertFalse(row["is_st"])
+        self.assertTrue(row["is_st"])
+        self.assertTrue(row["pit_status_unknown"])
         self.assertEqual(row["turnover_rate"], 1.5)
+
+    def test_point_in_time_st_flag_is_preserved_only_with_interval_evidence(self):
+        historical = BacktestService._exclude_non_point_in_time_fields(
+            {"is_st": True, "pit_status_available": True}
+        )
+        current_only = BacktestService._exclude_non_point_in_time_fields(
+            {"is_st": True, "pit_status_available": False}
+        )
+
+        self.assertTrue(historical["is_st"])
+        self.assertFalse(historical["pit_status_unknown"])
+        self.assertTrue(current_only["is_st"])
+        self.assertTrue(current_only["pit_status_unknown"])
 
     def test_run_insert_persists_reproducibility_metadata(self):
         executed: dict = {}

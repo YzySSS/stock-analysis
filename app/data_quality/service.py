@@ -8,6 +8,7 @@ from app.data_quality.repository import DataQualityRepository
 
 
 STATUS_RANK = {"pass": 0, "warn": 1, "fail": 2}
+PIT_MARKET_FIELD_MIN_COVERAGE = 0.95
 
 
 def _count(payload: dict[str, Any], key: str) -> int:
@@ -81,6 +82,7 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
     stock = snapshot.get("stock_basic") or {}
     kline = snapshot.get("daily_kline") or {}
     factor = snapshot.get("factor_input_daily") or {}
+    point_in_time = snapshot.get("point_in_time_status") or {}
     future = snapshot.get("future_rows") or {}
     upstream_attempts = snapshot.get("upstream_attempts") or {}
     active_stocks = _count(stock, "active_stock_rows")
@@ -206,6 +208,130 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "status_snapshot_trade_date": dates.get("status_snapshot_trade_date"),
                 "lag_calendar_days": status_lag_days,
             },
+        )
+    )
+
+    lifecycle = point_in_time.get("lifecycle") or {}
+    name_history = point_in_time.get("name_history") or {}
+    suspension = point_in_time.get("suspension") or {}
+    pit_manifest = point_in_time.get("manifest") or {}
+    lifecycle_rows = _count(lifecycle, "lifecycle_rows")
+    relevant_codes = _count(name_history, "relevant_codes")
+    name_covered_codes = _count(name_history, "name_covered_codes")
+    name_gap = max(relevant_codes - name_covered_codes, 0)
+    expected_suspension_days = _count(suspension, "expected_trade_days")
+    successful_suspension_days = _count(suspension, "successful_days")
+    suspension_gap = max(expected_suspension_days - successful_suspension_days, 0)
+    pit_hard_errors = (
+        _count(lifecycle, "invalid_lifecycle_rows")
+        + _count(name_history, "invalid_intervals")
+    )
+    if lifecycle_rows <= 0:
+        pit_truth_status = "fail"
+    elif (
+        pit_hard_errors
+        or pit_manifest.get("lifecycle_status") != "success"
+        or pit_manifest.get("name_history_status") != "success"
+        or name_gap
+        or suspension_gap
+        or _count(suspension, "failed_days")
+    ):
+        pit_truth_status = "warn"
+    else:
+        pit_truth_status = "pass"
+    checks.append(
+        _check(
+            "point_in_time_status_truth",
+            "point_in_time_status",
+            "历史上市/ST/停复牌真相层",
+            pit_truth_status,
+            (
+                f"生命周期 {lifecycle_rows} 只（上市 {_count(lifecycle, 'active_rows')} / "
+                f"退市 {_count(lifecycle, 'delisted_rows')}）；"
+                f"名称/ST 区间覆盖 {name_covered_codes}/{relevant_codes} 只；"
+                f"停复牌分区覆盖 {successful_suspension_days}/{expected_suspension_days} 个交易日。"
+            ),
+            {
+                "lifecycle_rows": lifecycle_rows,
+                "active_rows": _count(lifecycle, "active_rows"),
+                "delisted_rows": _count(lifecycle, "delisted_rows"),
+                "invalid_lifecycle_rows": _count(lifecycle, "invalid_lifecycle_rows"),
+                "name_history_rows": _count(name_history, "rows_count"),
+                "name_covered_codes": name_covered_codes,
+                "relevant_codes": relevant_codes,
+                "missing_name_history_codes": name_gap,
+                "invalid_name_intervals": _count(name_history, "invalid_intervals"),
+                "st_intervals": _count(name_history, "st_intervals"),
+                "delisting_intervals": _count(name_history, "delisting_intervals"),
+                "successful_suspension_days": successful_suspension_days,
+                "expected_suspension_days": expected_suspension_days,
+                "failed_suspension_days": _count(suspension, "failed_days"),
+                "lifecycle_manifest_status": pit_manifest.get("lifecycle_status"),
+                "name_history_manifest_status": pit_manifest.get("name_history_status"),
+                "upstream_attempt": upstream_attempts.get("stock_status_pit") or {},
+            },
+            point_in_time.get("name_samples") or [],
+        )
+    )
+
+    historical_market = point_in_time.get("historical_market_data") or {}
+    historical_delisted = _count(historical_market, "historical_delisted_codes")
+    missing_historical_market = _count(historical_market, "missing_market_data_codes")
+    historical_factor_rows = _count(historical_market, "historical_factor_rows")
+    historical_market_field_rows = _count(historical_market, "historical_market_field_rows")
+    market_field_coverage_ratio = float(
+        historical_market.get("market_field_coverage_ratio") or 0
+    )
+    historical_market_status = (
+        "pass"
+        if lifecycle_rows > 0
+        and missing_historical_market == 0
+        and market_field_coverage_ratio >= PIT_MARKET_FIELD_MIN_COVERAGE
+        else "warn"
+    )
+    if lifecycle_rows <= 0:
+        historical_market_status = "fail"
+    checks.append(
+        _check(
+            "point_in_time_historical_universe_data",
+            "point_in_time_status",
+            "历史退市股票行情/因子覆盖",
+            historical_market_status,
+            (
+                f"回测区间重叠退市股票 {historical_delisted} 只："
+                f"日线覆盖 {_count(historical_market, 'kline_covered_codes')} 只，"
+                f"因子覆盖 {_count(historical_market, 'factor_covered_codes')} 只，"
+                f"区间内无市场活动 {_count(historical_market, 'no_market_activity_codes')} 只，"
+                f"仍缺 {missing_historical_market} 只；"
+                f"关键市场字段 {historical_market_field_rows}/{historical_factor_rows} 行"
+                f"（{market_field_coverage_ratio * 100:.2f}%）。"
+                + (
+                    " 历史退市行情/因子缺口已归零，关键字段达到门槛。"
+                    if missing_historical_market == 0
+                    and market_field_coverage_ratio >= PIT_MARKET_FIELD_MIN_COVERAGE
+                    else " 缺口或关键字段覆盖未达门槛前，继续视为幸存者偏差风险。"
+                )
+            ),
+            {
+                "history_start_date": point_in_time.get("history_start_date"),
+                "history_end_date": point_in_time.get("history_end_date"),
+                "historical_delisted_codes": historical_delisted,
+                "kline_covered_codes": _count(historical_market, "kline_covered_codes"),
+                "factor_covered_codes": _count(historical_market, "factor_covered_codes"),
+                "no_market_activity_codes": _count(historical_market, "no_market_activity_codes"),
+                "missing_market_data_codes": missing_historical_market,
+                "historical_factor_rows": historical_factor_rows,
+                "historical_market_field_rows": historical_market_field_rows,
+                "market_field_coverage_ratio": market_field_coverage_ratio,
+                "market_field_min_coverage": PIT_MARKET_FIELD_MIN_COVERAGE,
+                "backtest_universe_ready": (
+                    lifecycle_rows > 0
+                    and missing_historical_market == 0
+                    and market_field_coverage_ratio >= PIT_MARKET_FIELD_MIN_COVERAGE
+                ),
+                "upstream_attempt": upstream_attempts.get("stock_status_pit") or {},
+            },
+            point_in_time.get("samples") or [],
         )
     )
 

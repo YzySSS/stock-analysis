@@ -144,7 +144,8 @@ class BacktestRepository:
         where_sql = " AND ".join(conditions)
         return_column = "return_1d_pct" if return_mode == "1d" else "return_3d_pct"
         sql = f"""
-        SELECT t.run_id, t.strategy_id, t.trade_date, t.code, sb.name,
+        SELECT t.run_id, t.strategy_id, t.trade_date, t.code,
+               COALESCE(sb.name, sil.name) AS name,
                p.score AS entry_score, p.factor_json,
                t.entry_date, t.entry_price,
                t.exit_date_1d, t.exit_price_1d, t.return_1d_pct,
@@ -152,6 +153,7 @@ class BacktestRepository:
                t.max_gain_pct, t.max_drawdown_pct
         FROM backtest_trade t
         LEFT JOIN stock_basic sb ON sb.code = t.code
+        LEFT JOIN stock_instrument_lifecycle sil ON sil.code = t.code
         LEFT JOIN backtest_pick p ON p.run_id = t.run_id AND p.trade_date = t.trade_date AND p.code = t.code
         WHERE {where_sql}
         ORDER BY t.trade_date DESC, t.{return_column} DESC
@@ -301,10 +303,11 @@ class BacktestRepository:
                             FROM factor_input_daily f
                             INNER JOIN daily_kline dk
                               ON dk.code = f.code AND dk.trade_date = f.trade_date
-                            INNER JOIN stock_basic sb ON sb.code = f.code
+                            INNER JOIN stock_instrument_lifecycle sil ON sil.code = f.code
                             WHERE f.trade_date = %s
-                              AND sb.instrument_type = 'stock'
-                              AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
+                              AND sil.instrument_type = 'stock'
+                              AND (sil.listing_date IS NULL OR sil.listing_date <= f.trade_date)
+                              AND (sil.delisting_date IS NULL OR f.trade_date < sil.delisting_date)
                               AND dk.open IS NOT NULL
                               AND dk.open > 0
                         ) AS expected_count
@@ -320,11 +323,16 @@ class BacktestRepository:
     ) -> list[dict[str, Any]]:
         sql = """
         SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            0 AS is_st,
+            sil.code,
+            COALESCE(nh.name, sb.name, sil.name) AS name,
+            COALESCE(sb.industry, sil.industry) AS industry,
+            sil.instrument_type,
+            CASE
+                WHEN nh.id IS NULL THEN 0
+                ELSE (nh.is_st=1 OR nh.is_delisting_period=1)
+            END AS is_st,
+            (nh.id IS NOT NULL) AS pit_status_available,
+            COALESCE(nh.is_delisting_period, 0) AS is_delisting_period,
             NULL AS pe_tushare,
             NULL AS pb_tushare,
             NULL AS roe,
@@ -370,13 +378,17 @@ class BacktestRepository:
             chip.cost_95pct AS chip_cost_95pct,
             chip.weight_avg AS chip_weight_avg,
             chip.winner_rate AS chip_winner_rate,
-            DATEDIFF(f.trade_date, sb.listing_date) AS listed_days,
+            DATEDIFF(f.trade_date, sil.listing_date) AS listed_days,
             ssd.sentiment_score,
             ssd.news_count,
             mcd.market_strength,
             mcd.market_state
         FROM factor_input_daily f
-        INNER JOIN stock_basic sb ON sb.code = f.code
+        INNER JOIN stock_instrument_lifecycle sil ON sil.code = f.code
+        LEFT JOIN stock_basic sb ON sb.code = f.code
+        LEFT JOIN stock_name_history nh ON nh.code = f.code
+          AND nh.start_date <= f.trade_date
+          AND (nh.end_date IS NULL OR nh.end_date >= f.trade_date)
         INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
         INNER JOIN lowvol_reversal_feature_daily lf ON lf.code = f.code AND lf.trade_date = f.trade_date
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
@@ -389,11 +401,12 @@ class BacktestRepository:
           )
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
-          AND sb.instrument_type = %s
-          AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
+          AND sil.instrument_type = %s
+          AND (sil.listing_date IS NULL OR sil.listing_date <= f.trade_date)
+          AND (sil.delisting_date IS NULL OR f.trade_date < sil.delisting_date)
           AND dk.open IS NOT NULL
           AND dk.open > 0
-        ORDER BY sb.code
+        ORDER BY sil.code
         """
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -410,11 +423,16 @@ class BacktestRepository:
     ) -> list[dict[str, Any]]:
         sql = """
         SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            0 AS is_st,
+            sil.code,
+            COALESCE(nh.name, sb.name, sil.name) AS name,
+            COALESCE(sb.industry, sil.industry) AS industry,
+            sil.instrument_type,
+            CASE
+                WHEN nh.id IS NULL THEN 0
+                ELSE (nh.is_st=1 OR nh.is_delisting_period=1)
+            END AS is_st,
+            (nh.id IS NOT NULL) AS pit_status_available,
+            COALESCE(nh.is_delisting_period, 0) AS is_delisting_period,
             NULL AS pe_tushare,
             NULL AS pb_tushare,
             NULL AS roe,
@@ -460,13 +478,17 @@ class BacktestRepository:
             chip.cost_95pct AS chip_cost_95pct,
             chip.weight_avg AS chip_weight_avg,
             chip.winner_rate AS chip_winner_rate,
-            DATEDIFF(f.trade_date, sb.listing_date) AS listed_days,
+            DATEDIFF(f.trade_date, sil.listing_date) AS listed_days,
             ssd.sentiment_score,
             ssd.news_count,
             mcd.market_strength,
             mcd.market_state
         FROM factor_input_daily f
-        INNER JOIN stock_basic sb ON sb.code = f.code
+        INNER JOIN stock_instrument_lifecycle sil ON sil.code = f.code
+        LEFT JOIN stock_basic sb ON sb.code = f.code
+        LEFT JOIN stock_name_history nh ON nh.code = f.code
+          AND nh.start_date <= f.trade_date
+          AND (nh.end_date IS NULL OR nh.end_date >= f.trade_date)
         INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
         LEFT JOIN (
             SELECT
@@ -496,7 +518,7 @@ class BacktestRepository:
             ) ranked
             WHERE rn <= 60
             GROUP BY code
-        ) ma ON sb.code = ma.code
+        ) ma ON sil.code = ma.code
         LEFT JOIN (
             SELECT code, AVG(turnover_rate) AS turnover_rate_5d_avg
             FROM (
@@ -510,7 +532,7 @@ class BacktestRepository:
             ) ranked_turnover
             WHERE rn <= 5
             GROUP BY code
-        ) tma ON sb.code = tma.code
+        ) tma ON sil.code = tma.code
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = f.code AND mf.trade_date = f.trade_date
         LEFT JOIN stock_chip_daily chip ON chip.code = f.code AND chip.trade_date = f.trade_date
         LEFT JOIN stock_sentiment_daily ssd ON ssd.code = f.code
@@ -521,11 +543,12 @@ class BacktestRepository:
           )
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
         WHERE f.trade_date = %s
-          AND sb.instrument_type = %s
-          AND (sb.listing_date IS NULL OR sb.listing_date <= f.trade_date)
+          AND sil.instrument_type = %s
+          AND (sil.listing_date IS NULL OR sil.listing_date <= f.trade_date)
+          AND (sil.delisting_date IS NULL OR f.trade_date < sil.delisting_date)
           AND dk.open IS NOT NULL
           AND dk.open > 0
-        ORDER BY sb.code
+        ORDER BY sil.code
         """
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -569,10 +592,15 @@ class BacktestRepository:
             return []
         placeholders = self._placeholders(codes)
         sql = f"""
-        SELECT dk.code, NULL AS name, dk.trade_date, dk.open, dk.high, dk.low, dk.close,
+        SELECT dk.code, COALESCE(nh.name, sil.name) AS name,
+               dk.trade_date, dk.open, dk.high, dk.low, dk.close,
                prev.close AS prev_close,
                af.adj_factor
         FROM daily_kline dk
+        LEFT JOIN stock_instrument_lifecycle sil ON sil.code = dk.code
+        LEFT JOIN stock_name_history nh ON nh.code = dk.code
+          AND nh.start_date <= dk.trade_date
+          AND (nh.end_date IS NULL OR nh.end_date >= dk.trade_date)
         LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
         LEFT JOIN daily_kline prev ON prev.code = dk.code
           AND prev.trade_date = (

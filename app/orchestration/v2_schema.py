@@ -16,6 +16,7 @@ FACTOR_INPUT_DAILY_COLUMNS: dict[str, str] = {
     "valuation_updated_at": "ALTER TABLE factor_input_daily ADD COLUMN valuation_updated_at DATETIME DEFAULT NULL AFTER fundamental_source",
     "fundamental_updated_at": "ALTER TABLE factor_input_daily ADD COLUMN fundamental_updated_at DATETIME DEFAULT NULL AFTER valuation_updated_at",
     "completeness_score": "ALTER TABLE factor_input_daily ADD COLUMN completeness_score DECIMAL(8,4) DEFAULT NULL AFTER fundamental_updated_at",
+    "source": "ALTER TABLE factor_input_daily ADD COLUMN source VARCHAR(32) DEFAULT 'tushare_daily_basic' AFTER completeness_score",
 }
 
 FACTOR_INPUT_DAILY_INDEXES: dict[str, str] = {

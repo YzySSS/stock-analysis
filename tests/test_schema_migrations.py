@@ -45,10 +45,11 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
         self.assertEqual(versions, sorted(versions))
         self.assertEqual(len(versions), len(set(versions)))
         self.assertEqual(versions[0], "0001")
-        self.assertEqual(versions[-1], "0016")
+        self.assertEqual(versions[-1], "0017")
         self.assertTrue(any("market opinion" in name for name in names))
         self.assertTrue(any("realtime" in name for name in names))
         self.assertTrue(any("job state" in name for name in names))
+        self.assertTrue(any("point-in-time stock" in name for name in names))
 
     def test_core_checksum_is_stable_when_module_is_imported(self):
         core = migrate.MIGRATIONS[0]

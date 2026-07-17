@@ -35,6 +35,7 @@ class FactorInputDailyRecord:
     valuation_updated_at: str | None = None
     fundamental_updated_at: str | None = None
     completeness_score: float | None = None
+    source: str = "tushare_daily_basic"
 
 
 class FactorInputHistorySync:
@@ -137,18 +138,16 @@ class FactorInputHistorySync:
             for row in rows
         }
 
-    def save_records(self, records: Iterable[FactorInputDailyRecord]) -> int:
-        rows = list(records)
-        if not rows:
-            return 0
+    @staticmethod
+    def _upsert_sql(*, preserve_existing_fundamentals: bool = False) -> str:
         sql = """
         INSERT INTO factor_input_daily (
             code, trade_date, pe_tushare, pb_tushare, turnover_rate, turnover_rate_f,
             volume_ratio, total_mv, circ_mv, roe, roa,
             grossprofit_margin, netprofit_margin, revenue_yoy, profit_yoy,
             fundamental_period, fundamental_publish_date, valuation_source, fundamental_source,
-            valuation_updated_at, fundamental_updated_at, completeness_score
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            valuation_updated_at, fundamental_updated_at, completeness_score, source
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             pe_tushare = VALUES(pe_tushare),
             pb_tushare = VALUES(pb_tushare),
@@ -157,6 +156,20 @@ class FactorInputHistorySync:
             volume_ratio = VALUES(volume_ratio),
             total_mv = VALUES(total_mv),
             circ_mv = VALUES(circ_mv),
+            valuation_source = VALUES(valuation_source),
+            valuation_updated_at = VALUES(valuation_updated_at),
+        """
+        if preserve_existing_fundamentals:
+            return sql + """
+            completeness_score = GREATEST(
+                COALESCE(factor_input_daily.completeness_score, 0),
+                COALESCE(VALUES(completeness_score), 0)
+            ),
+            source = VALUES(source)
+            """
+        return sql + """
+            fundamental_source = VALUES(fundamental_source),
+            fundamental_updated_at = VALUES(fundamental_updated_at),
             roe = VALUES(roe),
             roa = VALUES(roa),
             grossprofit_margin = VALUES(grossprofit_margin),
@@ -165,19 +178,29 @@ class FactorInputHistorySync:
             profit_yoy = VALUES(profit_yoy),
             fundamental_period = VALUES(fundamental_period),
             fundamental_publish_date = VALUES(fundamental_publish_date),
-            valuation_source = VALUES(valuation_source),
-            fundamental_source = VALUES(fundamental_source),
-            valuation_updated_at = VALUES(valuation_updated_at),
-            fundamental_updated_at = VALUES(fundamental_updated_at),
-            completeness_score = VALUES(completeness_score)
+            completeness_score = VALUES(completeness_score),
+            source = VALUES(source)
         """
+
+    def save_records(
+        self,
+        records: Iterable[FactorInputDailyRecord],
+        *,
+        preserve_existing_fundamentals: bool = False,
+    ) -> int:
+        rows = list(records)
+        if not rows:
+            return 0
+        sql = self._upsert_sql(
+            preserve_existing_fundamentals=preserve_existing_fundamentals
+        )
         data = [
             (
                 r.code, r.trade_date, r.pe_tushare, r.pb_tushare, r.turnover_rate, r.turnover_rate_f,
                 r.volume_ratio, r.total_mv, r.circ_mv, r.roe, r.roa,
                 r.grossprofit_margin, r.netprofit_margin, r.revenue_yoy, r.profit_yoy,
                 r.fundamental_period, r.fundamental_publish_date, r.valuation_source, r.fundamental_source,
-                r.valuation_updated_at, r.fundamental_updated_at, r.completeness_score,
+                r.valuation_updated_at, r.fundamental_updated_at, r.completeness_score, r.source,
             )
             for r in rows
         ]

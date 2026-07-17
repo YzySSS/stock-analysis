@@ -9,7 +9,7 @@ from app.data_quality.service import evaluate_data_quality
 
 def healthy_snapshot() -> dict:
     return {
-        "audit_version": "dq2",
+        "audit_version": "dq3",
         "generated_at": "2026-07-17 04:05:00",
         "history_lookback_trade_days": 60,
         "upstream_attempts": {
@@ -88,6 +88,43 @@ def healthy_snapshot() -> dict:
             },
             "samples": [],
         },
+        "point_in_time_status": {
+            "history_start_date": "2024-01-02",
+            "history_end_date": "2026-07-16",
+            "lifecycle": {
+                "lifecycle_rows": 120,
+                "active_rows": 100,
+                "delisted_rows": 20,
+                "invalid_lifecycle_rows": 0,
+            },
+            "name_history": {
+                "rows_count": 300,
+                "relevant_codes": 120,
+                "name_covered_codes": 120,
+                "invalid_intervals": 0,
+                "st_intervals": 25,
+                "delisting_intervals": 20,
+            },
+            "suspension": {
+                "expected_trade_days": 600,
+                "successful_days": 600,
+                "failed_days": 0,
+            },
+            "manifest": {
+                "lifecycle_status": "success",
+                "name_history_status": "success",
+            },
+            "historical_market_data": {
+                "historical_delisted_codes": 20,
+                "kline_covered_codes": 20,
+                "factor_covered_codes": 20,
+                "missing_market_data_codes": 0,
+                "historical_factor_rows": 1000,
+                "historical_market_field_rows": 980,
+                "market_field_coverage_ratio": 0.98,
+            },
+            "samples": [],
+        },
         "future_rows": {
             "daily_kline": 0,
             "factor_input_daily": 0,
@@ -117,7 +154,7 @@ class DataQualityEvaluationTests(unittest.TestCase):
         result = evaluate_data_quality(healthy_snapshot())
 
         self.assertEqual(result["health"], "healthy")
-        self.assertEqual(result["counts"], {"pass": 11, "warn": 0, "fail": 0})
+        self.assertEqual(result["counts"], {"pass": 13, "warn": 0, "fail": 0})
 
     def test_actionable_gaps_are_warnings_with_small_bounded_counts(self):
         snapshot = healthy_snapshot()
@@ -153,7 +190,7 @@ class DataQualityEvaluationTests(unittest.TestCase):
         result = evaluate_data_quality(snapshot)
         check = next(item for item in result["checks"] if item["check_id"] == "daily_kline_coverage")
 
-        self.assertEqual(result["audit_version"], "dq2")
+        self.assertEqual(result["audit_version"], "dq3")
         self.assertEqual(check["metrics"]["persistent_samples"], 1)
         self.assertEqual(check["metrics"]["long_running_samples"], 1)
         self.assertEqual(check["metrics"]["max_consecutive_missing_trade_days"], 5)
@@ -171,6 +208,77 @@ class DataQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(result["health"], "error")
         self.assertEqual(status_by_id["daily_kline_integrity"], "fail")
         self.assertEqual(status_by_id["future_trade_dates"], "fail")
+
+    def test_incomplete_historical_delisted_market_data_stays_research_warning(self):
+        snapshot = healthy_snapshot()
+        snapshot["point_in_time_status"]["historical_market_data"].update(
+            {
+                "kline_covered_codes": 14,
+                "factor_covered_codes": 14,
+                "missing_market_data_codes": 6,
+            }
+        )
+        snapshot["point_in_time_status"]["samples"] = [
+            {
+                "code": "sz.000005",
+                "classification": "historical_universe_missing",
+                "missing_kline": 1,
+                "missing_factor_input": 1,
+            }
+        ]
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item for item in result["checks"]
+            if item["check_id"] == "point_in_time_historical_universe_data"
+        )
+
+        self.assertEqual(result["health"], "warning")
+        self.assertEqual(check["status"], "warn")
+        self.assertFalse(check["metrics"]["backtest_universe_ready"])
+
+    def test_complete_historical_delisted_market_data_reports_zero_gap(self):
+        snapshot = healthy_snapshot()
+        snapshot["point_in_time_status"]["historical_market_data"].update(
+            {
+                "historical_delisted_codes": 3,
+                "kline_covered_codes": 2,
+                "factor_covered_codes": 2,
+                "no_market_activity_codes": 1,
+                "missing_market_data_codes": 0,
+            }
+        )
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item for item in result["checks"]
+            if item["check_id"] == "point_in_time_historical_universe_data"
+        )
+
+        self.assertEqual(check["status"], "pass")
+        self.assertTrue(check["metrics"]["backtest_universe_ready"])
+        self.assertIn("缺口已归零", check["message"])
+        self.assertNotIn("未归零前", check["message"])
+
+    def test_historical_rows_without_market_fields_are_not_marked_ready(self):
+        snapshot = healthy_snapshot()
+        snapshot["point_in_time_status"]["historical_market_data"].update(
+            {
+                "historical_factor_rows": 1000,
+                "historical_market_field_rows": 900,
+                "market_field_coverage_ratio": 0.9,
+            }
+        )
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item for item in result["checks"]
+            if item["check_id"] == "point_in_time_historical_universe_data"
+        )
+
+        self.assertEqual(check["status"], "warn")
+        self.assertFalse(check["metrics"]["backtest_universe_ready"])
+        self.assertEqual(check["metrics"]["market_field_min_coverage"], 0.95)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,18 @@ from scripts.run_factor_input_daily_update import prefetch_daily_basic_maps
 
 
 class FactorInputDailyUpdateTests(unittest.TestCase):
+    def test_market_only_upsert_preserves_existing_fundamentals(self):
+        regular_sql = FactorInputHistorySync._upsert_sql()
+        market_only_sql = FactorInputHistorySync._upsert_sql(
+            preserve_existing_fundamentals=True
+        )
+
+        self.assertIn("roe = VALUES(roe)", regular_sql)
+        self.assertIn("fundamental_source = VALUES(fundamental_source)", regular_sql)
+        self.assertNotIn("roe = VALUES(roe)", market_only_sql)
+        self.assertNotIn("fundamental_source = VALUES(fundamental_source)", market_only_sql)
+        self.assertIn("factor_input_daily.completeness_score", market_only_sql)
+
     def test_prefetch_calls_daily_basic_once_per_date_and_rejects_low_coverage(self):
         class FakeSync:
             def __init__(self):

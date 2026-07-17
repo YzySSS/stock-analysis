@@ -13,12 +13,14 @@ UPSTREAM_TASKS = {
     "daily_kline": ("daily_kline_realtime_eod_backfill", "daily_kline_increment"),
     "factor_input_daily": ("factor_input_daily_update",),
     "stock_status_snapshot": ("stock_status_snapshot_refresh",),
+    "stock_status_pit": ("stock_status_pit_backfill",),
 }
 UPSTREAM_SOURCE_BY_TASK = {
     "daily_kline_realtime_eod_backfill": "stock_realtime_snapshot",
     "daily_kline_increment": "tushare_daily",
     "factor_input_daily_update": "tushare_daily_basic",
     "stock_status_snapshot_refresh": "akshare",
+    "stock_status_pit_backfill": "tushare_stock_basic+namechange+suspend_d",
 }
 
 
@@ -111,6 +113,7 @@ class DataQualityRepository:
                 stock_basic = self._fetch_stock_basic(cursor)
                 daily_kline = self._fetch_daily_kline(cursor, dates)
                 factor_input = self._fetch_factor_input(cursor, dates)
+                point_in_time = self._fetch_point_in_time_status(cursor, dates)
                 future_rows = self._fetch_future_rows(cursor)
 
                 daily_reference_dates = self._fetch_recent_daily_dates(
@@ -163,7 +166,7 @@ class DataQualityRepository:
                 )
 
         return {
-            "audit_version": "dq2",
+            "audit_version": "dq3",
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "history_lookback_trade_days": HISTORY_LOOKBACK_TRADE_DAYS,
             "dates": dates,
@@ -171,6 +174,7 @@ class DataQualityRepository:
             "stock_basic": stock_basic,
             "daily_kline": daily_kline,
             "factor_input_daily": factor_input,
+            "point_in_time_status": point_in_time,
             "future_rows": future_rows,
         }
 
@@ -352,6 +356,7 @@ class DataQualityRepository:
             SELECT
                 (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_trade_date,
                 (SELECT MAX(trade_date) FROM factor_input_daily) AS factor_input_trade_date,
+                (SELECT MIN(trade_date) FROM factor_input_daily) AS factor_input_min_trade_date,
                 (
                     SELECT MAX(trade_date)
                     FROM stock_status_snapshot
@@ -366,6 +371,310 @@ class DataQualityRepository:
             """
         )
         return _normalize_row(cursor.fetchone())
+
+    def _fetch_point_in_time_status(self, cursor: Any, dates: dict[str, Any]) -> dict[str, Any]:
+        start_date = dates.get("factor_input_min_trade_date")
+        end_date = dates.get("factor_input_trade_date")
+        if not start_date or not end_date:
+            return {
+                "history_start_date": start_date,
+                "history_end_date": end_date,
+                "lifecycle": {},
+                "name_history": {},
+                "suspension": {},
+                "manifest": {},
+                "historical_market_data": {},
+                "samples": [],
+            }
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS lifecycle_rows,
+                SUM(list_status='L') AS active_rows,
+                SUM(list_status='D') AS delisted_rows,
+                SUM(list_status='P') AS paused_rows,
+                SUM(listing_date IS NULL) AS missing_listing_date,
+                SUM(delisting_date IS NOT NULL AND listing_date IS NOT NULL AND delisting_date <= listing_date)
+                    AS invalid_lifecycle_rows
+            FROM stock_instrument_lifecycle
+            """
+        )
+        lifecycle = _normalize_row(cursor.fetchone())
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS relevant_codes,
+                SUM(
+                    EXISTS(
+                        SELECT 1
+                        FROM stock_name_history nh
+                        WHERE nh.code=l.code
+                          AND nh.start_date <= %s
+                          AND (nh.end_date IS NULL OR nh.end_date >= %s)
+                    )
+                ) AS name_covered_codes
+            FROM stock_instrument_lifecycle l
+            WHERE l.instrument_type='stock'
+              AND (l.listing_date IS NULL OR l.listing_date <= %s)
+              AND (l.delisting_date IS NULL OR l.delisting_date >= %s)
+            """,
+            (end_date, start_date, end_date, start_date),
+        )
+        name_coverage = _normalize_row(cursor.fetchone())
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS rows_count,
+                COUNT(DISTINCT code) AS codes,
+                SUM(end_date IS NOT NULL AND end_date < start_date) AS invalid_intervals,
+                SUM(is_st=1) AS st_intervals,
+                SUM(is_delisting_period=1) AS delisting_intervals
+            FROM stock_name_history
+            """
+        )
+        name_history = _normalize_row(cursor.fetchone()) | name_coverage
+
+        cursor.execute(
+            """
+            SELECT l.code, l.name, l.listing_date, l.delisting_date,
+                   'name_history_unknown' AS classification
+            FROM stock_instrument_lifecycle l
+            WHERE l.instrument_type='stock'
+              AND (l.listing_date IS NULL OR l.listing_date <= %s)
+              AND (l.delisting_date IS NULL OR l.delisting_date >= %s)
+              AND NOT EXISTS(
+                  SELECT 1
+                  FROM stock_name_history nh
+                  WHERE nh.code=l.code
+                    AND nh.start_date <= LEAST(COALESCE(l.delisting_date, %s), %s)
+                    AND COALESCE(nh.end_date, '9999-12-31') >=
+                        GREATEST(COALESCE(l.listing_date, %s), %s)
+              )
+            ORDER BY l.code
+            LIMIT %s
+            """,
+            (end_date, start_date, end_date, end_date, start_date, start_date, self.SAMPLE_LIMIT),
+        )
+        name_samples = _normalize_rows(cursor.fetchall())
+
+        cursor.execute(
+            """
+            SELECT
+                MAX(CASE WHEN dataset='lifecycle' AND partition_key='full' THEN status END)
+                    AS lifecycle_status,
+                MAX(CASE WHEN dataset='name_history' AND partition_key='full' THEN status END)
+                    AS name_history_status,
+                MAX(CASE WHEN dataset='lifecycle' AND partition_key='full' THEN finished_at END)
+                    AS lifecycle_finished_at,
+                MAX(CASE WHEN dataset='name_history' AND partition_key='full' THEN finished_at END)
+                    AS name_history_finished_at
+            FROM stock_status_pit_manifest
+            """
+        )
+        manifest = _normalize_row(cursor.fetchone())
+
+        cursor.execute(
+            """
+            SELECT COUNT(DISTINCT trade_date) AS expected_trade_days
+            FROM factor_input_daily
+            WHERE trade_date BETWEEN %s AND %s
+            """,
+            (start_date, end_date),
+        )
+        expected_trade_days = int((cursor.fetchone() or {}).get("expected_trade_days") or 0)
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS manifest_days,
+                SUM(status='success') AS successful_days,
+                SUM(status='failed') AS failed_days,
+                SUM(source_rows) AS source_rows,
+                MAX(finished_at) AS latest_finished_at
+            FROM stock_status_pit_manifest
+            WHERE dataset='suspension_daily'
+              AND partition_key BETWEEN %s AND %s
+            """,
+            (str(start_date), str(end_date)),
+        )
+        suspension = _normalize_row(cursor.fetchone()) | {"expected_trade_days": expected_trade_days}
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS historical_delisted_codes,
+                SUM(
+                    m.status='success'
+                    AND JSON_UNQUOTE(JSON_EXTRACT(m.metadata_json, '$.classification')) =
+                        'source_confirmed_no_market_activity'
+                ) AS no_market_activity_codes,
+                SUM(
+                    EXISTS(
+                        SELECT 1 FROM daily_kline k
+                        WHERE k.code=l.code
+                          AND k.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                               AND LEAST(%s, l.delisting_date)
+                    )
+                ) AS kline_covered_codes,
+                SUM(
+                    EXISTS(
+                        SELECT 1 FROM factor_input_daily f
+                        WHERE f.code=l.code
+                          AND f.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                               AND LEAST(%s, l.delisting_date)
+                    )
+                ) AS factor_covered_codes,
+                SUM(
+                    NOT COALESCE((
+                        m.status='success'
+                        AND JSON_UNQUOTE(JSON_EXTRACT(m.metadata_json, '$.classification')) =
+                            'source_confirmed_no_market_activity'
+                    ), 0)
+                    AND (
+                    NOT EXISTS(
+                        SELECT 1 FROM daily_kline k
+                        WHERE k.code=l.code
+                          AND k.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                               AND LEAST(%s, l.delisting_date)
+                    )
+                    OR NOT EXISTS(
+                        SELECT 1 FROM factor_input_daily f
+                        WHERE f.code=l.code
+                          AND f.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                               AND LEAST(%s, l.delisting_date)
+                    ))
+                ) AS missing_market_data_codes
+            FROM stock_instrument_lifecycle l
+            LEFT JOIN stock_status_pit_manifest m
+              ON m.dataset='historical_market_data' AND m.partition_key=l.code
+            WHERE l.instrument_type='stock'
+              AND l.list_status='D'
+              AND l.listing_date <= %s
+              AND l.delisting_date >= %s
+            """,
+            (
+                start_date,
+                end_date,
+                start_date,
+                end_date,
+                start_date,
+                end_date,
+                start_date,
+                end_date,
+                end_date,
+                start_date,
+            ),
+        )
+        historical_market_data = _normalize_row(cursor.fetchone())
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS historical_factor_rows,
+                SUM(
+                    f.turnover_rate IS NOT NULL
+                    AND f.total_mv IS NOT NULL
+                    AND f.circ_mv IS NOT NULL
+                ) AS historical_market_field_rows
+            FROM factor_input_daily f
+            INNER JOIN stock_instrument_lifecycle l ON l.code=f.code
+            WHERE l.instrument_type='stock'
+              AND l.list_status='D'
+              AND l.listing_date <= %s
+              AND l.delisting_date >= %s
+              AND f.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                   AND LEAST(%s, l.delisting_date)
+            """,
+            (end_date, start_date, start_date, end_date),
+        )
+        factor_market_fields = _normalize_row(cursor.fetchone())
+        historical_factor_rows = int(factor_market_fields.get("historical_factor_rows") or 0)
+        historical_market_field_rows = int(
+            factor_market_fields.get("historical_market_field_rows") or 0
+        )
+        historical_market_data |= {
+            **factor_market_fields,
+            "market_field_coverage_ratio": round(
+                historical_market_field_rows / historical_factor_rows,
+                4,
+            )
+            if historical_factor_rows
+            else 1.0,
+        }
+
+        cursor.execute(
+            """
+            SELECT
+                l.code, l.name, l.listing_date, l.delisting_date,
+                NOT EXISTS(
+                    SELECT 1 FROM daily_kline k
+                    WHERE k.code=l.code
+                      AND k.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                           AND LEAST(%s, l.delisting_date)
+                ) AS missing_kline,
+                NOT EXISTS(
+                    SELECT 1 FROM factor_input_daily f
+                    WHERE f.code=l.code
+                      AND f.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                           AND LEAST(%s, l.delisting_date)
+                ) AS missing_factor_input,
+                'historical_universe_missing' AS classification
+            FROM stock_instrument_lifecycle l
+            LEFT JOIN stock_status_pit_manifest m
+              ON m.dataset='historical_market_data' AND m.partition_key=l.code
+            WHERE l.instrument_type='stock'
+              AND l.list_status='D'
+              AND l.listing_date <= %s
+              AND l.delisting_date >= %s
+              AND (
+                  NOT EXISTS(
+                      SELECT 1 FROM daily_kline k
+                      WHERE k.code=l.code
+                        AND k.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                             AND LEAST(%s, l.delisting_date)
+                  )
+                  OR NOT EXISTS(
+                      SELECT 1 FROM factor_input_daily f
+                      WHERE f.code=l.code
+                        AND f.trade_date BETWEEN GREATEST(%s, l.listing_date)
+                                             AND LEAST(%s, l.delisting_date)
+                  )
+              )
+              AND NOT COALESCE((
+                  m.status='success'
+                  AND JSON_UNQUOTE(JSON_EXTRACT(m.metadata_json, '$.classification')) =
+                      'source_confirmed_no_market_activity'
+              ), 0)
+            ORDER BY l.delisting_date DESC, l.code
+            LIMIT %s
+            """,
+            (
+                start_date,
+                end_date,
+                start_date,
+                end_date,
+                end_date,
+                start_date,
+                start_date,
+                end_date,
+                start_date,
+                end_date,
+                self.SAMPLE_LIMIT,
+            ),
+        )
+        samples = _normalize_rows(cursor.fetchall())
+        return {
+            "history_start_date": str(start_date),
+            "history_end_date": str(end_date),
+            "lifecycle": lifecycle,
+            "name_history": name_history,
+            "suspension": suspension,
+            "manifest": manifest,
+            "historical_market_data": historical_market_data,
+            "name_samples": name_samples,
+            "samples": samples,
+        }
 
     @staticmethod
     def _fetch_stock_basic(cursor: Any) -> dict[str, Any]:
@@ -521,7 +830,9 @@ class DataQualityRepository:
                     OR f.total_mv IS NULL OR f.circ_mv IS NULL
                 ) AS missing_market_field_rows,
                 SUM(
-                    f.roe IS NULL AND f.roa IS NULL
+                    sb.instrument_type='stock'
+                    AND COALESCE(sb.is_delisted, 0)=0
+                    AND f.roe IS NULL AND f.roa IS NULL
                     AND f.grossprofit_margin IS NULL AND f.netprofit_margin IS NULL
                     AND f.revenue_yoy IS NULL AND f.profit_yoy IS NULL
                 ) AS missing_all_fundamental_rows,

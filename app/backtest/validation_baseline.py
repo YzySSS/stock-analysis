@@ -38,6 +38,11 @@ REQUEST_DEFAULTS = {
     "apply_execution_constraints": False,
 }
 BASELINE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$")
+VALIDATION_KNOWN_LIMITATIONS = (
+    "样本少于 20 个交易日时只验证工程链路，不评价策略有效性",
+    "sh.689009 缺少上游历史名称/ST 区间，指数成分变更历史尚未建模",
+    "旧任务缺少配置 hash 时只能做方向性比较",
+)
 
 
 def _json_dict(value: Any) -> Dict[str, Any]:
@@ -389,9 +394,5 @@ class BacktestValidationBaseline:
             "validation_scope": "engineering_baseline_only" if sample_days < 20 else "research_baseline_unvalidated",
             "statistical_validation": False,
             "comparisons": comparisons,
-            "known_limitations": [
-                "样本少于 20 个交易日时只验证工程链路，不评价策略有效性",
-                "历史 ST、退市和成分变更数据仍不完整",
-                "旧任务缺少配置 hash 时只能做方向性比较",
-            ],
+            "known_limitations": list(VALIDATION_KNOWN_LIMITATIONS),
         }

@@ -111,10 +111,11 @@ class BacktestService:
                 "observe_t3_daily": "入场后逐日观察至第三个交易日",
             }.get(request.return_mode),
             "fundamental_policy": "non_point_in_time_fundamentals_excluded",
-            "universe_policy": "available_factor_kline_history_with_listing_date_v2",
+            "universe_policy": "tushare_lifecycle_name_st_point_in_time_v3",
             "known_limitations": [
-                "历史 ST 状态尚无完整逐日快照",
-                "已退市证券的完整历史主数据尚未接入",
+                "历史状态源与退市股票行情覆盖必须以 DQ3 审计结果为准",
+                "DQ3 未覆盖的历史名称/ST 状态按未知并从候选中保守排除",
+                "停牌日通过 Tushare 事件留痕，实际成交仍以行情和开盘价约束判定",
                 "回测仍为 research-only 且未完成样本外验证",
             ],
         }
@@ -135,8 +136,11 @@ class BacktestService:
             "completeness_score",
         ):
             item[field] = None
-        # stock_basic.is_st 是当前状态，不能用于历史信号日过滤。
-        item["is_st"] = False
+        # 只有名称历史区间命中时，is_st 才是信号日可知状态；绝不回退当前 stock_basic.is_st。
+        # 未知状态 fail-closed，经策略已有的 ST 硬过滤排除，同时保留显式未知标记供审计。
+        pit_status_available = bool(item.get("pit_status_available"))
+        item["pit_status_unknown"] = not pit_status_available
+        item["is_st"] = bool(item.get("is_st")) if pit_status_available else True
         return item
 
     def _fetch_data_cutoff(self, end_date: str) -> str | None:

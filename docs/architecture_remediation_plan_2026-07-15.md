@@ -160,6 +160,8 @@ root crontab（当前约 25 条）
 
 B2 后新建任务统一使用 `close_signal_next_open_v2`：T 日收盘后形成信号、T+1 开盘成交；不再把 T 日收盘信息用于 T 日开盘。对 lowvol/v13 的历史回测明确排除没有公告日保障的基本面字段，并保存数据截止日、策略配置 hash 与方法论快照。历史 ST/退市主数据仍不完整，因此新结果也继续是 `research_only + validation_pending`，不能直接升级为策略有效性证据。
 
+2026-07-17 的 DQ3 已在 B2 之上补齐独立的 point-in-time 生命周期、名称/ST 区间、停复牌分区和历史退市行情层，新任务方法论升级为 `close_signal_next_open_pit_universe_v3`。回测区间内 101 只历史退市股票的行情/因子缺口已归零；仍有 `sh.689009` 无上游历史名称记录，且基本面公告日真相层尚未补齐，因此 `research_only + validation_pending + unvalidated` 的结论不变。
+
 ### 3.5 任务与存储基线
 
 - `stock_realtime_snapshot`：约 5592 行，约 3.7 MB。
@@ -942,3 +944,11 @@ backtest 也补齐到共享任务契约：
 同日继续完成 DQ2 来源缺口追溯：离线审计对每类最多 10 个样本回看最近 60 个交易日，补充连续缺失交易日、最后成功来源/时间，以及 `task_run_log` 中最近一次相关上游尝试。系统页直接展示这份持久化快照，未增加在线大表扫描、schema 或运行时 DDL；持续性分类暂不改变 DQ1 的 11 条严重度规则。真实样本已区分 `sh.689009` 的 5 日持续日线缺口、`bj.920685` 的 2 日日线缺口和 `bj.920081` 的 5 日因子市场字段缺口，而对应上游任务整体仍为成功。
 
 DQ2 全量回归增至 127 项，migration 仍为 16/16 ready；真实 `data_quality_audit` 快照已持久化并由系统状态页读取。API 串行重启后本地/公网 health 200、`NRestarts=0`，三个 worker 健康空闲且队列为 0。收盘后的 readiness 暂为 degraded 仅因 7 月 17 日因子输入等待既定 18:30 日更，仍允许接收任务。
+
+### 2026-07-17：DQ3 point-in-time 历史股票池已落地
+
+新增 migration `0017`，建立 `stock_instrument_lifecycle`、`stock_name_history`、`stock_suspension_daily` 与 `stock_status_pit_manifest`。Tushare 生命周期共落地 5,866 只；回测区间相关 5,629 只中名称/ST 区间覆盖 5,628 只，唯一缺口 `sh.689009` 经逐股接口复核仍为 0 条。停复牌区间改为分页抓取，2024-01-02 至 2026-07-16 的 613/613 个交易日全部成功，共 9,951 条事件。
+
+历史股票池基线原有 101 只区间内退市股票，仅 14 只有行情/因子覆盖。后台回填后 98 只有日线与 `daily_basic`，另 3 只由两个接口同时确认区间内无市场活动，DQ3 待补缺口归零。历史行情 upsert 只更新市场列并保留已有基本面；开发过程中发现的 8,007 条存量基本面空写已按原 `stock_basic_snapshot` 口径恢复 7,967 条，剩余 40 条原本没有主数据，未猜值。最终字段级复核显示关键市场字段 `24,763 / 25,181` 行可用（98.34%），并将 95% 覆盖门槛写入 DQ3，避免“有行无值”被误判为 ready。
+
+BacktestRepository 现在按信号日连接生命周期和历史名称区间，退市前保留真实候选、退市日退出，且未知 ST 不回退当前状态。方法论版本升级为 `close_signal_next_open_pit_universe_v3`。真实 SQL 验证退市前/退市日边界符合预期；最终 DQ 为 `7 pass / 6 warn / 0 fail`，历史退市行情检查 pass，PIT 真相层仅因 `sh.689009` 保持 warn。全量 141 项回归、生产 migration 17/17、独立 smoke 库 0017 增量与第二遍幂等均通过。所有回测继续 `research_only / validation_pending / unvalidated`，本切片不声明策略有效。

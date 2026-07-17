@@ -88,6 +88,7 @@ CORE_TABLE_DDL = [
         valuation_updated_at DATETIME DEFAULT NULL,
         fundamental_updated_at DATETIME DEFAULT NULL,
         completeness_score DECIMAL(8,4) DEFAULT NULL,
+        source VARCHAR(32) DEFAULT 'tushare_daily_basic',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_factor_input_daily (code, trade_date),

@@ -19,7 +19,7 @@ import math
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from statistics import mean, stdev
-from typing import Any
+from typing import Any, Sequence
 
 from app.shared.db import mysql_conn
 
@@ -66,33 +66,47 @@ def std(values: list[float]) -> float | None:
     return round(stdev(values), 10) if len(values) >= 2 else None
 
 
-def refresh(start_date: str | None = None, end_date: str | None = None, lookback_days: int = 180) -> dict[str, Any]:
+def refresh(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    lookback_days: int = 180,
+    codes: Sequence[str] | None = None,
+) -> dict[str, Any]:
     if not start_date or not end_date:
         raise ValueError("start_date and end_date are required for bounded feature refresh")
 
     lookback_start = (datetime.strptime(start_date, "%Y-%m-%d").date() - timedelta(days=lookback_days)).isoformat()
 
+    normalized_codes = sorted({str(code) for code in (codes or []) if code})
+    code_filter = ""
+    code_params: list[Any] = []
+    if normalized_codes:
+        code_filter = f" AND code IN ({','.join(['%s'] * len(normalized_codes))})"
+        code_params = normalized_codes
+
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT code, trade_date, close, amount
                 FROM daily_kline
                 WHERE trade_date BETWEEN %s AND %s
+                {code_filter}
                 ORDER BY code, trade_date
                 """,
-                (lookback_start, end_date),
+                [lookback_start, end_date, *code_params],
             )
             kline_rows = cursor.fetchall() or []
             cursor.execute(
-                """
+                f"""
                 SELECT code, trade_date, turnover_rate
                 FROM factor_input_daily
                 WHERE trade_date BETWEEN %s AND %s
                   AND turnover_rate IS NOT NULL
+                {code_filter}
                 ORDER BY code, trade_date
                 """,
-                (lookback_start, end_date),
+                [lookback_start, end_date, *code_params],
             )
             turnover_rows = cursor.fetchall() or []
 
@@ -173,7 +187,12 @@ def refresh(start_date: str | None = None, end_date: str | None = None, lookback
             summary = cursor.fetchone() or {}
         conn.commit()
 
-    return {"affected_rows": affected, "payload_rows": len(payload), **summary}
+    return {
+        "affected_rows": affected,
+        "payload_rows": len(payload),
+        "filtered_codes": len(normalized_codes),
+        **summary,
+    }
 
 
 def main() -> None:
@@ -181,8 +200,14 @@ def main() -> None:
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
     parser.add_argument("--lookback-days", type=int, default=180)
+    parser.add_argument("--codes", help="Optional comma-separated code list for a bounded targeted refresh")
     args = parser.parse_args()
-    result = refresh(args.start_date, args.end_date, args.lookback_days)
+    result = refresh(
+        args.start_date,
+        args.end_date,
+        args.lookback_days,
+        [code.strip() for code in args.codes.split(",") if code.strip()] if args.codes else None,
+    )
     print(result)
 
 
