@@ -339,6 +339,24 @@ function renderTaskRunMetrics(run = {}, marketOpinion = null) {
   return `${summary}<div class="muted">${prefix}：${escapeHtml(detail)}</div>`;
 }
 
+function formatDataQualityGapSample(sample = {}) {
+  const code = sample.code || '-';
+  const details = [];
+  if (sample.consecutive_missing_trade_days != null) {
+    const capped = sample.persistence_capped ? '+' : '';
+    details.push(`连续 ${sample.consecutive_missing_trade_days}${capped} 个交易日`);
+  }
+  if (sample.last_success_trade_date || sample.last_success_source) {
+    details.push(`上次成功 ${sample.last_success_trade_date || '-'} / ${sample.last_success_source || '来源未知'}`);
+  } else {
+    details.push('回溯窗口内无成功记录');
+  }
+  if (sample.last_attempt_at) {
+    details.push(`最近尝试 ${sample.last_attempt_at}${sample.last_attempt_status ? `（${sample.last_attempt_status}）` : ''}`);
+  }
+  return details.length ? `${code}：${details.join('；')}` : code;
+}
+
 function renderDataQuality(item = {}) {
   if (!item.generated_at) {
     return '<div class="empty-state">尚无离线质量快照，等待 04:05 或 18:45 自动审计。</div>';
@@ -350,8 +368,12 @@ function renderDataQuality(item = {}) {
     ? noteworthy.map((check) => {
         const badgeClass = check.status === 'fail' ? 'status-error' : 'status-warn';
         const statusLabel = check.status === 'fail' ? '失败' : '提示';
-        const samples = (check.samples || []).slice(0, 5).map((sample) => sample.code).filter(Boolean);
-        const sampleText = samples.length ? `<div class="muted">样本：${escapeHtml(samples.join('、'))}</div>` : '';
+        const rawSamples = check.samples || [];
+        const actionableSamples = rawSamples.filter((sample) => sample.classification === 'actionable_missing');
+        const samples = (actionableSamples.length ? actionableSamples : rawSamples)
+          .slice(0, 5)
+          .map(formatDataQualityGapSample);
+        const sampleText = samples.length ? `<div class="muted">追溯：${escapeHtml(samples.join('｜'))}</div>` : '';
         return `
           <div class="system-error-summary-row">
             <b>${escapeHtml(check.label || check.check_id || '-')}</b>
@@ -366,10 +388,10 @@ function renderDataQuality(item = {}) {
   return `
     <div class="system-gap-callout">
       <strong>${escapeHtml(healthLabel)} · ${escapeHtml(item.reference_trade_date || '-')}</strong>
-      <p>审计于 ${escapeHtml(item.generated_at)} 完成：通过 ${escapeHtml(counts.pass ?? 0)}，提示 ${escapeHtml(counts.warn ?? 0)}，失败 ${escapeHtml(counts.fail ?? 0)}。</p>
+      <p>${escapeHtml((item.audit_version || 'dq1').toUpperCase())} 于 ${escapeHtml(item.generated_at)} 完成：通过 ${escapeHtml(counts.pass ?? 0)}，提示 ${escapeHtml(counts.warn ?? 0)}，失败 ${escapeHtml(counts.fail ?? 0)}。</p>
     </div>
     <div class="system-error-summary-list">${rows}</div>
-    <div class="muted">PE 缺失不作为硬故障；停牌、暂停上市和当日新股会与待处理源缺口分开统计。页面只读取任务快照，不扫描行情大表。</div>
+    <div class="muted">待处理样本最多回溯 ${escapeHtml(item.history_lookback_trade_days ?? '-')} 个交易日，并记录上次成功来源与最近上游尝试；PE 缺失仍不作为硬故障。页面只读取任务快照，不扫描行情大表。</div>
   `;
 }
 

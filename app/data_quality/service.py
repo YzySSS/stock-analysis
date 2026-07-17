@@ -50,12 +50,39 @@ def _check(
     }
 
 
+def _gap_tracking_metrics(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    actionable = [item for item in samples if item.get("classification") == "actionable_missing"]
+    streaks = [
+        int(item["consecutive_missing_trade_days"])
+        for item in actionable
+        if item.get("consecutive_missing_trade_days") is not None
+    ]
+    return {
+        "tracked_actionable_samples": len(actionable),
+        "single_day_samples": sum(value == 1 for value in streaks),
+        "persistent_samples": sum(value >= 2 for value in streaks),
+        "long_running_samples": sum(value >= 5 for value in streaks),
+        "max_consecutive_missing_trade_days": max(streaks) if streaks else 0,
+    }
+
+
+def _gap_tracking_message(metrics: dict[str, Any]) -> str:
+    tracked = int(metrics.get("tracked_actionable_samples") or 0)
+    if tracked <= 0:
+        return ""
+    return (
+        f" 待处理样本中持续缺失 {int(metrics.get('persistent_samples') or 0)} 只，"
+        f"最长 {int(metrics.get('max_consecutive_missing_trade_days') or 0)} 个交易日。"
+    )
+
+
 def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
     dates = snapshot.get("dates") or {}
     stock = snapshot.get("stock_basic") or {}
     kline = snapshot.get("daily_kline") or {}
     factor = snapshot.get("factor_input_daily") or {}
     future = snapshot.get("future_rows") or {}
+    upstream_attempts = snapshot.get("upstream_attempts") or {}
     active_stocks = _count(stock, "active_stock_rows")
     checks: list[dict[str, Any]] = []
 
@@ -134,6 +161,7 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
     kline_gaps = kline.get("gaps") or {}
     kline_actionable = _count(kline_gaps, "actionable_missing")
     kline_gap_status = _gap_status(kline_actionable, active_stocks)
+    kline_tracking = _gap_tracking_metrics(kline.get("samples") or [])
     checks.append(
         _check(
             "daily_kline_coverage",
@@ -145,10 +173,13 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
                 f"停牌/暂停上市 {_count(kline_gaps, 'expected_non_trading')}，"
                 f"当日新股 {_count(kline_gaps, 'new_listing_pending')}，"
                 f"待处理 {kline_actionable}。"
+                f"{_gap_tracking_message(kline_tracking)}"
             ),
             {key: _count(kline_gaps, key) for key in (
                 "missing_total", "expected_non_trading", "new_listing_pending", "actionable_missing"
-            )},
+            )}
+            | kline_tracking
+            | {"upstream_attempt": upstream_attempts.get("daily_kline") or {}},
             kline.get("samples") or [],
         )
     )
@@ -209,6 +240,7 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     factor_coverage = factor.get("coverage_gaps") or {}
     factor_actionable = _count(factor_coverage, "actionable_missing")
+    factor_coverage_tracking = _gap_tracking_metrics(factor.get("coverage_samples") or [])
     checks.append(
         _check(
             "factor_input_coverage",
@@ -220,15 +252,20 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
                 f"停牌/暂停上市 {_count(factor_coverage, 'expected_non_trading')}，"
                 f"当日新股 {_count(factor_coverage, 'new_listing_pending')}，"
                 f"待处理 {factor_actionable}。"
+                f"{_gap_tracking_message(factor_coverage_tracking)}"
             ),
             {key: _count(factor_coverage, key) for key in (
                 "missing_total", "expected_non_trading", "new_listing_pending", "actionable_missing"
-            )},
+            )}
+            | factor_coverage_tracking
+            | {"upstream_attempt": upstream_attempts.get("factor_input_daily") or {}},
+            factor.get("coverage_samples") or [],
         )
     )
 
     market_gaps = factor.get("market_field_gaps") or {}
     market_actionable = _count(market_gaps, "actionable_missing")
+    market_tracking = _gap_tracking_metrics(factor.get("samples") or [])
     checks.append(
         _check(
             "factor_input_market_fields",
@@ -238,11 +275,15 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
             (
                 f"换手率、量比或市值字段缺失 {_count(market_gaps, 'missing_total')} 只："
                 f"合法非交易 {_count(market_gaps, 'expected_non_trading')}，"
-                f"待处理 {market_actionable}。PE 不参与本检查，避免把亏损股误判为故障。"
+                f"待处理 {market_actionable}。"
+                f"{_gap_tracking_message(market_tracking)}"
+                "PE 不参与本检查，避免把亏损股误判为故障。"
             ),
             {key: _count(market_gaps, key) for key in (
                 "missing_total", "expected_non_trading", "new_listing_pending", "actionable_missing"
-            )},
+            )}
+            | market_tracking
+            | {"upstream_attempt": upstream_attempts.get("factor_input_daily") or {}},
             factor.get("samples") or [],
         )
     )
@@ -318,10 +359,13 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
     worst = max((check["status"] for check in checks), key=lambda status: STATUS_RANK[status])
     health = {"pass": "healthy", "warn": "warning", "fail": "error"}[worst]
     return {
+        "audit_version": snapshot.get("audit_version") or "dq1",
         "health": health,
         "status": worst,
         "generated_at": snapshot.get("generated_at"),
         "reference_trade_date": dates.get("daily_kline_trade_date"),
+        "history_lookback_trade_days": snapshot.get("history_lookback_trade_days"),
+        "upstream_attempts": upstream_attempts,
         "counts": counts,
         "checks": checks,
     }

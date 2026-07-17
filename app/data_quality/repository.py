@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from app.shared.db import mysql_conn
+
+
+HISTORY_LOOKBACK_TRADE_DAYS = 60
+UPSTREAM_TASKS = {
+    "daily_kline": ("daily_kline_realtime_eod_backfill", "daily_kline_increment"),
+    "factor_input_daily": ("factor_input_daily_update",),
+    "stock_status_snapshot": ("stock_status_snapshot_refresh",),
+}
+UPSTREAM_SOURCE_BY_TASK = {
+    "daily_kline_realtime_eod_backfill": "stock_realtime_snapshot",
+    "daily_kline_increment": "tushare_daily",
+    "factor_input_daily_update": "tushare_daily_basic",
+    "stock_status_snapshot_refresh": "akshare",
+}
 
 
 def _normalize_value(value: Any) -> Any:
@@ -23,6 +38,66 @@ def _normalize_rows(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return [_normalize_row(row) for row in (rows or [])]
 
 
+def _as_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def gap_persistence(
+    reference_trade_dates: list[Any],
+    last_success_trade_date: Any,
+    listing_date: Any = None,
+) -> dict[str, Any]:
+    """Describe a trailing gap using a bounded set of market trade dates."""
+
+    dates = sorted({value for item in reference_trade_dates if (value := _as_date(item)) is not None})
+    if not dates:
+        return {
+            "consecutive_missing_trade_days": None,
+            "persistence_level": "unknown",
+            "persistence_capped": False,
+            "first_missing_trade_date": None,
+        }
+
+    last_success = _as_date(last_success_trade_date)
+    listed = _as_date(listing_date)
+    eligible_dates = [item for item in dates if listed is None or item >= listed]
+    missing_dates = [item for item in eligible_dates if last_success is None or item > last_success]
+    streak = len(missing_dates)
+    if streak <= 0:
+        level = "none"
+    elif streak == 1:
+        level = "single_day"
+    elif streak < 5:
+        level = "persistent"
+    else:
+        level = "long_running"
+
+    earliest = eligible_dates[0] if eligible_dates else None
+    capped = bool(
+        missing_dates
+        and earliest
+        and (
+            (last_success is not None and last_success < earliest)
+            or (last_success is None and (listed is None or listed < earliest))
+        )
+    )
+    return {
+        "consecutive_missing_trade_days": streak,
+        "persistence_level": level,
+        "persistence_capped": capped,
+        "first_missing_trade_date": str(missing_dates[0]) if missing_dates else None,
+    }
+
+
 class DataQualityRepository:
     """Read only the latest bounded slices needed by the daily audit."""
 
@@ -32,19 +107,243 @@ class DataQualityRepository:
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
                 dates = self._fetch_dates(cursor)
+                upstream_attempts = self._fetch_upstream_attempts(cursor)
                 stock_basic = self._fetch_stock_basic(cursor)
                 daily_kline = self._fetch_daily_kline(cursor, dates)
                 factor_input = self._fetch_factor_input(cursor, dates)
                 future_rows = self._fetch_future_rows(cursor)
 
+                daily_reference_dates = self._fetch_recent_daily_dates(
+                    cursor,
+                    dates.get("daily_kline_trade_date"),
+                )
+                factor_reference_dates = self._fetch_recent_factor_dates(
+                    cursor,
+                    dates.get("factor_input_trade_date"),
+                )
+                daily_samples = daily_kline.get("samples") or []
+                daily_success = self._fetch_latest_daily_success(
+                    cursor,
+                    [str(item.get("code")) for item in daily_samples if item.get("code")],
+                    dates.get("daily_kline_trade_date"),
+                )
+                self._enrich_gap_samples(
+                    daily_samples,
+                    daily_success,
+                    daily_reference_dates,
+                    upstream_attempts.get("daily_kline") or {},
+                )
+
+                coverage_samples = factor_input.get("coverage_samples") or []
+                coverage_success = self._fetch_latest_factor_success(
+                    cursor,
+                    [str(item.get("code")) for item in coverage_samples if item.get("code")],
+                    dates.get("factor_input_trade_date"),
+                    require_complete_market_fields=False,
+                )
+                self._enrich_gap_samples(
+                    coverage_samples,
+                    coverage_success,
+                    factor_reference_dates,
+                    upstream_attempts.get("factor_input_daily") or {},
+                )
+
+                market_field_samples = factor_input.get("samples") or []
+                market_field_success = self._fetch_latest_factor_success(
+                    cursor,
+                    [str(item.get("code")) for item in market_field_samples if item.get("code")],
+                    dates.get("factor_input_trade_date"),
+                    require_complete_market_fields=True,
+                )
+                self._enrich_gap_samples(
+                    market_field_samples,
+                    market_field_success,
+                    factor_reference_dates,
+                    upstream_attempts.get("factor_input_daily") or {},
+                )
+
         return {
+            "audit_version": "dq2",
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "history_lookback_trade_days": HISTORY_LOOKBACK_TRADE_DAYS,
             "dates": dates,
+            "upstream_attempts": upstream_attempts,
             "stock_basic": stock_basic,
             "daily_kline": daily_kline,
             "factor_input_daily": factor_input,
             "future_rows": future_rows,
         }
+
+    @staticmethod
+    def _fetch_upstream_attempts(cursor: Any) -> dict[str, dict[str, Any]]:
+        task_names = sorted({task for tasks in UPSTREAM_TASKS.values() for task in tasks})
+        placeholders = ", ".join(["%s"] * len(task_names))
+        cursor.execute(
+            f"""
+            SELECT id, task_name, run_id, status, started_at, finished_at, metadata_json
+            FROM task_run_log
+            WHERE task_name IN ({placeholders})
+            ORDER BY id DESC
+            LIMIT 30
+            """,
+            task_names,
+        )
+        rows = cursor.fetchall() or []
+        attempts: dict[str, dict[str, Any]] = {}
+        for dataset, candidate_tasks in UPSTREAM_TASKS.items():
+            row = next((item for item in rows if item.get("task_name") in candidate_tasks), None)
+            if not row:
+                attempts[dataset] = {}
+                continue
+            raw_metadata = row.get("metadata_json")
+            if isinstance(raw_metadata, dict):
+                metadata = raw_metadata
+            else:
+                try:
+                    metadata = json.loads(raw_metadata or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    metadata = {}
+            target_trade_date = metadata.get("trade_date") or metadata.get("end_date")
+            coverage = (metadata.get("daily_basic_coverage") or {}).get(str(target_trade_date), {})
+            attempts[dataset] = {
+                "task_name": row.get("task_name"),
+                "run_id": row.get("run_id"),
+                "status": row.get("status"),
+                "last_attempt_at": str(row.get("finished_at") or row.get("started_at"))
+                if row.get("finished_at") or row.get("started_at")
+                else None,
+                "started_at": str(row.get("started_at")) if row.get("started_at") else None,
+                "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
+                "target_trade_date": str(target_trade_date) if target_trade_date else None,
+                "source": metadata.get("source") or UPSTREAM_SOURCE_BY_TASK.get(str(row.get("task_name"))),
+                "rows_synced": metadata.get("rows_synced"),
+                "source_rows": coverage.get("rows") if isinstance(coverage, dict) else None,
+                "source_coverage_ratio": coverage.get("coverage_ratio") if isinstance(coverage, dict) else None,
+            }
+        return attempts
+
+    @staticmethod
+    def _fetch_recent_daily_dates(cursor: Any, trade_date: Any) -> list[Any]:
+        if not trade_date:
+            return []
+        cursor.execute(
+            """
+            SELECT DISTINCT trade_date
+            FROM daily_kline
+            WHERE trade_date <= %s
+            ORDER BY trade_date DESC
+            LIMIT %s
+            """,
+            (trade_date, HISTORY_LOOKBACK_TRADE_DAYS),
+        )
+        return [row.get("trade_date") for row in (cursor.fetchall() or []) if row.get("trade_date")]
+
+    @staticmethod
+    def _fetch_recent_factor_dates(cursor: Any, trade_date: Any) -> list[Any]:
+        if not trade_date:
+            return []
+        cursor.execute(
+            """
+            SELECT DISTINCT trade_date
+            FROM factor_input_daily
+            WHERE trade_date <= %s
+            ORDER BY trade_date DESC
+            LIMIT %s
+            """,
+            (trade_date, HISTORY_LOOKBACK_TRADE_DAYS),
+        )
+        return [row.get("trade_date") for row in (cursor.fetchall() or []) if row.get("trade_date")]
+
+    @staticmethod
+    def _fetch_latest_daily_success(
+        cursor: Any,
+        codes: list[str],
+        trade_date: Any,
+    ) -> dict[str, dict[str, Any]]:
+        if not codes or not trade_date:
+            return {}
+        placeholders = ", ".join(["%s"] * len(codes))
+        cursor.execute(
+            f"""
+            SELECT h.code, h.trade_date, h.source, h.updated_at
+            FROM daily_kline h
+            INNER JOIN (
+                SELECT code, MAX(trade_date) AS trade_date
+                FROM daily_kline
+                WHERE code IN ({placeholders}) AND trade_date <= %s
+                GROUP BY code
+            ) latest ON latest.code=h.code AND latest.trade_date=h.trade_date
+            """,
+            [*codes, trade_date],
+        )
+        return {str(row["code"]): _normalize_row(row) for row in (cursor.fetchall() or [])}
+
+    @staticmethod
+    def _fetch_latest_factor_success(
+        cursor: Any,
+        codes: list[str],
+        trade_date: Any,
+        *,
+        require_complete_market_fields: bool,
+    ) -> dict[str, dict[str, Any]]:
+        if not codes or not trade_date:
+            return {}
+        placeholders = ", ".join(["%s"] * len(codes))
+        completeness_sql = """
+            AND turnover_rate IS NOT NULL
+            AND volume_ratio IS NOT NULL
+            AND total_mv IS NOT NULL
+            AND circ_mv IS NOT NULL
+        """ if require_complete_market_fields else ""
+        cursor.execute(
+            f"""
+            SELECT h.code, h.trade_date, h.source, h.valuation_source,
+                   h.fundamental_source, h.updated_at
+            FROM factor_input_daily h
+            INNER JOIN (
+                SELECT code, MAX(trade_date) AS trade_date
+                FROM factor_input_daily
+                WHERE code IN ({placeholders}) AND trade_date <= %s
+                {completeness_sql}
+                GROUP BY code
+            ) latest ON latest.code=h.code AND latest.trade_date=h.trade_date
+            """,
+            [*codes, trade_date],
+        )
+        return {str(row["code"]): _normalize_row(row) for row in (cursor.fetchall() or [])}
+
+    @staticmethod
+    def _enrich_gap_samples(
+        samples: list[dict[str, Any]],
+        success_by_code: dict[str, dict[str, Any]],
+        reference_trade_dates: list[Any],
+        upstream_attempt: dict[str, Any],
+    ) -> None:
+        for sample in samples:
+            success = success_by_code.get(str(sample.get("code"))) or {}
+            success_source = (
+                success.get("valuation_source")
+                or success.get("source")
+                or success.get("fundamental_source")
+            )
+            sample.update(
+                {
+                    "last_success_trade_date": success.get("trade_date"),
+                    "last_success_source": success_source,
+                    "last_success_at": success.get("updated_at"),
+                    "last_attempt_at": upstream_attempt.get("last_attempt_at"),
+                    "last_attempt_status": upstream_attempt.get("status"),
+                    "last_attempt_task": upstream_attempt.get("task_name"),
+                    "last_attempt_target_trade_date": upstream_attempt.get("target_trade_date"),
+                }
+            )
+            sample.update(
+                gap_persistence(
+                    reference_trade_dates,
+                    success.get("trade_date"),
+                    sample.get("listing_date"),
+                )
+            )
 
     @staticmethod
     def _fetch_dates(cursor: Any) -> dict[str, Any]:
@@ -199,6 +498,7 @@ class DataQualityRepository:
                 "metrics": {},
                 "coverage_gaps": {},
                 "market_field_gaps": {},
+                "coverage_samples": [],
                 "samples": [],
             }
 
@@ -269,6 +569,31 @@ class DataQualityRepository:
         cursor.execute(
             """
             SELECT
+                sb.code, sb.name, sb.listing_date,
+                ss.status_label, ss.status_reason,
+                CASE
+                    WHEN COALESCE(ss.status_label, '') IN ('paused_listing', 'suspended')
+                        THEN 'expected_non_trading'
+                    WHEN sb.listing_date=%s THEN 'new_listing_pending'
+                    ELSE 'actionable_missing'
+                END AS classification
+            FROM stock_basic sb
+            LEFT JOIN factor_input_daily f ON f.code=sb.code AND f.trade_date=%s
+            LEFT JOIN stock_status_snapshot ss ON ss.code=sb.code AND ss.trade_date=%s
+            WHERE sb.instrument_type='stock'
+              AND COALESCE(sb.is_delisted, 0)=0
+              AND (sb.listing_date IS NULL OR sb.listing_date <= %s)
+              AND f.code IS NULL
+            ORDER BY FIELD(classification, 'actionable_missing', 'new_listing_pending', 'expected_non_trading'), sb.code
+            LIMIT %s
+            """,
+            (trade_date, trade_date, status_date, trade_date, self.SAMPLE_LIMIT),
+        )
+        coverage_samples = _normalize_rows(cursor.fetchall())
+
+        cursor.execute(
+            """
+            SELECT
                 COUNT(*) AS missing_total,
                 SUM(COALESCE(ss.status_label, '') IN ('paused_listing', 'suspended')) AS expected_non_trading,
                 SUM(
@@ -329,6 +654,7 @@ class DataQualityRepository:
             "metrics": metrics,
             "coverage_gaps": coverage_gaps,
             "market_field_gaps": market_field_gaps,
+            "coverage_samples": coverage_samples,
             "samples": samples,
         }
 

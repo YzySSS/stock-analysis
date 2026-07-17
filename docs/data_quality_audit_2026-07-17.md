@@ -88,6 +88,35 @@ cron
 
 下一批数据质量工作建议按优先级推进：
 
-1. 为上游缺失增加“最后成功来源/最后尝试时间/连续缺失天数”，把一次性 source gap 与持续故障分开。
-2. 为历史股票池补 point-in-time 上市、ST、暂停/退市状态，解决回测幸存者偏差；当前所有回测仍保持 `research_only / unvalidated`。
-3. 校准 `factor_input_daily.completeness_score`：PE 不适用不能继续与真正的源缺失同罚，但调整前必须冻结策略/回测响应，避免静默改变选股口径。
+1. 为历史股票池补 point-in-time 上市、ST、暂停/退市状态，解决回测幸存者偏差；当前所有回测仍保持 `research_only / unvalidated`。
+2. 校准 `factor_input_daily.completeness_score`：PE 不适用不能继续与真正的源缺失同罚，但调整前必须冻结策略/回测响应，避免静默改变选股口径。
+
+## 7. DQ2：来源缺口持续性追溯
+
+2026-07-17 在 DQ1 上继续完成 DQ2。目标不是增加更多“缺失数量”，而是回答三个排障问题：这只股票连续缺了多久、上一次成功来自哪里、上游最近是否已经尝试过。
+
+实现保持原有离线边界：
+
+1. 审计任务最多读取最近 60 个交易日，只追溯每类检查最多 10 个展示样本。
+2. 日线缺口读取该代码最后一条 `daily_kline` 的交易日、`source` 与更新时间。
+3. 因子覆盖缺口读取最后一条 `factor_input_daily`；市场字段缺口只把换手率、量比、总市值和流通市值同时完整的记录视为成功。
+4. 最近尝试时间、任务状态、目标交易日与上游覆盖率来自现有 `task_run_log`，日线同时识别增量任务和实时收盘回填任务。
+5. 结果继续写入 `data_quality_audit` 的 `metadata_json`；系统状态页只读取这份快照，没有新增在线历史扫描、数据表或 migration。
+
+持续性按市场交易日而非自然日计算：
+
+- `single_day`：连续 1 个交易日。
+- `persistent`：连续 2～4 个交易日。
+- `long_running`：连续 5 个交易日及以上。
+- 超出 60 日窗口时标记 `persistence_capped=true`，页面以 `60+` 语义展示，不猜测窗口外的精确天数。
+
+这层分类目前只增强解释和排障，不改变 DQ1 的 11 条 pass/warn/fail 阈值，也不改变选股、策略或回测口径。
+
+首次真实只读追溯结果：
+
+- `sh.689009` 日线连续缺 5 个交易日；最后成功为 2026-07-10，来源 `tushare_daily`。
+- `bj.920685` 日线连续缺 2 个交易日；最后成功为 2026-07-15，来源 `akshare_realtime_eod`。其因子市场字段在 2026-07-16 为单日缺失，最后完整来源为 `tushare_daily_basic`。
+- `bj.920081` 自 2026-07-10 上市后连续 5 个交易日没有完整的四项市场字段，窗口内无完整成功记录。
+- 最近日线收盘回填与因子日更均为 `success`，因子源整体覆盖约 99.91%，因此当前属于少数代码持续 source gap，不是整条上游任务故障。
+
+DQ2 验收：全量 127 项 unittest、Python 编译、系统页 JavaScript 语法和 `git diff --check` 通过；migration 继续为 16/16 ready。真实审计快照已写入 `task_run_log`，系统状态 API 返回 `audit_version=dq2` 和完整追溯字段。API 串行重启后本地 health、系统页及公网 health 均为 HTTP 200，`NRestarts=0`；三个 worker 健康空闲、三类队列为 0。15:25 的 readiness 为 `degraded / accepting_jobs=true`，唯一原因是 2026-07-17 日线已经收盘而因子日更仍等待 18:30 既定调度，不是 DQ2 部署故障。

@@ -938,3 +938,7 @@ backtest 也补齐到共享任务契约：
 缺口不再只报一个覆盖率：停牌/暂停上市、当日新股和待处理源缺口分别统计，PE 缺失不再作为因子硬故障。同步修复 `StockBasicSync` 长期只读取 `list_status=L` 导致退市旧行留在有效池的问题：额外读取 D 集合但只标记库内已有代码，同时将行业 `NaN` 归一化为 NULL。13 只历史退市旧行退出有效池后，有效股票由 5,542 降为 5,529；日线缺口由 20 降为 7，因子市场字段缺口由 20 降为 7，最终审计为 `8 pass / 3 warn / 0 fail`。剩余告警保留真实样本，不写猜测值。详细记录见 `docs/data_quality_audit_2026-07-17.md`。
 
 验收结果：全量 125 项、Python/JavaScript/shell/diff 检查通过，migration 16/16；两条质量 cron 已安装且无重复。API 串行重启后 active、`NRestarts=0`，本地 health/readiness/system status 与公网 health 均 200，readiness `ready / accepting_jobs=true`；三个 worker 未重启且继续 active。
+
+同日继续完成 DQ2 来源缺口追溯：离线审计对每类最多 10 个样本回看最近 60 个交易日，补充连续缺失交易日、最后成功来源/时间，以及 `task_run_log` 中最近一次相关上游尝试。系统页直接展示这份持久化快照，未增加在线大表扫描、schema 或运行时 DDL；持续性分类暂不改变 DQ1 的 11 条严重度规则。真实样本已区分 `sh.689009` 的 5 日持续日线缺口、`bj.920685` 的 2 日日线缺口和 `bj.920081` 的 5 日因子市场字段缺口，而对应上游任务整体仍为成功。
+
+DQ2 全量回归增至 127 项，migration 仍为 16/16 ready；真实 `data_quality_audit` 快照已持久化并由系统状态页读取。API 串行重启后本地/公网 health 200、`NRestarts=0`，三个 worker 健康空闲且队列为 0。收盘后的 readiness 暂为 degraded 仅因 7 月 17 日因子输入等待既定 18:30 日更，仍允许接收任务。
