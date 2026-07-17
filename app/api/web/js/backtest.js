@@ -28,6 +28,19 @@ function backtestRunStrategyLabel(item) {
   return item?.strategy_display_name || backtestStrategyLabel(item?.strategy_id);
 }
 
+const BACKTEST_UNIVERSE_LABELS = {
+  ALL_A: '历史全A',
+  '000016.SH': '上证50',
+  '000300.SH': '沪深300',
+  '000905.SH': '中证500',
+  '000852.SH': '中证1000',
+};
+
+function backtestUniverseLabel(item) {
+  const code = item?.universe_code || item?.request?.universe_code || 'ALL_A';
+  return item?.universe_label || BACKTEST_UNIVERSE_LABELS[code] || code;
+}
+
 async function loadBacktestStrategies() {
   const select = qs('#backtest-strategy-id');
   const submit = qs('#backtest-form button[type="submit"]');
@@ -519,7 +532,7 @@ function renderRuns(items = []) {
             <span>${statusLabel}</span>
           </div>
           <strong>${escapeHtml(backtestRunStrategyLabel(item))}</strong>
-          <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')}　每日入选：${escapeHtml(picks)}</span>
+          <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')}　${escapeHtml(backtestUniverseLabel(item))} · 每日入选：${escapeHtml(picks)}</span>
         </div>
         <div class="backtest-progress-percent">${formatNumber(progress, 0)}%</div>
       </div>
@@ -556,7 +569,7 @@ function renderRecentRunsPanel(items = []) {
     <button class="recent-backtest-row" type="button" data-load-run="${escapeHtml(item.run_id || '')}">
       <span class="recent-selection-strategy" title="选股策略：${escapeHtml(backtestRunStrategyLabel(item))}">${escapeHtml(backtestRunStrategyLabel(item))}</span>
       <span class="recent-trade-strategy" title="交易策略：${escapeHtml(backtestTradeStrategyLabel(item))}">${escapeHtml(backtestTradeStrategyLabel(item))}</span>
-      <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')}${item.request?.use_adjusted_price ? ' · 复权' : ''}${(Number(item.request?.commission_bps || 0) || Number(item.request?.stamp_tax_bps || 0) || Number(item.request?.slippage_bps || 0) || item.request?.apply_execution_constraints) ? ' · 真实化' : ''}</span>
+      <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')} · ${escapeHtml(backtestUniverseLabel(item))}${item.request?.use_adjusted_price ? ' · 复权' : ''}${(Number(item.request?.commission_bps || 0) || Number(item.request?.stamp_tax_bps || 0) || Number(item.request?.slippage_bps || 0) || item.request?.apply_execution_constraints) ? ' · 真实化' : ''}</span>
       <span><i class="badge ${statusBadgeClass(item.status)}">${escapeHtml(item.status || '-')}</i></span>
       <strong class="${getPctClass(item.total_return_pct) || ''}">${formatPercent(item.total_return_pct)}</strong>
     </button>
@@ -695,6 +708,7 @@ async function runBacktest(event) {
     return_mode: returnMode,
     trade_strategy_id: tradeStrategyId,
     instrument_type: 'stock',
+    universe_code: qs('#backtest-universe-code')?.value || 'ALL_A',
     use_adjusted_price: Boolean(qs('#backtest-use-adjusted-price')?.checked),
     commission_bps: Number(qs('#backtest-commission-bps')?.value || 0),
     stamp_tax_bps: Number(qs('#backtest-stamp-tax-bps')?.value || 0),

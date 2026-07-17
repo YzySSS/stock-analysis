@@ -162,7 +162,9 @@ B2 后新建任务统一使用 `close_signal_next_open_v2`：T 日收盘后形�
 
 2026-07-17 的 DQ3 已在 B2 之上补齐独立的 point-in-time 生命周期、名称/ST 区间、停复牌分区和历史退市行情层，新任务方法论升级为 `close_signal_next_open_pit_universe_v3`。回测区间内 101 只历史退市股票的行情/因子缺口已归零；仍有 `sh.689009` 无上游历史名称记录。
 
-同日 DQ4 又补齐按公告日和修订版本生效的基本面真相层，回测方法论升级为 `close_signal_next_open_pit_fundamentals_v4`。2022 年报至 2026 中报落库 100,423 个公告版本，12 个代表交易日 as-of 覆盖 100%；旧历史快照污染不再进入候选。指数成分历史和样本外验证仍未完成，因此 `research_only + validation_pending + unvalidated` 的结论不变。
+同日 DQ4 又补齐按公告日和修订版本生效的基本面真相层，回测方法论升级为 `close_signal_next_open_pit_fundamentals_v4`。2022 年报至 2026 中报落库 100,423 个公告版本，12 个代表交易日 as-of 覆盖 100%；旧历史快照污染不再进入候选。
+
+随后 DQ5 建立四个核心宽基指数的月度历史成分真相层，显式指数回测按信号日读取最近快照并 fail-closed，默认全 A 口径保持不变。数据真相主线已完成；样本外验证仍未完成，因此 `research_only + validation_pending + unvalidated` 的结论不变。
 
 ### 3.5 任务与存储基线
 
@@ -960,3 +962,9 @@ BacktestRepository 现在按信号日连接生命周期和历史名称区间，�
 新增 migration `0018`，建立 `stock_fundamental_pit` 与 `fundamental_pit_manifest`。同步器通过 Tushare `fina_indicator_vip` 按报告期分页，保留报告期、公告日和修订版本；成熟报告期首刷需达到历史股票池 50%，重复刷新不得低于已有覆盖 80%。2022 年报至 2026 中报共落库 100,423 个版本、5,766 只股票，日期硬异常为 0；12 个代表交易日 as-of 覆盖 `61,970 / 61,970`。
 
 回测只使用信号日 `daily_basic` PE/PB 与公告日不晚于信号日的最新报告期，Service 再次 fail-closed 清除未知或未来财务版本；方法论升级为 `close_signal_next_open_pit_fundamentals_v4`。全市场 fallback SQL 相比原查询新增约 0.74 秒，主要耗时仍是既有 90 日窗口。最终 DQ4 为 `8 pass / 6 warn / 0 fail`，公告日检查 pass；149 项回归、生产/独立 smoke migration 18/18 与第二遍幂等均通过。所有回测继续 `research_only / validation_pending / unvalidated`。
+
+### 2026-07-17：DQ5 历史指数成分真相层已落地
+
+新增 migration `0019`，建立 `index_constituent_pit` 与 `index_constituent_pit_manifest`。Tushare `index_weight` 按月串行同步上证 50、沪深 300、中证 500 和中证 1000；2023-12 至 2026-06 的 124 个指数/月分区全部成功，落库 57,350 条成分，成员数、权重、代码映射和日期硬异常均通过守卫。12 个代表交易日共 48 个 as-of 快照覆盖 `22,200 / 22,200`，最大滞后 17 天。
+
+回测请求新增显式 `universe_code`，默认 `ALL_A` 不变；只有选择指数时才按信号日读取最近月度快照，缺失、成员数或权重异常都会 fail-closed。方法论升级为 `close_signal_next_open_pit_index_universe_v5`，并明确记录“月度权重快照不是精确调仓事件”的限制。最终 DQ5 为 `10 pass / 5 warn / 0 fail`；159 项回归、生产/独立 smoke migration 19/19 与第二遍幂等均通过。沪深 300 两日工程 smoke 成功，但所有回测继续 `research_only / validation_pending / unvalidated`。

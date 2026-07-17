@@ -337,6 +337,18 @@ PYTHONPATH=. .venv/bin/python -m app.orchestration.migrate --check
 - 本地 health、system status、system 页面与回测结果均为 HTTP 200；公网 health 200，公网 `/system` 未认证返回预期 401。
 - DQ4 快照为 `8 pass / 6 warn / 0 fail`，公告日基本面检查自身为 pass；readiness 若在 18:30 因子日更前显示 degraded，仅表示 7 月 17 日日线已收盘而 factor input 暂停在 7 月 16 日，仍 `accepting_jobs=true`。
 
+## DQ5 历史指数成分部署（2026-07-17）
+
+- 生产与保留的独立 migration smoke 库均已增量应用 `0019`，最终 `19/19 ready`；smoke 库第二遍 `applied_now=0`。
+- 后台全量回填完成 2023-12 至 2026-06 的上证 50、沪深 300、中证 500 和中证 1000：`57,350` 条成分、31 个快照日，`124/124` 个指数/月 manifest 成功，partial/failed 和四类硬异常均为 0。
+- crontab 新增每天 `04:45` 运行 `run_index_constituent_pit_backfill.py --recent-months 3`，核心 DQ 夜间审计顺延到 `05:00`；交易日 `18:45` 复核保持不变。指数任务 1 条、DQ 任务 2 条，无重复。
+- API 与 backtest worker 已串行重启，两个 unit 的 `ExecStartPre` 均验证 migration 19/19；`NRestarts=0`。selection/portfolio worker 未重启且保持健康。
+- system test `backtest_lowvol_reversal_20260717_203303_252683` 使用沪深 300，成功完成 2 个信号日、6 个 picks/6 笔交易；`methodology_version=close_signal_next_open_pit_index_universe_v5`，并保持 `is_system_test=1 / research_only=true / validation_pending`。窗口收益为负，只作工程 smoke。
+- 本地 health、readiness、system status 和回测结果均为 HTTP 200；公网 health 200，公网 `/system` 未认证返回预期 401。readiness 为 `ready / accepting_jobs=true`，三个 worker healthy/idle、三类队列为 0。
+- DQ5 快照为 `10 pass / 5 warn / 0 fail`；指数成分检查自身为 pass，12 个代表交易日成员覆盖 `22,200/22,200`，最大快照滞后 17 天。
+- 全量 159 项 unittest、Python 编译、前端 JavaScript、cron shell 和 diff 检查均通过。
+- 回测默认股票池继续是 `ALL_A`。用户显式选择指数时才读取信号日之前最近的月度权重快照；这不是精确到调仓公告时刻的事件流。
+
 ## Portfolio Repository 垂直切片（2026-07-16）
 
 持仓模块的 SQL 已从 `app/portfolio/service.py` 收口到 `app/portfolio/repository.py`。Service 继续负责行情兜底、技术指标、纪律规则、AI 建议、缓存失效与结果评分，不再直接打开 MySQL 连接。

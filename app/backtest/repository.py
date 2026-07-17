@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Callable, Sequence
 
 from app.shared.db import mysql_conn
+from app.shared.index_universe import ALL_A_UNIVERSE_CODE, normalize_backtest_universe
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
@@ -316,17 +317,92 @@ class BacktestRepository:
                 )
                 return cursor.fetchone() or {}
 
+    @staticmethod
+    def _universe_sql_parts(
+        universe_code: str,
+        trade_date: str,
+    ) -> tuple[str, str, tuple[str, ...]]:
+        normalized = normalize_backtest_universe(universe_code)
+        if normalized == ALL_A_UNIVERSE_CODE:
+            return (
+                """
+                NULL AS universe_index_code,
+                NULL AS universe_effective_date,
+                NULL AS universe_weight,
+                1 AS pit_universe_available,
+                """,
+                "",
+                (),
+            )
+        return (
+            """
+            iu.index_code AS universe_index_code,
+            iu.effective_date AS universe_effective_date,
+            iu.weight AS universe_weight,
+            1 AS pit_universe_available,
+            """,
+            """
+            INNER JOIN index_constituent_pit iu
+              ON iu.code = f.code
+             AND iu.index_code = %s
+             AND iu.effective_date = (
+                 SELECT MAX(iu2.effective_date)
+                 FROM index_constituent_pit iu2
+                 WHERE iu2.index_code = %s
+                   AND iu2.effective_date <= %s
+             )
+            """,
+            (normalized, normalized, trade_date),
+        )
+
+    def load_index_universe_snapshot(
+        self,
+        universe_code: str,
+        trade_date: str,
+    ) -> dict[str, Any]:
+        normalized = normalize_backtest_universe(universe_code)
+        if normalized == ALL_A_UNIVERSE_CODE:
+            return {
+                "index_code": normalized,
+                "effective_date": trade_date,
+                "member_count": None,
+            }
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT index_code, effective_date, COUNT(*) AS member_count,
+                           SUM(weight) AS weight_sum
+                    FROM index_constituent_pit
+                    WHERE index_code=%s
+                      AND effective_date=(
+                          SELECT MAX(effective_date)
+                          FROM index_constituent_pit
+                          WHERE index_code=%s AND effective_date <= %s
+                      )
+                    GROUP BY index_code, effective_date
+                    """,
+                    (normalized, normalized, trade_date),
+                )
+                return cursor.fetchone() or {}
+
     def load_feature_candidate_rows(
         self,
         trade_date: str,
         instrument_type: str,
+        universe_code: str = ALL_A_UNIVERSE_CODE,
     ) -> list[dict[str, Any]]:
-        sql = """
+        universe_select, universe_join, universe_params = self._universe_sql_parts(
+            universe_code,
+            trade_date,
+        )
+        sql = f"""
         SELECT
             sil.code,
             COALESCE(nh.name, sb.name, sil.name) AS name,
             COALESCE(sb.industry, sil.industry) AS industry,
             sil.instrument_type,
+            {universe_select}
             CASE
                 WHEN nh.id IS NULL THEN 0
                 ELSE (nh.is_st=1 OR nh.is_delisting_period=1)
@@ -416,6 +492,7 @@ class BacktestRepository:
               WHERE s2.code = f.code AND s2.trade_date <= f.trade_date
           )
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
+        {universe_join}
         WHERE f.trade_date = %s
           AND sil.instrument_type = %s
           AND (sil.listing_date IS NULL OR sil.listing_date <= f.trade_date)
@@ -426,7 +503,7 @@ class BacktestRepository:
         """
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, (trade_date, instrument_type))
+                cursor.execute(sql, (*universe_params, trade_date, instrument_type))
                 return cursor.fetchall() or []
 
     def load_candidate_rows(
@@ -436,13 +513,19 @@ class BacktestRepository:
         instrument_type: str,
         kline_window_start: str,
         factor_window_start: str,
+        universe_code: str = ALL_A_UNIVERSE_CODE,
     ) -> list[dict[str, Any]]:
-        sql = """
+        universe_select, universe_join, universe_params = self._universe_sql_parts(
+            universe_code,
+            trade_date,
+        )
+        sql = f"""
         SELECT
             sil.code,
             COALESCE(nh.name, sb.name, sil.name) AS name,
             COALESCE(sb.industry, sil.industry) AS industry,
             sil.instrument_type,
+            {universe_select}
             CASE
                 WHEN nh.id IS NULL THEN 0
                 ELSE (nh.is_st=1 OR nh.is_delisting_period=1)
@@ -574,6 +657,7 @@ class BacktestRepository:
               WHERE s2.code = f.code AND s2.trade_date <= f.trade_date
           )
         LEFT JOIN market_context_daily mcd ON mcd.trade_date = f.trade_date AND mcd.index_code = '000300.SH'
+        {universe_join}
         WHERE f.trade_date = %s
           AND sil.instrument_type = %s
           AND (sil.listing_date IS NULL OR sil.listing_date <= f.trade_date)
@@ -591,6 +675,7 @@ class BacktestRepository:
                         trade_date,
                         factor_window_start,
                         trade_date,
+                        *universe_params,
                         trade_date,
                         instrument_type,
                     ),

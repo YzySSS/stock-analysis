@@ -355,6 +355,14 @@ function formatDataQualityGapSample(sample = {}) {
     if (sample.listing_date) details.push(`上市 ${sample.listing_date}`);
     return details.length ? `${code}：${details.join('；')}` : code;
   }
+  if (sample.classification === 'index_snapshot_gap') {
+    const indexLabel = sample.index_name || sample.index_code || '指数';
+    if (sample.trade_date) details.push(`信号日 ${sample.trade_date}`);
+    if (sample.effective_date) details.push(`最近快照 ${sample.effective_date}`);
+    details.push(`成员 ${sample.member_count ?? 0}/${sample.expected_members ?? '-'}`);
+    if (sample.staleness_days != null) details.push(`间隔 ${sample.staleness_days} 天`);
+    return `${indexLabel}：${details.join('；')}`;
+  }
   if (sample.consecutive_missing_trade_days != null) {
     const capped = sample.persistence_capped ? '+' : '';
     details.push(`连续 ${sample.consecutive_missing_trade_days}${capped} 个交易日`);
@@ -372,7 +380,7 @@ function formatDataQualityGapSample(sample = {}) {
 
 function renderDataQuality(item = {}) {
   if (!item.generated_at) {
-    return '<div class="empty-state">尚无离线质量快照，等待 04:55 或 18:45 自动审计。</div>';
+    return '<div class="empty-state">尚无离线质量快照，等待 05:00 或 18:45 自动审计。</div>';
   }
   const counts = item.counts || {};
   const checks = item.checks || [];

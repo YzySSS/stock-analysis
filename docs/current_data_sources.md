@@ -122,6 +122,12 @@
   - 不允许真实默认值
   - 不直接复用旧脚本里的明文 token 写法
 
+2026-07-17 point-in-time 真相层补充：
+
+- `stock_fundamental_pit` / `fundamental_pit_manifest` 使用 `fina_indicator_vip` 按报告期、公告日和修订版本保存历史基本面。
+- `index_constituent_pit` / `index_constituent_pit_manifest` 使用 `index_weight` 保存上证 50、沪深 300、中证 500 和中证 1000 的月度历史成分及权重。
+- 指数数据当前只有月度权重快照精度；回测采用信号日 as-of 最近快照，不宣称精确调仓事件时间。
+
 ---
 
 ## 二、当前部分可访问但未稳定封装的数据源

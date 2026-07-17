@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.shared.db import mysql_conn
+from app.shared.index_universe import INDEX_UNIVERSE_DEFINITIONS, index_member_guard_range
 
 
 HISTORY_LOOKBACK_TRADE_DAYS = 60
@@ -15,6 +16,7 @@ UPSTREAM_TASKS = {
     "stock_status_snapshot": ("stock_status_snapshot_refresh",),
     "stock_status_pit": ("stock_status_pit_backfill",),
     "fundamental_pit": ("fundamental_pit_backfill",),
+    "index_constituent_pit": ("index_constituent_pit_backfill",),
 }
 UPSTREAM_SOURCE_BY_TASK = {
     "daily_kline_realtime_eod_backfill": "stock_realtime_snapshot",
@@ -23,6 +25,7 @@ UPSTREAM_SOURCE_BY_TASK = {
     "stock_status_snapshot_refresh": "akshare",
     "stock_status_pit_backfill": "tushare_stock_basic+namechange+suspend_d",
     "fundamental_pit_backfill": "tushare_fina_indicator_vip",
+    "index_constituent_pit_backfill": "tushare_index_weight",
 }
 
 
@@ -117,6 +120,7 @@ class DataQualityRepository:
                 factor_input = self._fetch_factor_input(cursor, dates)
                 point_in_time = self._fetch_point_in_time_status(cursor, dates)
                 fundamental_pit = self._fetch_point_in_time_fundamentals(cursor, dates)
+                index_constituent_pit = self._fetch_point_in_time_index_constituents(cursor, dates)
                 future_rows = self._fetch_future_rows(cursor)
 
                 daily_reference_dates = self._fetch_recent_daily_dates(
@@ -169,7 +173,7 @@ class DataQualityRepository:
                 )
 
         return {
-            "audit_version": "dq4",
+            "audit_version": "dq5",
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "history_lookback_trade_days": HISTORY_LOOKBACK_TRADE_DAYS,
             "dates": dates,
@@ -179,6 +183,7 @@ class DataQualityRepository:
             "factor_input_daily": factor_input,
             "point_in_time_status": point_in_time,
             "point_in_time_fundamentals": fundamental_pit,
+            "point_in_time_index_constituents": index_constituent_pit,
             "future_rows": future_rows,
         }
 
@@ -865,6 +870,243 @@ class DataQualityRepository:
             "samples": samples,
         }
 
+    def _fetch_point_in_time_index_constituents(
+        self,
+        cursor: Any,
+        dates: dict[str, Any],
+    ) -> dict[str, Any]:
+        start_date = _as_date(dates.get("factor_input_min_trade_date"))
+        end_date = _as_date(dates.get("factor_input_trade_date"))
+        index_codes = list(INDEX_UNIVERSE_DEFINITIONS)
+        if not start_date or not end_date:
+            return {
+                "history_start_date": str(start_date) if start_date else None,
+                "history_end_date": str(end_date) if end_date else None,
+                "table": {},
+                "manifest": {},
+                "coverage": {},
+                "coverage_by_date": [],
+                "samples": [],
+            }
+
+        def shift_month(value: date, offset: int) -> date:
+            absolute = value.year * 12 + value.month - 1 + offset
+            return date(absolute // 12, absolute % 12 + 1, 1)
+
+        required_start_month = shift_month(start_date, -1)
+        required_end_month = shift_month(end_date, -1)
+        expected_months = max(
+            (required_end_month.year - required_start_month.year) * 12
+            + required_end_month.month
+            - required_start_month.month
+            + 1,
+            0,
+        )
+        index_placeholders = ", ".join(["%s"] * len(index_codes))
+
+        cursor.execute(
+            f"""
+            SELECT
+                COUNT(*) AS rows_count,
+                COUNT(DISTINCT index_code) AS distinct_index_codes,
+                COUNT(DISTINCT effective_date) AS distinct_snapshot_dates,
+                MIN(effective_date) AS min_effective_date,
+                MAX(effective_date) AS max_effective_date,
+                SUM(l.code IS NULL) AS orphan_rows,
+                SUM(weight IS NULL OR weight < 0) AS invalid_weight_rows,
+                SUM(effective_date > CURDATE()) AS future_effective_rows,
+                SUM(index_code NOT IN ({index_placeholders})) AS unsupported_index_rows
+            FROM index_constituent_pit p
+            LEFT JOIN stock_instrument_lifecycle l ON l.code=p.code
+            """,
+            index_codes,
+        )
+        table = _normalize_row(cursor.fetchone())
+
+        guard_ranges = {
+            code: index_member_guard_range(config["expected_members"])
+            for code, config in INDEX_UNIVERSE_DEFINITIONS.items()
+        }
+        member_guard_sql = " OR ".join(
+            f"(index_code='{code}' AND member_count NOT BETWEEN {bounds[0]} AND {bounds[1]})"
+            for code, bounds in guard_ranges.items()
+        )
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS total_snapshot_partitions,
+                   COALESCE(SUM(
+                       CASE
+                           WHEN ({member_guard_sql})
+                             OR weight_sum NOT BETWEEN 95 AND 105
+                           THEN 1 ELSE 0
+                       END
+                   ), 0) AS invalid_snapshot_partitions
+            FROM (
+                SELECT index_code, effective_date,
+                       COUNT(*) AS member_count,
+                       SUM(weight) AS weight_sum
+                FROM index_constituent_pit
+                WHERE index_code IN ({index_placeholders})
+                GROUP BY index_code, effective_date
+            ) snapshots
+            """,
+            index_codes,
+        )
+        table.update(_normalize_row(cursor.fetchone()))
+
+        cursor.execute(
+            f"""
+            SELECT
+                COUNT(*) AS manifest_partitions,
+                COUNT(DISTINCT index_code) AS manifest_index_codes,
+                SUM(status='success') AS successful_partitions,
+                SUM(status='partial_success') AS partial_partitions,
+                SUM(status='failed') AS failed_partitions,
+                MIN(period_month) AS min_period_month,
+                MAX(period_month) AS max_period_month,
+                MAX(finished_at) AS latest_finished_at
+            FROM index_constituent_pit_manifest
+            WHERE index_code IN ({index_placeholders})
+              AND period_month BETWEEN %s AND %s
+            """,
+            (*index_codes, required_start_month, required_end_month),
+        )
+        manifest = _normalize_row(cursor.fetchone())
+        manifest["expected_months"] = expected_months
+        manifest["expected_partitions"] = expected_months * len(index_codes)
+        manifest["required_start_month"] = str(required_start_month)
+        manifest["required_end_month"] = str(required_end_month)
+
+        cursor.execute(
+            """
+            SELECT MAX(trade_date) AS trade_date
+            FROM factor_input_daily
+            WHERE trade_date BETWEEN %s AND %s
+            GROUP BY YEAR(trade_date), QUARTER(trade_date)
+            ORDER BY trade_date
+            """,
+            (start_date, end_date),
+        )
+        representative_dates = [
+            str(row["trade_date"])
+            for row in (cursor.fetchall() or [])
+            if row.get("trade_date")
+        ]
+        representative_dates = sorted(
+            set([str(start_date), str(end_date), *representative_dates])
+        )
+        if len(representative_dates) > 12:
+            last_index = len(representative_dates) - 1
+            representative_dates = sorted(
+                {
+                    representative_dates[round(index * last_index / 11)]
+                    for index in range(12)
+                }
+            )
+
+        coverage_by_date: list[dict[str, Any]] = []
+        samples: list[dict[str, Any]] = []
+        for trade_date in representative_dates:
+            for index_code in index_codes:
+                cursor.execute(
+                    """
+                    SELECT effective_date, COUNT(*) AS member_count,
+                           SUM(weight) AS weight_sum,
+                           DATEDIFF(%s, effective_date) AS staleness_days
+                    FROM index_constituent_pit
+                    WHERE index_code=%s
+                      AND effective_date=(
+                          SELECT MAX(effective_date)
+                          FROM index_constituent_pit
+                          WHERE index_code=%s AND effective_date <= %s
+                      )
+                    GROUP BY effective_date
+                    """,
+                    (trade_date, index_code, index_code, trade_date),
+                )
+                row = _normalize_row(cursor.fetchone())
+                expected_members = int(
+                    INDEX_UNIVERSE_DEFINITIONS[index_code]["expected_members"]
+                )
+                member_count = int(row.get("member_count") or 0)
+                covered_members = min(member_count, expected_members)
+                coverage_ratio = round(
+                    covered_members / expected_members,
+                    6,
+                ) if expected_members else 0.0
+                item = {
+                    "trade_date": trade_date,
+                    "index_code": index_code,
+                    "index_name": INDEX_UNIVERSE_DEFINITIONS[index_code]["name"],
+                    "effective_date": row.get("effective_date"),
+                    "member_count": member_count,
+                    "expected_members": expected_members,
+                    "covered_members": covered_members,
+                    "coverage_ratio": coverage_ratio,
+                    "weight_sum": row.get("weight_sum"),
+                    "staleness_days": row.get("staleness_days"),
+                }
+                coverage_by_date.append(item)
+                if (
+                    coverage_ratio < 0.95
+                    or row.get("effective_date") is None
+                    or int(row.get("staleness_days") or 0) > 45
+                ) and len(samples) < self.SAMPLE_LIMIT:
+                    samples.append(
+                        {
+                            **item,
+                            "classification": "index_snapshot_gap",
+                        }
+                    )
+
+        expected_members_total = sum(
+            int(row.get("expected_members") or 0) for row in coverage_by_date
+        )
+        covered_members_total = sum(
+            int(row.get("covered_members") or 0) for row in coverage_by_date
+        )
+        coverage_ratio = round(
+            covered_members_total / expected_members_total,
+            6,
+        ) if expected_members_total else 0.0
+        worst = min(
+            coverage_by_date,
+            key=lambda row: float(row.get("coverage_ratio") or 0),
+            default={},
+        )
+        max_staleness_days = max(
+            [int(row.get("staleness_days") or 0) for row in coverage_by_date],
+            default=0,
+        )
+        return {
+            "history_start_date": str(start_date),
+            "history_end_date": str(end_date),
+            "supported_indices": [
+                {
+                    "index_code": code,
+                    "index_name": INDEX_UNIVERSE_DEFINITIONS[code]["name"],
+                    "expected_members": INDEX_UNIVERSE_DEFINITIONS[code]["expected_members"],
+                }
+                for code in index_codes
+            ],
+            "table": table,
+            "manifest": manifest,
+            "coverage": {
+                "sample_dates": len(representative_dates),
+                "sample_index_snapshots": len(coverage_by_date),
+                "expected_members": expected_members_total,
+                "covered_members": covered_members_total,
+                "missing_members": max(expected_members_total - covered_members_total, 0),
+                "coverage_ratio": coverage_ratio,
+                "worst_trade_date": worst.get("trade_date"),
+                "worst_index_code": worst.get("index_code"),
+                "worst_coverage_ratio": worst.get("coverage_ratio"),
+                "max_staleness_days": max_staleness_days,
+            },
+            "coverage_by_date": coverage_by_date,
+            "samples": samples,
+        }
+
     @staticmethod
     def _fetch_stock_basic(cursor: Any) -> dict[str, Any]:
         cursor.execute(
@@ -1165,7 +1407,8 @@ class DataQualityRepository:
             SELECT
                 (SELECT COUNT(*) FROM daily_kline WHERE trade_date > CURDATE()) AS daily_kline,
                 (SELECT COUNT(*) FROM factor_input_daily WHERE trade_date > CURDATE()) AS factor_input_daily,
-                (SELECT COUNT(*) FROM stock_status_snapshot WHERE trade_date > CURDATE()) AS stock_status_snapshot
+                (SELECT COUNT(*) FROM stock_status_snapshot WHERE trade_date > CURDATE()) AS stock_status_snapshot,
+                (SELECT COUNT(*) FROM index_constituent_pit WHERE effective_date > CURDATE()) AS index_constituent_pit
             """
         )
         return _normalize_row(cursor.fetchone())

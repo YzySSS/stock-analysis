@@ -32,6 +32,7 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
         self.assertEqual(legacy["methodology_version"], LEGACY_BACKTEST_METHODOLOGY_VERSION)
         self.assertEqual(current["methodology_version"], BACKTEST_METHODOLOGY_VERSION)
         self.assertIn("T+1", current["risk_notice"])
+        self.assertIn("月度成分权重快照", current["risk_notice"])
 
     def test_pick_does_not_use_signal_day_open_as_entry(self):
         pick = BacktestService()._build_pick(
@@ -198,6 +199,21 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
         self.assertEqual(executed["validation_baseline_id"], "b3-smoke")
         self.assertEqual(executed["status"], "queued")
         self.assertEqual(executed["progress_total_days"], 2)
+        request_json = __import__("json").loads(executed["request_json"])
+        methodology_json = __import__("json").loads(executed["methodology_json"])
+        self.assertEqual(request_json["universe_code"], "ALL_A")
+        self.assertEqual(methodology_json["universe_code"], "ALL_A")
+
+    def test_missing_index_snapshot_fails_closed_before_candidate_loading(self):
+        class FakeRepository:
+            @staticmethod
+            def load_index_universe_snapshot(_universe_code, _trade_date):
+                return {}
+
+        service = BacktestService(repository=FakeRepository())
+
+        with self.assertRaisesRegex(ValueError, "fail-closed"):
+            service._ensure_index_universe_snapshot("000300.SH", "2026-07-16")
 
 
 if __name__ == "__main__":

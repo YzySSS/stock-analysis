@@ -14,6 +14,7 @@ from app.orchestration.feature_cache_schema import ensure_feature_cache_schema
 from app.orchestration.fundamental_pit_schema import ensure_fundamental_pit_schema
 from app.orchestration.init_project import init_mysql_schema
 from app.orchestration.intraday_bar_schema import ensure_intraday_bar_schema
+from app.orchestration.index_constituent_pit_schema import ensure_index_constituent_pit_schema
 from app.orchestration.market_fund_flow_schema import ensure_market_fund_flow_schema
 from app.orchestration.market_opinion_schema import ensure_market_opinion_schema
 from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
@@ -94,6 +95,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0016", "worker runtime, job state and retention schema", ensure_job_ops_schema),
     Migration("0017", "point-in-time stock lifecycle and status schema", ensure_stock_status_pit_schema),
     Migration("0018", "point-in-time fundamental announcement schema", ensure_fundamental_pit_schema),
+    Migration("0019", "point-in-time index constituent schema", ensure_index_constituent_pit_schema),
 )
 
 

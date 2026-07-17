@@ -9,7 +9,7 @@ from app.data_quality.service import evaluate_data_quality
 
 def healthy_snapshot() -> dict:
     return {
-        "audit_version": "dq4",
+        "audit_version": "dq5",
         "generated_at": "2026-07-17 04:05:00",
         "history_lookback_trade_days": 60,
         "upstream_attempts": {
@@ -27,6 +27,11 @@ def healthy_snapshot() -> dict:
                 "task_name": "fundamental_pit_backfill",
                 "status": "success",
                 "last_attempt_at": "2026-07-17 04:40:48",
+            },
+            "index_constituent_pit": {
+                "task_name": "index_constituent_pit_backfill",
+                "status": "success",
+                "last_attempt_at": "2026-07-17 04:45:48",
             },
         },
         "dates": {
@@ -162,10 +167,53 @@ def healthy_snapshot() -> dict:
             },
             "samples": [],
         },
+        "point_in_time_index_constituents": {
+            "history_start_date": "2024-01-02",
+            "history_end_date": "2026-07-16",
+            "supported_indices": [
+                {"index_code": "000016.SH", "index_name": "上证50", "expected_members": 50},
+                {"index_code": "000300.SH", "index_name": "沪深300", "expected_members": 300},
+                {"index_code": "000905.SH", "index_name": "中证500", "expected_members": 500},
+                {"index_code": "000852.SH", "index_name": "中证1000", "expected_members": 1000},
+            ],
+            "table": {
+                "rows_count": 55000,
+                "distinct_index_codes": 4,
+                "distinct_snapshot_dates": 31,
+                "min_effective_date": "2023-12-29",
+                "max_effective_date": "2026-06-30",
+                "orphan_rows": 0,
+                "invalid_weight_rows": 0,
+                "future_effective_rows": 0,
+                "unsupported_index_rows": 0,
+                "total_snapshot_partitions": 124,
+                "invalid_snapshot_partitions": 0,
+            },
+            "manifest": {
+                "expected_partitions": 124,
+                "successful_partitions": 124,
+                "partial_partitions": 0,
+                "failed_partitions": 0,
+            },
+            "coverage": {
+                "sample_dates": 12,
+                "sample_index_snapshots": 48,
+                "expected_members": 22200,
+                "covered_members": 22200,
+                "missing_members": 0,
+                "coverage_ratio": 1.0,
+                "max_staleness_days": 31,
+                "worst_trade_date": "2024-01-02",
+                "worst_index_code": "000016.SH",
+                "worst_coverage_ratio": 1.0,
+            },
+            "samples": [],
+        },
         "future_rows": {
             "daily_kline": 0,
             "factor_input_daily": 0,
             "stock_status_snapshot": 0,
+            "index_constituent_pit": 0,
         },
     }
 
@@ -191,7 +239,7 @@ class DataQualityEvaluationTests(unittest.TestCase):
         result = evaluate_data_quality(healthy_snapshot())
 
         self.assertEqual(result["health"], "healthy")
-        self.assertEqual(result["counts"], {"pass": 14, "warn": 0, "fail": 0})
+        self.assertEqual(result["counts"], {"pass": 15, "warn": 0, "fail": 0})
 
     def test_actionable_gaps_are_warnings_with_small_bounded_counts(self):
         snapshot = healthy_snapshot()
@@ -227,7 +275,7 @@ class DataQualityEvaluationTests(unittest.TestCase):
         result = evaluate_data_quality(snapshot)
         check = next(item for item in result["checks"] if item["check_id"] == "daily_kline_coverage")
 
-        self.assertEqual(result["audit_version"], "dq4")
+        self.assertEqual(result["audit_version"], "dq5")
         self.assertEqual(check["metrics"]["persistent_samples"], 1)
         self.assertEqual(check["metrics"]["long_running_samples"], 1)
         self.assertEqual(check["metrics"]["max_consecutive_missing_trade_days"], 5)
@@ -245,6 +293,46 @@ class DataQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(result["health"], "error")
         self.assertEqual(status_by_id["daily_kline_integrity"], "fail")
         self.assertEqual(status_by_id["future_trade_dates"], "fail")
+
+    def test_incomplete_index_history_stays_a_research_warning(self):
+        snapshot = healthy_snapshot()
+        snapshot["point_in_time_index_constituents"]["manifest"].update(
+            {"successful_partitions": 120, "partial_partitions": 4}
+        )
+        snapshot["point_in_time_index_constituents"]["coverage"].update(
+            {
+                "covered_members": 21000,
+                "missing_members": 1200,
+                "coverage_ratio": 0.945946,
+                "max_staleness_days": 62,
+            }
+        )
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item
+            for item in result["checks"]
+            if item["check_id"] == "point_in_time_index_constituent_truth"
+        )
+
+        self.assertEqual(check["status"], "warn")
+        self.assertFalse(check["metrics"]["backtest_index_universe_ready"])
+
+    def test_corrupt_index_snapshot_is_a_hard_failure(self):
+        snapshot = healthy_snapshot()
+        snapshot["point_in_time_index_constituents"]["table"][
+            "invalid_snapshot_partitions"
+        ] = 1
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item
+            for item in result["checks"]
+            if item["check_id"] == "point_in_time_index_constituent_truth"
+        )
+
+        self.assertEqual(check["status"], "fail")
+        self.assertFalse(check["metrics"]["backtest_index_universe_ready"])
 
     def test_incomplete_historical_delisted_market_data_stays_research_warning(self):
         snapshot = healthy_snapshot()

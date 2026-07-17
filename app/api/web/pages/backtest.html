@@ -41,7 +41,7 @@
         <span class="badge status-warn">RESEARCH ONLY</span>
         <div>
           <strong>回测结果仅用于研究和排错，不代表可交易结论</strong>
-          <p>当前口径仍在修正信号时点、非时点化基本面与幸存者偏差；完成样本外验证前，请勿据此直接决策。</p>
+          <p>当前已使用 T+1 成交、历史状态、公告日基本面和可选指数月度成分；完成样本外验证前，请勿据此直接决策。</p>
         </div>
       </section>
 
@@ -89,6 +89,17 @@
               <button id="backtest-ashare-realistic-preset" class="btn btn-secondary backtest-preset-button wide" type="button">
                 应用 A 股真实化预设
               </button>
+              <div class="terminal-form-field wide">
+                <label for="backtest-universe-code">历史股票池</label>
+                <select id="backtest-universe-code">
+                  <option value="ALL_A">历史全A（默认）</option>
+                  <option value="000016.SH">上证50（月度历史成分）</option>
+                  <option value="000300.SH">沪深300（月度历史成分）</option>
+                  <option value="000905.SH">中证500（月度历史成分）</option>
+                  <option value="000852.SH">中证1000（月度历史成分）</option>
+                </select>
+                <small>指定指数时按信号日前最近一份 Tushare 月度权重快照筛选，不读取当前成分。</small>
+              </div>
               <label class="inline-checkbox backtest-adjusted-toggle wide" for="backtest-use-adjusted-price">
                 <input id="backtest-use-adjusted-price" type="checkbox" />
                 <span>
@@ -265,6 +276,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260612price"></script>
-  <script src="/static/js/backtest.js?v=20260716b2"></script>
+  <script src="/static/js/backtest.js?v=20260717dq5"></script>
 </body>
 </html>

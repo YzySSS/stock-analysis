@@ -18,6 +18,13 @@ from app.backtest.repository import BacktestRepository
 from app.jobs.errors import record_job_error
 from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
 from app.shared.instrument_policy import SUPPORTED_BACKTEST_INSTRUMENT_TYPES, require_supported_instrument
+from app.shared.index_universe import (
+    ALL_A_UNIVERSE_CODE,
+    expected_index_members,
+    index_member_guard_range,
+    normalize_backtest_universe,
+    universe_label,
+)
 from app.stock_selection.selector import StockSelector
 from app.strategies.service import StrategyService
 
@@ -31,6 +38,7 @@ class BacktestRequest:
     trade_strategy_id: Optional[str] = None
     evaluation_mode: str = "research"
     instrument_type: str = "stock"
+    universe_code: str = ALL_A_UNIVERSE_CODE
     use_adjusted_price: bool = False
     commission_bps: float = 0.0
     stamp_tax_bps: float = 0.0
@@ -100,6 +108,8 @@ class BacktestService:
 
     @staticmethod
     def _methodology_metadata(request: BacktestRequest) -> Dict[str, Any]:
+        universe_code = normalize_backtest_universe(request.universe_code)
+        indexed_universe = universe_code != ALL_A_UNIVERSE_CODE
         return {
             "methodology_version": BACKTEST_METHODOLOGY_VERSION,
             "signal_timing": "T日收盘后形成信号",
@@ -111,13 +121,24 @@ class BacktestService:
                 "observe_t3_daily": "入场后逐日观察至第三个交易日",
             }.get(request.return_mode),
             "fundamental_policy": "tushare_daily_basic_t_day_plus_announcement_date_asof_v4",
-            "universe_policy": "tushare_lifecycle_name_st_point_in_time_v3",
+            "universe_policy": (
+                "tushare_index_weight_monthly_snapshot_asof_v5"
+                if indexed_universe
+                else "tushare_lifecycle_name_st_point_in_time_all_a_v3"
+            ),
+            "universe_code": universe_code,
+            "universe_label": universe_label(universe_code),
+            "index_constituent_effective_policy": (
+                "latest_monthly_snapshot_effective_date_lte_signal_date"
+                if indexed_universe
+                else None
+            ),
             "known_limitations": [
-                "历史状态、退市股票行情与公告日基本面覆盖必须以 DQ4 审计结果为准",
-                "DQ4 未覆盖的历史名称/ST 或基本面状态按未知处理，ST 状态继续 fail-closed",
+                "历史状态、退市股票行情、公告日基本面与指数月度成分覆盖必须以 DQ5 审计结果为准",
+                "DQ5 未覆盖的历史名称/ST、基本面或所选指数快照按未知处理并 fail-closed",
                 "公告日只有日期粒度，按公告日不晚于信号日视为可在下一交易日开盘前获知",
                 "停牌日通过 Tushare 事件留痕，实际成交仍以行情和开盘价约束判定",
-                "指数成分变更历史尚未建模",
+                "Tushare index_weight 为月度权重快照，不能替代精确到公告时刻的调仓事件流",
                 "回测仍为 research-only 且未完成样本外验证",
             ],
         }
@@ -168,6 +189,7 @@ class BacktestService:
         pit_status_available = bool(item.get("pit_status_available"))
         item["pit_status_unknown"] = not pit_status_available
         item["is_st"] = bool(item.get("is_st")) if pit_status_available else True
+        item["pit_universe_available"] = bool(item.get("pit_universe_available", True))
         return item
 
     def _fetch_data_cutoff(self, end_date: str) -> str | None:
@@ -307,6 +329,7 @@ class BacktestService:
             operation="backtest",
             supported=SUPPORTED_BACKTEST_INSTRUMENT_TYPES,
         )
+        request.universe_code = normalize_backtest_universe(request.universe_code)
         StrategyService().require_backtest_ready(
             request.strategy_id,
             instrument_type=request.instrument_type,
@@ -368,7 +391,12 @@ class BacktestService:
             rejection_counts: Dict[str, int] = {}
 
             for trade_date in trade_dates:
-                candidates = self._load_candidates(selector, trade_date, request.instrument_type)
+                candidates = self._load_candidates(
+                    selector,
+                    trade_date,
+                    request.instrument_type,
+                    request.universe_code,
+                )
                 selected = selector.run({"candidates": candidates})
                 picks = [self._build_pick(row, trade_date) for row in selected]
                 trades, daily_rejections = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
@@ -447,7 +475,12 @@ class BacktestService:
                     error_code="cancelled_by_user",
                 )
                 return
-            candidates = self._load_candidates(selector, trade_date, request.instrument_type)
+            candidates = self._load_candidates(
+                selector,
+                trade_date,
+                request.instrument_type,
+                request.universe_code,
+            )
             selected = selector.run({"candidates": candidates})
             picks = [self._build_pick(row, trade_date) for row in selected]
             trades, daily_rejections = self._build_trades(run_id, request.strategy_id, trade_date, picks, request)
@@ -478,10 +511,17 @@ class BacktestService:
             return cache_count > 0
         return cache_count >= max(1000, int(expected_count * 0.9))
 
-    def _load_candidates_from_feature_cache(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
+    def _load_candidates_from_feature_cache(
+        self,
+        selector: StockSelector,
+        trade_date: str,
+        instrument_type: str,
+        universe_code: str,
+    ) -> List[Dict[str, Any]]:
         rows = self.repository.load_feature_candidate_rows(
             trade_date,
             instrument_type,
+            universe_code,
         )
         candidates: List[Dict[str, Any]] = []
         for row in rows:
@@ -491,10 +531,41 @@ class BacktestService:
             candidates.append(item)
         return candidates
 
-    def _load_candidates(self, selector: StockSelector, trade_date: str, instrument_type: str) -> List[Dict[str, Any]]:
+    def _ensure_index_universe_snapshot(self, universe_code: str, trade_date: str) -> None:
+        if universe_code == ALL_A_UNIVERSE_CODE:
+            return
+        snapshot = self.repository.load_index_universe_snapshot(universe_code, trade_date)
+        member_count = int(snapshot.get("member_count") or 0)
+        expected = expected_index_members(universe_code)
+        minimum, maximum = index_member_guard_range(expected)
+        weight_sum = _to_float(snapshot.get("weight_sum"))
+        if (
+            not snapshot.get("effective_date")
+            or not minimum <= member_count <= maximum
+            or weight_sum is None
+            or not 95.0 <= weight_sum <= 105.0
+        ):
+            raise ValueError(
+                f"{trade_date} 缺少可用的 {universe_label(universe_code)} 历史成分快照；"
+                f"成员 {member_count}/{expected}、权重和 {weight_sum}，已按 fail-closed 停止回测"
+            )
+
+    def _load_candidates(
+        self,
+        selector: StockSelector,
+        trade_date: str,
+        instrument_type: str,
+        universe_code: str,
+    ) -> List[Dict[str, Any]]:
+        self._ensure_index_universe_snapshot(universe_code, trade_date)
         try:
             if self._has_lowvol_feature_cache(trade_date):
-                return self._load_candidates_from_feature_cache(selector, trade_date, instrument_type)
+                return self._load_candidates_from_feature_cache(
+                    selector,
+                    trade_date,
+                    instrument_type,
+                    universe_code,
+                )
         except Exception:
             # Cache table is optional; fall back to point-in-time window SQL.
             pass
@@ -505,6 +576,7 @@ class BacktestService:
             instrument_type=instrument_type,
             kline_window_start=kline_window_start,
             factor_window_start=factor_window_start,
+            universe_code=universe_code,
         )
         candidates: List[Dict[str, Any]] = []
         for row in rows:

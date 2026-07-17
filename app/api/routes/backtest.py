@@ -11,6 +11,7 @@ from app.backtest.policy import research_disclosure
 from app.backtest.repository import BacktestRepository
 from app.backtest.service import BacktestRequest, BacktestService
 from app.shared.instrument_policy import UnsupportedInstrumentError
+from app.shared.index_universe import ALL_A_UNIVERSE_CODE, universe_label
 
 router = APIRouter(tags=["backtest"])
 backtest_repository = BacktestRepository()
@@ -49,6 +50,7 @@ class BacktestRunRequest(BaseModel):
     trade_strategy_id: Optional[str] = None
     evaluation_mode: str = "research"
     instrument_type: str = "stock"
+    universe_code: str = ALL_A_UNIVERSE_CODE
     use_adjusted_price: bool = False
     commission_bps: float = Field(default=0, ge=0, le=100)
     stamp_tax_bps: float = Field(default=0, ge=0, le=100)
@@ -129,6 +131,7 @@ def normalize_run_row(row: dict, *, include_details: bool = True) -> dict:
         methodology = json.loads(methodology)
     strategy_id = row.get("strategy_id")
     strategy_version = row.get("strategy_version")
+    universe_code = (request or {}).get("universe_code") or ALL_A_UNIVERSE_CODE
     result = {
         **research_disclosure(row.get("methodology_version")),
         "run_id": row.get("run_id"),
@@ -143,6 +146,8 @@ def normalize_run_row(row: dict, *, include_details: bool = True) -> dict:
         "data_cutoff_date": str(row.get("data_cutoff_date")) if row.get("data_cutoff_date") else None,
         "strategy_config_hash": row.get("strategy_config_hash"),
         "instrument_type": row.get("instrument_type") or (request or {}).get("instrument_type") or "stock",
+        "universe_code": universe_code,
+        "universe_label": universe_label(universe_code),
         "status": row.get("status"),
         "phase": row.get("phase"),
         "deduplicated": bool(row.get("deduplicated")),

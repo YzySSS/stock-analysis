@@ -162,6 +162,51 @@ class BacktestRepositoryTests(unittest.TestCase):
             ),
         )
 
+    def test_index_universe_uses_latest_monthly_snapshot_not_current_members(self):
+        cursor = FakeCursor(fetchall_values=[[]])
+        repository = BacktestRepository(connection_factory(cursor))
+
+        repository.load_feature_candidate_rows(
+            "2026-07-16",
+            "stock",
+            "000300.SH",
+        )
+
+        sql, params = cursor.executed[0]
+        self.assertIn("INNER JOIN index_constituent_pit iu", sql)
+        self.assertIn("MAX(iu2.effective_date)", sql)
+        self.assertIn("iu2.effective_date <= %s", sql)
+        self.assertEqual(
+            params,
+            (
+                "000300.SH",
+                "000300.SH",
+                "2026-07-16",
+                "2026-07-16",
+                "stock",
+            ),
+        )
+
+    def test_index_snapshot_read_model_is_bounded_by_signal_date(self):
+        cursor = FakeCursor(
+            fetchone_values=[
+                {
+                    "index_code": "000300.SH",
+                    "effective_date": "2026-06-30",
+                    "member_count": 300,
+                }
+            ]
+        )
+        repository = BacktestRepository(connection_factory(cursor))
+
+        result = repository.load_index_universe_snapshot("000300.SH", "2026-07-16")
+
+        self.assertEqual(result["member_count"], 300)
+        sql, params = cursor.executed[0]
+        self.assertIn("MAX(effective_date)", sql)
+        self.assertIn("effective_date <= %s", sql)
+        self.assertEqual(params, ("000300.SH", "000300.SH", "2026-07-16"))
+
     def test_save_results_preserves_three_short_transaction_batches(self):
         cursor = FakeCursor()
         repository = BacktestRepository(connection_factory(cursor))

@@ -29,6 +29,7 @@ METRIC_FIELDS = (
     "win_rate_pct",
 )
 REQUEST_DEFAULTS = {
+    "universe_code": "ALL_A",
     "max_picks": 3,
     "score_threshold": None,
     "use_adjusted_price": False,
@@ -40,8 +41,8 @@ REQUEST_DEFAULTS = {
 BASELINE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$")
 VALIDATION_KNOWN_LIMITATIONS = (
     "样本少于 20 个交易日时只验证工程链路，不评价策略有效性",
-    "sh.689009 缺少上游历史名称/ST 区间，公告日基本面覆盖须以 DQ4 审计为准",
-    "指数成分变更历史尚未建模",
+    "sh.689009 缺少上游历史名称/ST 区间，历史真相覆盖须以 DQ5 审计为准",
+    "指数股票池基于 Tushare 月度权重快照，不代表精确到公告时刻的调仓事件流",
     "旧任务缺少配置 hash 时只能做方向性比较",
 )
 

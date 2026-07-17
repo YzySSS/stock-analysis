@@ -10,6 +10,8 @@ from app.data_quality.repository import DataQualityRepository
 STATUS_RANK = {"pass": 0, "warn": 1, "fail": 2}
 PIT_MARKET_FIELD_MIN_COVERAGE = 0.95
 PIT_FUNDAMENTAL_MIN_COVERAGE = 0.95
+PIT_INDEX_MEMBER_MIN_COVERAGE = 0.95
+PIT_INDEX_MAX_SNAPSHOT_STALENESS_DAYS = 45
 
 
 def _count(payload: dict[str, Any], key: str) -> int:
@@ -85,6 +87,7 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
     factor = snapshot.get("factor_input_daily") or {}
     point_in_time = snapshot.get("point_in_time_status") or {}
     fundamental_pit = snapshot.get("point_in_time_fundamentals") or {}
+    index_constituent_pit = snapshot.get("point_in_time_index_constituents") or {}
     future = snapshot.get("future_rows") or {}
     upstream_attempts = snapshot.get("upstream_attempts") or {}
     active_stocks = _count(stock, "active_stock_rows")
@@ -106,6 +109,97 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
             "fail" if identity_errors else "pass",
             f"身份字段异常 {identity_errors} 条；当前有效股票 {active_stocks} 只。",
             {key: _count(stock, key) for key in identity_keys} | {"active_stock_rows": active_stocks},
+        )
+    )
+
+    index_table = index_constituent_pit.get("table") or {}
+    index_manifest = index_constituent_pit.get("manifest") or {}
+    index_coverage = index_constituent_pit.get("coverage") or {}
+    supported_indices = index_constituent_pit.get("supported_indices") or []
+    index_rows = _count(index_table, "rows_count")
+    index_expected_members = _count(index_coverage, "expected_members")
+    index_covered_members = _count(index_coverage, "covered_members")
+    index_coverage_ratio = float(index_coverage.get("coverage_ratio") or 0)
+    expected_partitions = _count(index_manifest, "expected_partitions")
+    successful_partitions = _count(index_manifest, "successful_partitions")
+    max_staleness_days = _count(index_coverage, "max_staleness_days")
+    index_hard_errors = sum(
+        _count(index_table, key)
+        for key in (
+            "orphan_rows",
+            "invalid_weight_rows",
+            "future_effective_rows",
+            "unsupported_index_rows",
+            "invalid_snapshot_partitions",
+        )
+    )
+    index_ready = (
+        index_rows > 0
+        and index_expected_members > 0
+        and index_hard_errors == 0
+        and index_coverage_ratio >= PIT_INDEX_MEMBER_MIN_COVERAGE
+        and _count(index_table, "distinct_index_codes") == len(supported_indices)
+        and expected_partitions > 0
+        and successful_partitions == expected_partitions
+        and _count(index_manifest, "partial_partitions") == 0
+        and _count(index_manifest, "failed_partitions") == 0
+        and max_staleness_days <= PIT_INDEX_MAX_SNAPSHOT_STALENESS_DAYS
+    )
+    if index_rows <= 0 or index_expected_members <= 0 or index_hard_errors:
+        index_status = "fail"
+    elif not index_ready:
+        index_status = "warn"
+    else:
+        index_status = "pass"
+    checks.append(
+        _check(
+            "point_in_time_index_constituent_truth",
+            "point_in_time_index_constituents",
+            "指数成分月度 PIT 真相层",
+            index_status,
+            (
+                f"{len(supported_indices)} 个核心指数、{index_rows} 条历史成分；"
+                f"{_count(index_coverage, 'sample_dates')} 个代表交易日成员覆盖 "
+                f"{index_covered_members}/{index_expected_members} "
+                f"（{index_coverage_ratio * 100:.2f}%），"
+                f"manifest {successful_partitions}/{expected_partitions}，"
+                f"最大快照间隔 {max_staleness_days} 天。"
+            ),
+            {
+                "history_start_date": index_constituent_pit.get("history_start_date"),
+                "history_end_date": index_constituent_pit.get("history_end_date"),
+                "supported_indices": supported_indices,
+                "rows_count": index_rows,
+                "distinct_index_codes": _count(index_table, "distinct_index_codes"),
+                "distinct_snapshot_dates": _count(index_table, "distinct_snapshot_dates"),
+                "min_effective_date": index_table.get("min_effective_date"),
+                "max_effective_date": index_table.get("max_effective_date"),
+                "orphan_rows": _count(index_table, "orphan_rows"),
+                "invalid_weight_rows": _count(index_table, "invalid_weight_rows"),
+                "future_effective_rows": _count(index_table, "future_effective_rows"),
+                "unsupported_index_rows": _count(index_table, "unsupported_index_rows"),
+                "total_snapshot_partitions": _count(index_table, "total_snapshot_partitions"),
+                "invalid_snapshot_partitions": _count(index_table, "invalid_snapshot_partitions"),
+                "expected_partitions": expected_partitions,
+                "successful_partitions": successful_partitions,
+                "partial_partitions": _count(index_manifest, "partial_partitions"),
+                "failed_partitions": _count(index_manifest, "failed_partitions"),
+                "sample_dates": _count(index_coverage, "sample_dates"),
+                "sample_index_snapshots": _count(index_coverage, "sample_index_snapshots"),
+                "expected_members": index_expected_members,
+                "covered_members": index_covered_members,
+                "missing_members": _count(index_coverage, "missing_members"),
+                "coverage_ratio": index_coverage_ratio,
+                "minimum_coverage_ratio": PIT_INDEX_MEMBER_MIN_COVERAGE,
+                "max_staleness_days": max_staleness_days,
+                "maximum_snapshot_staleness_days": PIT_INDEX_MAX_SNAPSHOT_STALENESS_DAYS,
+                "worst_trade_date": index_coverage.get("worst_trade_date"),
+                "worst_index_code": index_coverage.get("worst_index_code"),
+                "worst_coverage_ratio": index_coverage.get("worst_coverage_ratio"),
+                "backtest_index_universe_ready": index_ready,
+                "upstream_attempt": upstream_attempts.get("index_constituent_pit") or {},
+            },
+            index_constituent_pit.get("samples") or [],
         )
     )
 
@@ -554,7 +648,13 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
         )
     )
 
-    future_total = sum(_count(future, key) for key in ("daily_kline", "factor_input_daily", "stock_status_snapshot"))
+    future_keys = (
+        "daily_kline",
+        "factor_input_daily",
+        "stock_status_snapshot",
+        "index_constituent_pit",
+    )
+    future_total = sum(_count(future, key) for key in future_keys)
     checks.append(
         _check(
             "future_trade_dates",
@@ -562,7 +662,7 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
             "未来日期污染",
             "fail" if future_total else "pass",
             f"发现未来交易日记录 {future_total} 条。" if future_total else "未发现未来交易日记录。",
-            {key: _count(future, key) for key in ("daily_kline", "factor_input_daily", "stock_status_snapshot")},
+            {key: _count(future, key) for key in future_keys},
         )
     )
 

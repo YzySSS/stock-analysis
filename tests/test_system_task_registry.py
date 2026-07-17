@@ -28,6 +28,7 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "portfolio_etf_quote_update",
                 "data_quality_audit",
                 "fundamental_pit_backfill",
+                "index_constituent_pit_backfill",
             }.issubset(TRACKED_TASKS)
         )
 

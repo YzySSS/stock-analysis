@@ -26,6 +26,8 @@ REQUIRED_TABLES = {
     "stock_status_pit_manifest",
     "stock_fundamental_pit",
     "fundamental_pit_manifest",
+    "index_constituent_pit",
+    "index_constituent_pit_manifest",
     "sector_opinion_daily",
     "sector_opinion_stock",
     "market_timing_signal_daily",

@@ -40,10 +40,11 @@ def run_row(**overrides):
 
 
 class BacktestValidationBaselineTests(unittest.TestCase):
-    def test_known_limitations_match_pit_v3_truth_layer(self):
+    def test_known_limitations_match_dq5_truth_layer(self):
         joined = " ".join(VALIDATION_KNOWN_LIMITATIONS)
         self.assertIn("sh.689009", joined)
-        self.assertIn("指数成分变更历史尚未建模", joined)
+        self.assertIn("月度权重快照", joined)
+        self.assertNotIn("指数成分变更历史尚未建模", joined)
         self.assertNotIn("历史 ST、退市和成分变更数据仍不完整", joined)
 
     def test_baseline_id_rejects_whitespace_and_shell_chars(self):
