@@ -124,6 +124,7 @@ class JobRetentionService:
             "protected": {
                 "formal_backtests": True,
                 "validation_baselines": True,
+                "validation_protocols": True,
                 "portfolio_advice_summaries": True,
                 "portfolio_advice_outcomes": True,
                 "saved_selection_results": True,

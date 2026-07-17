@@ -4,6 +4,7 @@ import json
 import hashlib
 import math
 import os
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -48,6 +49,7 @@ class BacktestRequest:
     score_threshold: Optional[float] = None
     is_system_test: bool = False
     validation_baseline_id: Optional[str] = None
+    validation_implementation_hash: Optional[str] = None
 
 
 def _to_float(value: Any) -> float | None:
@@ -359,6 +361,11 @@ class BacktestService:
             raise ValueError("validation_baseline_id 仅允许用于系统测试任务")
         if request.validation_baseline_id and len(request.validation_baseline_id) > 80:
             raise ValueError("validation_baseline_id 最长 80 个字符")
+        if request.validation_implementation_hash:
+            if not request.is_system_test or not request.validation_baseline_id:
+                raise ValueError("validation_implementation_hash 仅允许用于已分组的系统验证任务")
+            if not re.fullmatch(r"[0-9a-f]{64}", request.validation_implementation_hash):
+                raise ValueError("validation_implementation_hash 必须是 64 位小写 SHA-256")
         # V2.1 supports adjusted return calculation when adj_factor_daily has
         # coverage for the requested date range.
 

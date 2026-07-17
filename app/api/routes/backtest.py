@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.backtest.policy import research_disclosure
 from app.backtest.repository import BacktestRepository
 from app.backtest.service import BacktestRequest, BacktestService
+from app.backtest.strategy_validation import StrategyValidationService
 from app.shared.instrument_policy import UnsupportedInstrumentError
 from app.shared.index_universe import ALL_A_UNIVERSE_CODE, universe_label
 
@@ -319,6 +320,29 @@ def get_backtest_runs(
             for row in rows
         ]
     }
+
+
+@router.get("/backtest/validations")
+def get_backtest_validations(
+    limit: int = Query(default=20, ge=1, le=100),
+    strategy_id: Optional[str] = Query(default=None),
+    compact: bool = Query(default=False),
+) -> dict:
+    return {
+        "items": StrategyValidationService().list(
+            limit=limit,
+            strategy_id=strategy_id,
+            compact=compact,
+        )
+    }
+
+
+@router.get("/backtest/validations/{protocol_id}")
+def get_backtest_validation(protocol_id: str) -> dict:
+    try:
+        return StrategyValidationService().get(protocol_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/factor-input/status")

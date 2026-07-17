@@ -968,3 +968,11 @@ BacktestRepository 现在按信号日连接生命周期和历史名称区间，�
 新增 migration `0019`，建立 `index_constituent_pit` 与 `index_constituent_pit_manifest`。Tushare `index_weight` 按月串行同步上证 50、沪深 300、中证 500 和中证 1000；2023-12 至 2026-06 的 124 个指数/月分区全部成功，落库 57,350 条成分，成员数、权重、代码映射和日期硬异常均通过守卫。12 个代表交易日共 48 个 as-of 快照覆盖 `22,200 / 22,200`，最大滞后 17 天。
 
 回测请求新增显式 `universe_code`，默认 `ALL_A` 不变；只有选择指数时才按信号日读取最近月度快照，缺失、成员数或权重异常都会 fail-closed。方法论升级为 `close_signal_next_open_pit_index_universe_v5`，并明确记录“月度权重快照不是精确调仓事件”的限制。最终 DQ5 为 `10 pass / 5 warn / 0 fail`；159 项回归、生产/独立 smoke migration 19/19 与第二遍幂等均通过。沪深 300 两日工程 smoke 成功，但所有回测继续 `research_only / validation_pending / unvalidated`。
+
+### 2026-07-18：冻结策略受控验证已落地
+
+新增 migration `0020` 和 `strategy_validation_protocol`，将一次验证的策略配置、方法论、请求参数、成本/成交约束以及真实执行源码指纹固化为不可静默覆盖的协议。首轮 V1 在发现未冻结源码后于 54/242 主动取消并标记 superseded；V2 对策略实现、Selector、Backtest Service/Repository 与股票池政策逐文件计算 SHA-256，配置、方法论或源码任一漂移均 fail-closed。验证 run 以 system test 隔离并受 retention 保护，API/回测页可读取协议与报告。
+
+历史全 A 区间 2025-07-01 至 2026-06-30 的两条 V2 诊断均完整跑完 242 个样本日、714 笔交易，基准覆盖 100%、收益缺失 0、全部结构检查通过。低波反转扣费后收益 `-43.4248%`、超额 `-54.1446%`、最大回撤 `-44.4163%`；三因子收益 `-39.0495%`、超额 `-50.5983%`、最大回撤 `-47.2742%`。两条策略六项表现门槛均失败，结论为 `historical_diagnostic_fail`，不能归咎于工程或数据缺口，也不会自动调参或升级验证状态。
+
+真正样本外协议已冻结到 2026-07-20 至 2027-01-31，窗口闭合前不执行。当前结论继续是 `research_only / validation_pending / unvalidated`；下一策略工作不再围绕证明现版本有效，而应先分析失败归因并另开新版本研究，旧冻结证据保持不可变。

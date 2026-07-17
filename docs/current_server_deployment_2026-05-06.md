@@ -349,6 +349,18 @@ PYTHONPATH=. .venv/bin/python -m app.orchestration.migrate --check
 - 全量 159 项 unittest、Python 编译、前端 JavaScript、cron shell 和 diff 检查均通过。
 - 回测默认股票池继续是 `ALL_A`。用户显式选择指数时才读取信号日之前最近的月度权重快照；这不是精确到调仓公告时刻的事件流。
 
+## 冻结策略受控验证部署（2026-07-18）
+
+- migration `0020` 新增 `strategy_validation_protocol`，生产库已为 `20/20 ready`；协议锁定策略配置、方法论、请求/成本/成交约束与实际执行源码 SHA-256，任一漂移均 fail-closed。
+- V1 四份协议因缺少源码指纹已保留审计记录并标记 `superseded`；有效历史协议为 `hist_diag_20250701_20260630_lowvol_v2` 和 `hist_diag_20250701_20260630_v13_v2`。
+- 低波 run `backtest_lowvol_reversal_20260718_002337_693871` 完成 242 个样本日、714 笔交易，扣费后收益 `-43.4248%`、超额 `-54.1446%`、最大回撤 `-44.4163%`，结论 `historical_diagnostic_fail`。
+- 三因子 run `backtest_v13_three_factor_20260718_010249_400303` 完成 242 个样本日、714 笔交易，扣费后收益 `-39.0495%`、超额 `-50.5983%`、最大回撤 `-47.2742%`，结论同为 `historical_diagnostic_fail`。
+- 两条 run 基准覆盖均为 100%、收益缺失为 0，配置/方法论/请求/源码结构检查全部通过；失败来自六项表现门槛，不是工程或数据缺口。策略继续保持 `research_only / validation_pending / unvalidated`。
+- 真正样本外协议 `prospective_20260720_20270131_lowvol_v2` 与 `prospective_20260720_20270131_v13_v2` 已冻结，2027-01-31 窗口闭合前不执行，也不会根据历史诊断修改参数。
+- `GET /api/backtest/validations`、协议详情 API 和 `/backtest` 冻结验证卡片已上线；system validation run 继续从正式回测列表隔离并受 retention 保护。
+- 全量 170 项 unittest、Python 编译、前端 JavaScript、migration 与 diff 检查通过。API 与三个 worker 均 active、`NRestarts=0`，readiness `ready / accepting_jobs=true`，migration `20/20`，三类队列为 0。
+- 本地 health、验证 API、回测页及静态 JS 均为 HTTP 200；公网 health 200，公网 `/backtest` 未认证返回预期 401。
+
 ## Portfolio Repository 垂直切片（2026-07-16）
 
 持仓模块的 SQL 已从 `app/portfolio/service.py` 收口到 `app/portfolio/repository.py`。Service 继续负责行情兜底、技术指标、纪律规则、AI 建议、缓存失效与结果评分，不再直接打开 MySQL 连接。
