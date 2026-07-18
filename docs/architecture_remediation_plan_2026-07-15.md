@@ -1006,3 +1006,9 @@ BacktestRepository 现在按信号日连接生命周期和历史名称区间，�
 现按实时快照交易日形成明确的代码/分钟边界，使用既有 `code + quote_minute` 索引，并在 MySQL 8 window query 内聚合开板次数、首次封板和最后开板。完整情绪板优化前后 SHA-256 均为 `a68094209aad6295096b0deb3ac8a5e0a9b3bdc679719304cfacfdabbac7187d`。部署后线上冷/热约 `401.85ms / 1.24ms`，强制缓存未命中五次中位 `412.65ms`、最大 `457.53ms`；无需新 schema 或延长缓存。
 
 新增 `scripts/benchmark_page_responses.py` 和预算回归，工具只访问 GET 目标并保持服务端探测串行。全量 188 项通过，API 串行重启后 active、`NRestarts=0`。下一切片进入 Portfolio。
+
+### 2026-07-19：PERF-2B Portfolio 基线已收口
+
+Portfolio HTML/JS 首次均低于 4ms，完整 `GET /api/portfolio` 首次约 `47.41ms`、热中位约 `32.61ms`。前端 `loadStrategies()` 只填充本地持有风格常量，不请求共享策略 API；首屏实际只有一次持仓数据请求，不存在串行网络 waterfall。
+
+因此本切片不修改已批量化为固定 9 条 SQL 的 Portfolio Service/Repository，不增加缓存，也不为几十毫秒接口引入额外抽象。只修正 benchmark 目标清单和记录基线，下一切片进入 Selection。

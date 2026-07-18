@@ -27,7 +27,6 @@ PROFILE_TARGETS: dict[str, tuple[Target, ...]] = {
     "portfolio": (
         Target("portfolio_html", "/portfolio", "page"),
         Target("portfolio_js", "/static/js/portfolio.js", "asset"),
-        Target("portfolio_strategies", "/api/strategies?instrument_type=stock", "api"),
         Target("portfolio_positions", "/api/portfolio", "api"),
     ),
     "selection": (

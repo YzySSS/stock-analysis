@@ -31,7 +31,7 @@ PYTHONPATH=. .venv/bin/python scripts/benchmark_page_responses.py \
 | Dashboard JS | 1.47ms | 1.37ms | 26.2 KiB | 达标 |
 | Dashboard compact | 3394.20ms | 1.38ms | 21.3 KiB | 冷请求超预算 |
 | Portfolio HTML / JS | 1.68ms / 1.71ms | 1.51ms / 1.49ms | 7.0 / 29.2 KiB | 达标 |
-| Strategies | 205.59ms | 15.43ms | 20.0 KiB | 达标 |
+| Selection/Backtest Strategies | 205.59ms | 15.43ms | 20.0 KiB | 达标 |
 | Portfolio API | 44.63ms | 32.50ms | 9.0 KiB | 达标 |
 | Selection HTML / JS | 2.02ms / 1.59ms | 1.73ms / 1.43ms | 12.1 / 57.6 KiB | 达标 |
 | Selection results | 54.30ms | 51.19ms | 64.1 KiB | 达标 |
@@ -58,3 +58,11 @@ PYTHONPATH=. .venv/bin/python scripts/benchmark_page_responses.py \
 新磁盘代码的首轮五次应用缓存未命中样本为 `515.63 / 418.38 / 387.41 / 466.30 / 462.05ms`，中位数 `462.05ms`、最大 `515.63ms`。部署后在线首次/热中位数为 `401.85ms / 1.24ms`；独立进程连续五次强制缓存未命中的中位数 `412.65ms`、最大 `457.53ms`。相比旧线上首次 `3394.20ms` 约快 8.4 倍，稳定进入 `<800ms` 预算。
 
 API 串行重启后 `NRestarts=0`，页面和 API 均为 200，响应字段哈希不变。Dashboard 切片完成，下一页进入 Portfolio。
+
+## 4. Portfolio 切片
+
+线上五次串行复核：HTML 首次/热中位数 `3.30 / 1.38ms`，JS `1.53 / 1.37ms`，`GET /api/portfolio` 为 `47.41 / 32.61ms`，均远低于预算。
+
+前端 `DOMContentLoaded` 虽写成先 `loadStrategies()` 再 `loadPortfolio()`，但 Portfolio 的 `loadStrategies()` 只在浏览器内填充“短期/波段/长期”三个固定选项，不发网络请求，也不读取共享策略 API。首屏只有一次真实数据请求 `/api/portfolio`，不存在需要并行化的网络 waterfall。
+
+因此本切片不修改 Portfolio Service/Repository、前端加载顺序或缓存。已有 Repository 将持仓市场上下文固定为 9 条批量 SQL，当前两个持仓的完整响应约 9.0 KiB；继续优化只会增加复杂度，没有真实收益。测量工具已同步移除误归类到 Portfolio 的 `/api/strategies` 目标。Portfolio 判定完成，下一页进入 Selection。

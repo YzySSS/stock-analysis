@@ -542,6 +542,8 @@ V13 的非重叠 3 日 offset 净收益为 `-5.7802% / -22.0879% / +12.0806%`，
 
 2026-07-19 Dashboard 切片完成：真实 compact 缓存未命中从 `3394.20ms` 降至约 `401.85ms`，热中位数 `1.24ms`。根因是短线情绪板为约 30 只股票按交易日扫描全市场分钟表并把 6205 条明细搬回 Python；现按当前快照交易日形成代码/分钟有界范围、使用既有复合索引并在 MySQL window query 内聚合开板次数和时间。优化前后完整情绪板 SHA-256 一致，不增加 schema 或长期陈旧缓存。新增串行只读 benchmark 工具，后续继续 Portfolio、Selection、Backtest。
 
+同日 Portfolio 基线已完成：HTML/JS 均约 1～3ms，完整持仓 API 首次/热约 `47.41/32.61ms`。页面的策略选项来自本地常量，首屏只有一次持仓数据请求，不存在网络串行慢点；按“只修真实慢点”原则不修改 Service/Repository、前端顺序或缓存。
+
 ### 17. 下一代策略研究章程（协议层已完成）
 
 2026-07-18 已冻结 `next_strategy_research_v1`，机器合同、SHA-256 锁和回归守卫位于 `config/research_protocols/`。该章程不是策略实现或 validation protocol，本轮没有创建新策略和回测。
