@@ -23,6 +23,7 @@ Research Baseline 2026.07
 | 自动回归 | 177 项通过 |
 | 运行状态 | readiness `ready`，3 个 worker healthy/idle，3 类队列均为 0 |
 | 公网边界 | `/api/health` 公开；其余页面/API 由 Basic Auth 保护；重型入口限流 |
+| TLS | Let’s Encrypt，当前有效期至 2026-10-16；Certbot 每日两轮自动续期，续期成功后校验并 reload Nginx |
 | 数据真相 | DQ1～DQ5 已完成：行情、历史股票状态、公告日基本面、历史指数成分均按 point-in-time 使用 |
 | 回测口径 | `close_signal_next_open_pit_index_universe_v5`；所有结果仍为 research-only |
 | 策略状态 | 11 条可加载、7 条数据就绪、2 条普通选股可执行、2 条仅研究回测、0 条通过交易有效性验证 |
@@ -46,6 +47,7 @@ Research Baseline 2026.07
 | 回测可信工程 | 已完成 | 次日开盘成交、公告日基本面、历史生命周期/ST/停复牌、指数历史成分、方法论/配置/源码指纹 |
 | 长任务可靠性 | 已完成 | selection/backtest/portfolio advice 独立 worker；幂等、取消、心跳、stale recovery、重试 |
 | 公网保护 | 已完成 | Basic Auth、重型入口限流、无密钥部署模板 |
+| HTTPS 续签 | 已完成 | TrustAsia 手工证书已切换为 Let’s Encrypt webroot；Certbot timer、deploy hook、dry-run 与到期复核提醒均已验证 |
 | 数据生命周期 | 已完成 | raw 1m、rollup、tracked 1m、舆情快照、任务/错误日志均有保留与清理口径 |
 | Schema 与代码边界 | 已完成 | 唯一 migration 入口；五个核心 Repository；生产 `app` 不反向依赖 `scripts/src` |
 | 核心数据质量 | 已完成首轮 | DQ1～DQ5 离线审计、快照展示、已知缺口 fail-closed |
@@ -62,7 +64,7 @@ Research Baseline 2026.07
 
 必须完成：
 
-1. 在当前证书于 2026-08-03 23:59:59 GMT 到期前完成续签、替换、回滚与到期监控闭环；目标完成日不晚于 2026-07-25。
+1. 已完成：原 2026-08-03 到期的 TrustAsia 手工证书已切换为 Let’s Encrypt；新证书到期日为 2026-10-16，Certbot timer 每日两轮自动续期，webroot 和 reload hook 的完整 dry-run 已通过。
 2. 为 Dashboard、Selection、Backtest、Portfolio 建立与 Tracking 相同的冷/热响应基线和查询预算。
 3. 只优化有真实慢点的接口；不靠长期陈旧缓存、隐藏字段或一次性大重构制造“看起来很快”。
 
@@ -108,11 +110,10 @@ Research Baseline 2026.07
 
 按实际执行顺序：
 
-1. **OPS-1 证书续签**：当前唯一有硬截止日期的 P0 运维项。
-2. **STR-1 下一策略研究协议**：先写冻结合同和验收门槛，不先写策略代码。
-3. **PERF-2 其余页面基线**：Dashboard → Portfolio → Selection 结果 → Backtest 列表，逐个测、逐个修。
-4. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
-5. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
+1. **STR-1 下一策略研究协议**：先写冻结合同和验收门槛，不先写策略代码。
+2. **PERF-2 其余页面基线**：Dashboard → Portfolio → Selection 结果 → Backtest 列表，逐个测、逐个修。
+3. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
+4. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
 
 以下项目保持可选，不进入当前承诺：
 

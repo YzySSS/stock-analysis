@@ -87,7 +87,37 @@ systemctl reload nginx
 - `http://www.yzysstock.cloud/api/health` 返回 `301` 到 HTTPS
 - TLS 证书链可读取，SAN 包含 `yzysstock.cloud` 和 `www.yzysstock.cloud`
 
-注意：当前证书将在 `2026-08-03 23:59:59 GMT` 过期，后续需要提前续期并替换 nginx 证书文件。
+历史说明：这张 TrustAsia 手工证书原定于 `2026-08-03 23:59:59 GMT` 过期，已在 2026-07-18 切换为下节记录的 Let’s Encrypt 自动续期链路；Nginx 不再引用这里的旧路径。
+
+## HTTPS 自动续期切换（2026-07-18）
+
+现网已从手工 TrustAsia 证书切换为 Let’s Encrypt webroot 自动续期：
+
+- 证书域名：`yzysstock.cloud`、`www.yzysstock.cloud`。
+- 当前 issuer：`Let's Encrypt / YR2`。
+- 当前有效期：`2026-07-18 07:01:29 GMT`～`2026-10-16 07:01:28 GMT`。
+- 当前证书：`/etc/letsencrypt/live/yzysstock.cloud/fullchain.pem`。
+- 当前私钥：`/etc/letsencrypt/live/yzysstock.cloud/privkey.pem`，目标文件权限 `0600 root:root`。
+- HTTP-01 webroot：`/var/www/letsencrypt`；挑战路径免认证、不跳转，其余 HTTP 请求仍 301 到 HTTPS。
+- 自动续期：系统 `certbot.timer` 已 enabled/active，每日运行两轮。
+- deploy hook：`/etc/letsencrypt/renewal-hooks/deploy/stock-analysis-reload-nginx`；只有 Nginx 配置校验成功才 reload。
+- Certbot 账户未登记运维邮箱；失败兜底依赖 systemd 日志和 2026-09-18 09:30 的 OpenClaw 一次性续期复核任务。
+
+上线前备份位于：
+
+```text
+/root/.openclaw/workspace/.restore-safety/stock-analysis-cert/20260718_155759/
+```
+
+旧 `/etc/nginx/ssl/yzysstock.cloud/` 文件暂未删除，可在紧急回滚时恢复原 Nginx SSL 路径。自动续期闭环已用下面的命令完整验证：
+
+```bash
+certbot renew --dry-run --run-deploy-hooks
+/usr/sbin/nginx -t
+systemctl list-timers certbot.timer --all --no-pager
+```
+
+最终验证：两域名远端证书指纹与本机 Certbot live 文件一致；HTTP→HTTPS 为 301；两个 HTTPS `/api/health` 均为 200；受保护页面未认证仍为预期 401；Nginx active。
 
 ## 公网保护更新（2026-07-15 23:02）
 

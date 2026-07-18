@@ -2,14 +2,14 @@
 
 这些文件复现当前单机部署边界：FastAPI 只监听 loopback，Nginx 提供 HTTPS、全站 Basic Auth 和重型接口限流，`/api/health` 保持免认证。
 
-模板不包含数据库密码、API token、TLS 私钥或 Basic Auth 明文密码。部署前确认项目 `.env`、证书和 MySQL 已独立准备。
+模板不包含数据库密码、API token、TLS 私钥或 Basic Auth 明文密码。部署前确认项目 `.env` 和 MySQL 已独立准备；TLS 由 Certbot 在服务器上签发，证书文件不进入仓库。
 
 ## 依赖
 
-- Ubuntu/Debian：Nginx、OpenSSL、Python 3 venv。
+- Ubuntu/Debian：Nginx、OpenSSL、Certbot、Python 3 venv。
 - Python：在项目 `.venv` 内安装仓库依赖。
 - 数据：MySQL 可用，应用 `.env` 只保存在服务器。
-- TLS：证书安装到 `/etc/nginx/ssl/yzysstock.cloud/`，私钥权限限制为 root。
+- TLS：Let’s Encrypt webroot 为 `/var/www/letsencrypt`，证书位于 `/etc/letsencrypt/live/yzysstock.cloud/`，私钥由 Certbot 限制为 root。
 
 ## systemd
 
@@ -25,7 +25,7 @@ systemctl daemon-reload
 systemctl enable --now stock-analysis-api.service stock-analysis-backtest-worker.service stock-analysis-selection-worker.service stock-analysis-portfolio-worker.service
 ```
 
-`app.orchestration.migrate` 是唯一 schema 入口，默认只输出 plan，只有 `--apply` 修改数据库。16 个有序 migration 使用持久 MySQL advisory lock、状态/checksum 和失败记录；再次执行不会重复应用。四个 systemd unit 都在 `ExecStartPre` 运行 `--check`，有 pending/checksum mismatch 时拒绝启动。cron 安装脚本在真正写入 crontab 前也执行同一检查。
+`app.orchestration.migrate` 是唯一 schema 入口，默认只输出 plan，只有 `--apply` 修改数据库。截至 2026-07-18 的 20 个有序 migration 使用持久 MySQL advisory lock、状态/checksum 和失败记录；再次执行不会重复应用。四个 systemd unit 都在 `ExecStartPre` 运行 `--check`，有 pending/checksum mismatch 时拒绝启动。cron 安装脚本在真正写入 crontab 前也执行同一检查。
 
 选股 schema migration 必须先于 API/worker 切换执行。API 只写入 `queued` 任务，selection worker 负责原子 claim、心跳、取消与 stale recovery；重启 API 不会丢失排队任务。
 
@@ -41,7 +41,7 @@ DB_NAME=stock_migration_smoke \
   --database stock_migration_smoke
 ```
 
-当前生产数据库位于远端，应用账号不能自行创建数据库，独立 smoke 库仍需由数据库侧 provision。2026-07-16 已在 `stock_migration_smoke` 完成真实空库验收：首次应用 16 个 migration、生成 61 张表，工具内部第二遍 `applied_now=0`。该工具要求首次零表；再次完整演练应重新 provision 空库或使用新的安全后缀库名，不会自动清表或删库。
+当前生产数据库位于远端，应用账号不能自行创建数据库，独立 smoke 库仍需由数据库侧 provision。独立 smoke 库已经增量验证到 20/20，第二遍始终要求 `applied_now=0`。该工具要求首次零表；再次完整演练应重新 provision 空库或使用新的安全后缀库名，不会自动清表或删库。
 
 模板按当前服务器路径 `/root/.openclaw/workspace/stock-analysis` 编写；迁移目录时先统一替换路径并运行 `systemd-analyze verify`。
 
@@ -57,6 +57,39 @@ password_hash=$(openssl passwd -apr1 -in /root/.config/stock-analysis/basic-auth
 install -o root -g www-data -m 640 <(printf 'dax:%s\n' "$password_hash") /etc/nginx/.htpasswd-stock-analysis
 unset password_hash
 ```
+
+## TLS 自动签发与续期
+
+首次部署先安装 Certbot、准备 webroot，并用临时 HTTP 配置完成 HTTP-01 验证。将示例邮箱替换为实际运维地址：
+
+```bash
+apt-get install -y certbot
+install -d -o root -g root -m 755 /var/www/letsencrypt/.well-known/acme-challenge
+install -o root -g root -m 644 deploy/nginx/stock-analysis-acme-bootstrap.conf /etc/nginx/sites-available/stock-analysis
+ln -sfn /etc/nginx/sites-available/stock-analysis /etc/nginx/sites-enabled/stock-analysis
+/usr/sbin/nginx -t
+systemctl reload nginx.service
+certbot certonly \
+  --webroot --webroot-path /var/www/letsencrypt \
+  --cert-name yzysstock.cloud \
+  -d yzysstock.cloud -d www.yzysstock.cloud \
+  --non-interactive --agree-tos \
+  --email admin@example.com \
+  --key-type rsa --rsa-key-size 2048
+install -d -o root -g root -m 755 /etc/letsencrypt/renewal-hooks/deploy
+install -o root -g root -m 755 deploy/certbot/reload-nginx.sh /etc/letsencrypt/renewal-hooks/deploy/stock-analysis-reload-nginx
+systemctl enable --now certbot.timer
+```
+
+续期使用同一个 webroot；deploy hook 只在 `/usr/sbin/nginx -t` 成功后 reload。安装最终 Nginx 配置后做一次完整模拟：
+
+```bash
+certbot certificates
+certbot renew --dry-run --run-deploy-hooks
+systemctl list-timers certbot.timer --all --no-pager
+```
+
+不要把 `/etc/letsencrypt`、私钥、账户文件或 Basic Auth 凭据复制进仓库。
 
 ## Nginx
 
@@ -74,6 +107,8 @@ systemctl reload nginx.service
 - 未认证页面和其他 API 返回 401。
 - 正确凭据访问页面和普通 API 返回 200。
 - 选股、回测、DeepSeek 深度复盘和持仓建议接口按 IP 限制为每分钟 6 次、突发 2 次，超限返回 429。
+- HTTP-01 路径 `/.well-known/acme-challenge/` 免认证且不重定向，其余 HTTP 请求 301 到 HTTPS。
+- 远端证书 SAN 同时包含 `yzysstock.cloud` 与 `www.yzysstock.cloud`，证书指纹与本机 Certbot live 文件一致。
 
 ## cron
 
@@ -106,4 +141,4 @@ install -o root -g root -m 644 deploy/logrotate/stock-analysis /etc/logrotate.d/
 
 ## 回滚
 
-每次覆盖现网配置前先备份 `/etc/nginx/sites-available/stock-analysis`、`/etc/nginx/conf.d/stock-analysis-rate-limit.conf` 和 htpasswd。回滚后必须先执行 `/usr/sbin/nginx -t`，通过后再 `systemctl reload nginx.service`。
+每次覆盖现网配置前先备份 `/etc/nginx/sites-available/stock-analysis`、原证书目录、`/etc/nginx/conf.d/stock-analysis-rate-limit.conf` 和 htpasswd。证书切换失败时恢复旧 SSL 路径和旧证书；回滚后必须先执行 `/usr/sbin/nginx -t`，通过后再 `systemctl reload nginx.service`。

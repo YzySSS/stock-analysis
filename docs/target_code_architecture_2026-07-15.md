@@ -267,7 +267,7 @@ class JobRepository:
 - 热度任务错误语义与系统状态注册。（已完成：24 项注册表、降级/陈旧状态可见）
 - Basic Auth（`/api/health` 例外）与重型接口限流。（已完成：全站认证、五类重型入口按 IP 限流）
 - systemd、Nginx、cron 部署模板。（已完成：无密钥模板和 cron 审查模式）
-- 证书续签。（待完成：当前证书 2026-08-03 到期）
+- 证书续签。（已完成：2026-07-18 切换 Let’s Encrypt webroot、Certbot timer 与校验后 reload hook）
 
 运行时凭据只保存在服务器 root-only 文件中，不进入仓库、文档或任务日志。
 
