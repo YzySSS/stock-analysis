@@ -20,7 +20,7 @@ Research Baseline 2026.07
 | 产品定位 | 个人纪律型投研工作台；辅助研究，不自动交易，不构成投资建议 |
 | 部署形态 | 单机模块化单体；FastAPI + MySQL + Nginx + 3 个独立 worker |
 | 数据库 | migration `0020`，生产与独立 smoke 库均为 `20/20` |
-| 自动回归 | 177 项通过 |
+| 自动回归 | 183 项通过 |
 | 运行状态 | readiness `ready`，3 个 worker healthy/idle，3 类队列均为 0 |
 | 公网边界 | `/api/health` 公开；其余页面/API 由 Basic Auth 保护；重型入口限流 |
 | TLS | Let’s Encrypt，当前有效期至 2026-10-16；Certbot 每日两轮自动续期，续期成功后校验并 reload Nginx |
@@ -52,6 +52,7 @@ Research Baseline 2026.07
 | Schema 与代码边界 | 已完成 | 唯一 migration 入口；五个核心 Repository；生产 `app` 不反向依赖 `scripts/src` |
 | 核心数据质量 | 已完成首轮 | DQ1～DQ5 离线审计、快照展示、已知缺口 fail-closed |
 | 策略历史诊断 | 已完成 | 两条冻结诊断均失败，失败归因已完成，不创建执行修补型 V14 |
+| 下一策略研究章程 | 已完成协议层 | `next_strategy_research_v1` 已冻结并加 SHA-256 锁；未写新策略、未创建验证协议、未运行回测 |
 | 跟踪复盘性能 | 已完成第一阶段 | 冷请求从约 3.60s 降至 0.244s，热请求约 0.035s；真实交易日边界同时修正 |
 
 ## 3. 版本路线
@@ -81,7 +82,7 @@ Research Baseline 2026.07
 
 ### R2026.Q3-Research：下一代策略研究候选（协议优先）
 
-这一阶段先冻结研究协议，再决定是否写新策略；不在旧 lowvol/V13 上做为了翻正结果的补丁。
+研究章程 v1 已于 2026-07-18 冻结，协议 ID 为 `next_strategy_research_v1`。当前只完成 preimplementation charter，候选实现、数据库 validation protocol 和新回测均未创建；不在旧 lowvol/V13 上做为了翻正结果的补丁。
 
 协议最低要求：
 
@@ -92,6 +93,8 @@ Research Baseline 2026.07
 - 冻结股票池、基准、持有期、换仓频率、交易成本、最少样本数和所有非重叠 offset 的汇总门槛。
 - 历史诊断只能排雷，不能把策略升级为“已验证”。
 - 即使真正前瞻协议通过，也只进入人工评审候选，不自动成为默认策略或普通选股策略。
+
+完整的区间、执行、成本、五个 offset、数据和晋级合同见 [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)。后续若恢复策略研究，必须从独立 `factor_spec_lock` 开始，且只允许使用冻结开发集。
 
 ### Validation Candidate：交易有效性候选（无固定日期）
 
@@ -110,10 +113,11 @@ Research Baseline 2026.07
 
 按实际执行顺序：
 
-1. **STR-1 下一策略研究协议**：先写冻结合同和验收门槛，不先写策略代码。
-2. **PERF-2 其余页面基线**：Dashboard → Portfolio → Selection 结果 → Backtest 列表，逐个测、逐个修。
-3. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
-4. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
+1. **PERF-2 其余页面基线**：Dashboard → Portfolio → Selection 结果 → Backtest 列表，逐个测、逐个修。
+2. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
+3. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
+
+策略研究的下一切片 `STR-2 factor spec lock` 已有冻结入口，但暂不插队；恢复时必须创建新 spec 与哈希，不能修改 v1 章程。
 
 以下项目保持可选，不进入当前承诺：
 
@@ -141,5 +145,6 @@ Research Baseline 2026.07
 - [`IMPROVEMENT_PLAN.md`](./IMPROVEMENT_PLAN.md)：长期产品方向、数据质量、验证和性能背景；当前执行顺序以本文为准。
 - [`strategy_oos_validation_2026-07-17.md`](./strategy_oos_validation_2026-07-17.md)：冻结历史诊断与真正前瞻协议。
 - [`strategy_failure_attribution_2026-07-18.md`](./strategy_failure_attribution_2026-07-18.md)：失败原因与下一策略研究边界。
+- [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)：下一策略不可变研究章程、时间分区、执行成本与人工晋级合同。
 
 如果历史文档中的“下一步”与本文冲突，以本文为准。

@@ -990,3 +990,11 @@ BacktestRepository 现在按信号日连接生命周期和历史名称区间，�
 原 TrustAsia 手工证书在到期前完成可回滚切换。现网改用 Let’s Encrypt HTTP-01 webroot，证书同时覆盖根域与 `www`，有效期至 2026-10-16；`certbot.timer` 每日运行两轮，续期 deploy hook 只在 Nginx 配置校验成功后 reload。真实签发、远端指纹、HTTP→HTTPS、健康检查、认证边界和 `certbot renew --dry-run --run-deploy-hooks` 均已通过。
 
 旧证书、私钥和 Nginx 配置保留在 root-only 恢复目录，旧 SSL 文件未删除；仓库同步提供 ACME bootstrap、最终 Nginx 模板、deploy hook、安装与回滚说明。另设 2026-09-18 的一次性 OpenClaw 复核任务，在首次进入续期窗口后检查远端到期日、timer、日志、dry-run 与公网健康。P0-6 的证书尾项至此关闭。
+
+### 2026-07-18：STR-1 下一代策略研究章程已冻结
+
+新增机器可读 `next_strategy_research_v1` 及 SHA-256 锁，把候选信号家族、禁止事项、开发/历史诊断/隔离/真正前瞻分区、5 日执行与全部 5 个非重叠 offset、成本、PIT 数据、调整总回报前置条件和人工晋级门槛固化为不可原地修改的 preimplementation charter。
+
+历史诊断 2025-07-01～2026-06-30 明确只能否决或判定证据不足；真正前瞻必须从实现与数据同时冻结后的首个基准交易日开始并观察固定 252 个交易日。候选允许 0～3 只、无信号持币，禁止低波/V13 换权重、绝对股价加分、强制补满及结果后挑持有期/offset。
+
+本切片未创建策略实现、数据库 validation protocol 或回测 run，也未修改旧冻结实现文件。新增 6 条章程守卫后全量 183 项回归通过，两份既有 V2 前瞻协议实现指纹继续 `MATCH`。后续研究必须先用开发集产生独立 factor spec 与哈希；当前执行队列转入其余页面性能基线。
