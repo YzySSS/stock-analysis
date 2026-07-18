@@ -1,6 +1,6 @@
 # 股票分析系统架构审计与整改计划（2026-07-15）
 
-> 状态：**已完成并归档为执行台账（2026-07-18）**。批次 A～E、DQ1～DQ5、冻结策略诊断与第一阶段 Tracking 性能治理均已部署验收；本文保留逐批证据和历史决策，不再承载当前待办。当前运行基线、版本路线与剩余整改队列统一见 [`CURRENT_VERSION_PLAN.md`](./CURRENT_VERSION_PLAN.md)。
+> 状态：**已完成并归档为执行台账（2026-07-19）**。批次 A～E、DQ1～DQ5、冻结策略诊断，以及 Tracking、Dashboard、Portfolio、Selection、Backtest 首轮性能治理均已部署验收；本文保留逐批证据和历史决策，不再承载当前待办。当前运行基线、版本路线与剩余整改队列统一见 [`CURRENT_VERSION_PLAN.md`](./CURRENT_VERSION_PLAN.md)。
 >
 > 本文保留 `docs/IMPROVEMENT_PLAN.md` 中“个人纪律型投研工作台、模块化单体、异步任务驱动、不做自动交易、不急拆微服务”的产品与架构定位，只更新当前整改优先级。
 >
@@ -1018,3 +1018,11 @@ Portfolio HTML/JS 首次均低于 4ms，完整 `GET /api/portfolio` 首次约 `4
 Selection HTML/JS 约 1～3ms，策略列表首次/热约 `184.34/15.08ms`；默认最近、显式 run、按 strategy 最近三条真实结果分支均约 `51～84ms`。结果包约 64 KiB，主要来自页面实际渲染的因子分、舆情上下文和交易计划，不能把删除产品字段当性能优化。
 
 首屏默认只加载策略列表，历史结果按用户运行或筛选后读取；选股计算继续异步入 selection worker。本切片不修改 Selection Repository、字段、加载顺序或缓存，下一切片进入 Backtest 列表与首屏 waterfall。
+
+### 2026-07-19：PERF-2D Backtest 基线与整轮页面性能已收口
+
+Backtest 的真实首屏不是单一任务列表：前端依次读取策略、因子输入状态、冻结验证和任务列表，再自动加载默认 run 的结果与第一页成交明细。自动 benchmark 现按与前端相同的 running 最高进度、queued、success 优先级测量完整 6 请求串行链，并使用结果返回的真实 `return_mode` 请求成交明细。
+
+本机五次完整链路为 `260.77 / 79.56 / 91.84 / 81.56 / 84.94ms`，首次/热中位约 `260.77/83.25ms`，六个响应合计 92,506 B；各单接口也全部低于 800/200ms 预算。并发化最多节省几十毫秒，却会在 2 vCPU 主机上制造同时查询尖峰，因此不修改前端顺序、不加缓存、不裁剪冻结证据或成交字段。回测计算继续由独立 worker 异步执行。
+
+至此 Tracking、Dashboard、Portfolio、Selection、Backtest 均已完成统一预算基线；唯一真实超预算的 Dashboard 冷请求已从约 3.39s 降至约 0.40s，PERF-2 从开放整改队列移出。

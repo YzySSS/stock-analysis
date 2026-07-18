@@ -1,6 +1,6 @@
 # 当前版本与整改计划
 
-> 当前唯一执行计划。最后更新：2026-07-18。
+> 当前唯一执行计划。最后更新：2026-07-19。
 >
 > 这里的版本名是项目阶段标签，不是对外 API 的语义化版本号。历史审计、逐批实施日志和早期产品设想继续保留，但不再作为“下一步做什么”的依据。
 
@@ -13,14 +13,14 @@ Research Baseline 2026.07
 可信研究基线，未验证交易系统
 ```
 
-当前功能基线以提交 `3e99bbd` 为准；本计划之后的纯文档提交不改变该运行时基线。
+当前运行时代码基线以提交 `641022a` 为准；其后的性能测量工具、回归与文档提交不改变线上业务语义。
 
 | 维度 | 当前事实 |
 | --- | --- |
 | 产品定位 | 个人纪律型投研工作台；辅助研究，不自动交易，不构成投资建议 |
 | 部署形态 | 单机模块化单体；FastAPI + MySQL + Nginx + 3 个独立 worker |
 | 数据库 | migration `0020`，生产与独立 smoke 库均为 `20/20` |
-| 自动回归 | 188 项通过 |
+| 自动回归 | 190 项通过 |
 | 运行状态 | readiness `ready`，3 个 worker healthy/idle，3 类队列均为 0 |
 | 公网边界 | `/api/health` 公开；其余页面/API 由 Basic Auth 保护；重型入口限流 |
 | TLS | Let’s Encrypt，当前有效期至 2026-10-16；Certbot 每日两轮自动续期，续期成功后校验并 reload Nginx |
@@ -28,7 +28,7 @@ Research Baseline 2026.07
 | 回测口径 | `close_signal_next_open_pit_index_universe_v5`；所有结果仍为 research-only |
 | 策略状态 | 11 条可加载、7 条数据就绪、2 条普通选股可执行、2 条仅研究回测、0 条通过交易有效性验证 |
 | 默认策略 | 无；普通选股必须由用户显式选择 `strategy_id` |
-| 页面性能 | 跟踪复盘 compact API 冷请求约 `0.244s`，热请求约 `0.035s` |
+| 页面性能 | Tracking、Dashboard、Portfolio、Selection、Backtest 均有统一冷/热预算证据；唯一超预算项 Dashboard 已从约 3.39s 降至 0.40s |
 
 策略证据必须按下面的口径理解：
 
@@ -57,6 +57,7 @@ Research Baseline 2026.07
 | Dashboard 性能 | 已完成 | compact 冷请求从约 3.39s 降至 0.40～0.46s，热请求约 0.001s；输出哈希保持一致 |
 | Portfolio 性能 | 已完成基线 | 完整持仓 API 首次约 0.047s、热约 0.033s；首屏只有一个数据请求，无需改代码或加缓存 |
 | Selection 性能 | 已完成基线 | 最近/run/strategy 三条结果读取约 0.051～0.084s；详细字段均由页面实际使用，不裁剪产品信息 |
+| Backtest 性能 | 已完成基线 | 包含最近结果与成交明细的 6 请求首屏串行链首次约 0.261s、热约 0.083s；保持串行以避免小主机并发查询尖峰 |
 
 ## 3. 版本路线
 
@@ -64,12 +65,12 @@ Research Baseline 2026.07
 
 完成标准已经满足：工程能力不冒充策略有效性，核心数据按 point-in-time 使用，长任务可恢复，关键状态可观测，历史策略结论有冻结证据。
 
-### R2026.07.1：运维与响应性能维护版（当前下一版）
+### R2026.07.1：运维与响应性能维护版（已完成）
 
-必须完成：
+完成项：
 
 1. 已完成：原 2026-08-03 到期的 TrustAsia 手工证书已切换为 Let’s Encrypt；新证书到期日为 2026-10-16，Certbot timer 每日两轮自动续期，webroot 和 reload hook 的完整 dry-run 已通过。
-2. Dashboard、Portfolio、Selection 已完成；继续为 Backtest 建立与 Tracking 相同的冷/热响应基线和查询预算。
+2. Tracking、Dashboard、Portfolio、Selection、Backtest 均已建立同一口径的冷/热响应基线和查询预算；Dashboard 真实冷慢点已经整改，其余页面均无需改运行代码。
 3. 只优化有真实慢点的接口；不靠长期陈旧缓存、隐藏字段或一次性大重构制造“看起来很快”。
 
 页面/API 的第一版预算：
@@ -116,9 +117,10 @@ Research Baseline 2026.07
 
 按实际执行顺序：
 
-1. **PERF-2 其余页面基线**：Dashboard、Portfolio、Selection 已完成；继续 Backtest 列表与首屏 waterfall。
-2. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
-3. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
+1. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
+2. **PRODUCT-1 建议复盘闭环**：性能维护版已完成，在运行基线稳定的前提下恢复。
+
+`PERF-2` 已从开放队列移出：Tracking、Dashboard、Portfolio、Selection、Backtest 全部验收完成。若以后某页真实冷/热请求越过预算，再按独立切片重开，不做无基线的泛化优化。
 
 策略研究的下一切片 `STR-2 factor spec lock` 已有冻结入口，但暂不插队；恢复时必须创建新 spec 与哈希，不能修改 v1 章程。
 

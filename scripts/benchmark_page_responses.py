@@ -6,7 +6,7 @@ import statistics
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -74,6 +74,29 @@ def targets_for_profiles(profiles: Iterable[str]) -> list[Target]:
     return result
 
 
+def pick_default_backtest_run(items: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
+    eligible = [item for item in items if item.get("run_id")]
+
+    def progress(item: dict[str, Any]) -> float:
+        try:
+            return float(item.get("progress_pct") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    running = sorted(
+        (item for item in eligible if item.get("status") == "running"),
+        key=progress,
+        reverse=True,
+    )
+    if running:
+        return running[0]
+    for status in ("queued", "success"):
+        selected = next((item for item in eligible if item.get("status") == status), None)
+        if selected:
+            return selected
+    return None
+
+
 def summarize_samples(
     target: Target,
     samples_ms: list[float],
@@ -128,6 +151,83 @@ def measure_target(
     )
 
 
+def measure_backtest_first_screen(
+    session: requests.Session,
+    base_url: str,
+    *,
+    repetitions: int,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    fixed_paths = (
+        "/api/strategies?instrument_type=stock",
+        "/api/factor-input/status",
+        "/api/backtest/validations?limit=10&compact=true",
+        "/api/backtest/runs?limit=20&compact=true",
+    )
+    samples_ms: list[float] = []
+    response_bytes = 0
+    request_count = 0
+    selected_run_id: str | None = None
+
+    for _ in range(repetitions):
+        started = time.perf_counter()
+        sample_bytes = 0
+        responses: dict[str, requests.Response] = {}
+        for path in fixed_paths:
+            response = session.get(f"{base_url}{path}", timeout=timeout_seconds)
+            response.raise_for_status()
+            sample_bytes += len(response.content)
+            responses[path] = response
+
+        runs = responses[fixed_paths[-1]].json().get("items", [])
+        default_run = pick_default_backtest_run(runs)
+        sample_request_count = len(fixed_paths)
+        if default_run:
+            selected_run_id = str(default_run["run_id"])
+            results_path = "/api/backtest/results?" + urlencode({"run_id": selected_run_id})
+            result_response = session.get(f"{base_url}{results_path}", timeout=timeout_seconds)
+            result_response.raise_for_status()
+            sample_bytes += len(result_response.content)
+            result = result_response.json()
+            return_mode = (
+                result.get("return_mode")
+                or (result.get("request") or {}).get("return_mode")
+                or default_run.get("return_mode")
+                or "1d"
+            )
+            trades_path = "/api/backtest/trades?" + urlencode(
+                {
+                    "run_id": selected_run_id,
+                    "limit": 10,
+                    "page": 1,
+                    "return_mode": return_mode,
+                }
+            )
+            trades_response = session.get(f"{base_url}{trades_path}", timeout=timeout_seconds)
+            trades_response.raise_for_status()
+            sample_bytes += len(trades_response.content)
+            sample_request_count += 2
+
+        samples_ms.append((time.perf_counter() - started) * 1000)
+        response_bytes = sample_bytes
+        request_count = sample_request_count
+
+    result = summarize_samples(
+        Target("backtest_first_screen_data_chain", "sequence:backtest-first-screen", "api"),
+        samples_ms,
+        status_code=200,
+        response_bytes=response_bytes,
+    )
+    result.update(
+        {
+            "request_count": request_count,
+            "selected_run_id": selected_run_id,
+            "measurement_scope": "serial DOMContentLoaded data chain, including latest results and first trade page",
+        }
+    )
+    return result
+
+
 def measure_dashboard_local_cache_miss(repetitions: int) -> dict[str, Any]:
     from app.api.routes import dashboard
 
@@ -168,7 +268,17 @@ def run_benchmark(
 ) -> dict[str, Any]:
     base_url = validate_base_url(base_url)
     with requests.Session() as session:
-        results = [
+        results = []
+        if "backtest" in profiles:
+            results.append(
+                measure_backtest_first_screen(
+                    session,
+                    base_url,
+                    repetitions=repetitions,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+        results.extend(
             measure_target(
                 session,
                 base_url,
@@ -177,7 +287,7 @@ def run_benchmark(
                 timeout_seconds=timeout_seconds,
             )
             for target in targets_for_profiles(profiles)
-        ]
+        )
     if include_dashboard_local_cache_miss and "dashboard" in profiles:
         results.append(measure_dashboard_local_cache_miss(repetitions))
     failed = [
