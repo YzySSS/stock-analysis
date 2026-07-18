@@ -283,6 +283,14 @@ class StrategyCapabilityService:
             availability = "prototype"
             availability_label = "原型"
             availability_note = "代码可加载，但尚无足够真实运行证据，选股入口保持关闭。"
+        elif backtest_ready:
+            availability = "research"
+            availability_label = "仅研究"
+            availability_note = (
+                str(capability.get("evidence_note"))
+                if evidence_status == "historical_diagnostic_fail"
+                else "实时选股入口关闭，仅保留研究回测。"
+            )
         else:
             availability = "display_only"
             availability_label = "仅展示"
@@ -310,7 +318,9 @@ class StrategyCapabilityService:
             "availability_label": availability_label,
             "availability_note": availability_note,
             "backtest_note": (
-                "研究回测已开放；当前仍未通过交易有效性验证。"
+                "研究回测已开放；冻结历史诊断未通过，不得作为交易有效性证据。"
+                if backtest_ready and evidence_status == "historical_diagnostic_fail"
+                else "研究回测已开放；当前仍未通过交易有效性验证。"
                 if backtest_ready
                 else (backtest_reasons[0] if backtest_reasons else "回测入口未开放。")
             ),

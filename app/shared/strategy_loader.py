@@ -36,11 +36,9 @@ class StrategyLoader:
 
         return data
 
-    def get_default_strategy_id(self) -> str:
+    def get_default_strategy_id(self) -> Optional[str]:
         strategy_id = self.registry.get("default_strategy")
-        if not strategy_id:
-            raise StrategyRegistryError("策略注册表未配置 default_strategy")
-        return strategy_id
+        return str(strategy_id) if strategy_id else None
 
     def get_strategy_meta(self, strategy_id: str) -> Dict[str, Any]:
         for item in self.registry.get("strategies", []):
@@ -64,6 +62,8 @@ class StrategyLoader:
 
     def load_strategy(self, strategy_id: Optional[str] = None):
         strategy_id = strategy_id or self.get_default_strategy_id()
+        if not strategy_id:
+            raise StrategyRegistryError("当前未设置默认策略，请明确指定 strategy_id")
         meta = self.get_strategy_meta(strategy_id)
 
         entrypoint = meta.get("entrypoint")

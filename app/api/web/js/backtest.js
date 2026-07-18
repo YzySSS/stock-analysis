@@ -128,7 +128,7 @@ async function loadBacktestStrategies() {
     return [];
   }
   select.innerHTML = items.map((item) => (
-    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.display_name || item.id)}（研究态 · ${item.validation_status === 'validated' ? '已验证' : '未验证'}）</option>`
+    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.display_name || item.id)}（${item.evidence_status === 'historical_diagnostic_fail' ? '历史诊断未通过 · 仅研究' : `研究态 · ${item.validation_status === 'validated' ? '已验证' : '未验证'}`}）</option>`
   )).join('');
   const preferred = items.some((item) => item.id === previousValue)
     ? previousValue

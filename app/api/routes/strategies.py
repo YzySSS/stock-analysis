@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Query
 
 from app.strategies.service import StrategyService
@@ -35,7 +33,7 @@ def list_strategies(instrument_type: str = Query(default="stock")) -> dict:
 
 @router.get("/strategies/detail")
 def get_strategy_detail(
-    strategy_id: Optional[str] = Query(default=None),
+    strategy_id: str = Query(min_length=1, max_length=64),
     instrument_type: str = Query(default="stock"),
     sample_limit: int = Query(default=200, ge=20, le=1000),
 ) -> dict:

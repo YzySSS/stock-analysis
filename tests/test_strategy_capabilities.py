@@ -24,12 +24,11 @@ def ready_snapshot(*, factor_codes: int = 100, moneyflow_codes: int = 94) -> dic
 
 
 class StrategyCapabilityContractTests(unittest.TestCase):
-    def test_registry_exposes_four_runtime_and_two_research_backtest_strategies(self):
-        items = StrategyService(dataset_snapshot=ready_snapshot()).list_strategies()
+    def test_failed_historical_diagnostics_are_research_only_and_no_default_is_set(self):
+        service = StrategyService(dataset_snapshot=ready_snapshot())
+        items = service.list_strategies()
 
         self.assertEqual({item["id"] for item in items if item["runtime_ready"]}, {
-            "lowvol_reversal",
-            "v13_three_factor",
             "v12_legacy",
             "a_share_sentiment",
         })
@@ -37,7 +36,17 @@ class StrategyCapabilityContractTests(unittest.TestCase):
             "lowvol_reversal",
             "v13_three_factor",
         })
+        self.assertIsNone(service.get_default_strategy_id())
+        self.assertFalse(any(item["is_default"] for item in items))
         self.assertFalse(any(item["validated"] for item in items))
+        by_id = {item["id"]: item for item in items}
+        for strategy_id in ("lowvol_reversal", "v13_three_factor"):
+            item = by_id[strategy_id]
+            self.assertFalse(item["runtime_ready"])
+            self.assertTrue(item["backtest_ready"])
+            self.assertEqual(item["availability"], "research")
+            self.assertEqual(item["evidence_status"], "historical_diagnostic_fail")
+            self.assertIn("冻结历史诊断未通过", item["backtest_note"])
 
     def test_loadable_prototype_is_not_misreported_as_runtime_ready(self):
         item = StrategyService(dataset_snapshot=ready_snapshot()).get_strategy_capability("quality_lowvol")
@@ -51,7 +60,7 @@ class StrategyCapabilityContractTests(unittest.TestCase):
     def test_required_dataset_gap_blocks_runtime(self):
         item = StrategyService(
             dataset_snapshot=ready_snapshot(factor_codes=80),
-        ).get_strategy_capability("lowvol_reversal")
+        ).get_strategy_capability("v12_legacy")
 
         self.assertFalse(item["data_ready"])
         self.assertFalse(item["runtime_ready"])
@@ -87,6 +96,18 @@ class CapabilityPreflightTests(unittest.TestCase):
         with patch("app.stock_selection.run_tasks.StrategyService", return_value=RejectingStrategyService()):
             with self.assertRaisesRegex(ValueError, "prototype"):
                 service.submit({"strategy_id": "quality_lowvol", "instrument_type": "stock", "limit": 3})
+
+    def test_selection_requires_explicit_strategy_before_estimate_or_insert(self):
+        class UnexpectedStrategyService:
+            def require_runtime_ready(self, *_args, **_kwargs):
+                raise AssertionError("缺少策略时不应进入能力检查")
+
+        service = object.__new__(SelectionRunService)
+        service._estimate_seconds = lambda **_kwargs: self.fail("缺少策略时不应估算任务时长")
+        service.repository = object()
+        with patch("app.stock_selection.run_tasks.StrategyService", return_value=UnexpectedStrategyService()):
+            with self.assertRaisesRegex(ValueError, "明确指定 strategy_id"):
+                service.submit({"instrument_type": "stock", "limit": 3})
 
     def test_backtest_uses_registry_capability_preflight(self):
         class RejectingStrategyService:

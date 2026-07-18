@@ -1,4 +1,4 @@
-default_strategy: v13_three_factor
+default_strategy: null
 
 strategies:
   - id: lowvol_reversal
@@ -6,42 +6,42 @@ strategies:
     entrypoint: app.strategies.active.lowvol_reversal_strategy.LowVolReversalStrategy
     config_path: app/strategies/registry/configs/lowvol_reversal.yaml
     version: v2.1-risk-filtered
-    status: experimental
-    mode: current
+    status: research_only
+    mode: research
     executable: true
     capability:
       supported_instrument_types: [stock]
       required_datasets: [daily_kline, factor_input_daily]
       minimum_coverage: 0.95
       maximum_data_age_days: 1
-      runtime_status: enabled
+      runtime_status: research_only
       backtest_status: research_only
-      validation_status: unvalidated
-      evidence_status: observed
-      evidence_note: 已有真实选股运行记录；回测仍采用 research-only 口径
+      validation_status: validation_pending
+      evidence_status: historical_diagnostic_fail
+      evidence_note: 2025-07-01 至 2026-06-30 冻结历史诊断未通过；仅保留研究回测，不进入普通选股入口
     tags: [lowvol, reversal, experimental]
-    description: 低波动反转策略 v2.1，当前已恢复到选股中心可执行列表，适合作为实验策略观察
+    description: 低波动反转策略 v2.1；冻结历史诊断未通过，当前仅保留研究与前瞻协议观察
 
   - id: v13_three_factor
     display_name: 三因子策略
     entrypoint: app.strategies.active.v13_three_factor.strategy.V13ThreeFactorStrategy
     config_path: app/strategies/registry/configs/v13_three_factor.yaml
     version: 0.1.0
-    status: experimental
-    mode: current
+    status: research_only
+    mode: research
     executable: true
     capability:
       supported_instrument_types: [stock]
       required_datasets: [daily_kline, factor_input_daily]
       minimum_coverage: 0.95
       maximum_data_age_days: 1
-      runtime_status: enabled
+      runtime_status: research_only
       backtest_status: research_only
-      validation_status: unvalidated
-      evidence_status: observed
-      evidence_note: 已有少量真实选股运行记录；尚未完成样本外验证
+      validation_status: validation_pending
+      evidence_status: historical_diagnostic_fail
+      evidence_note: 2025-07-01 至 2026-06-30 冻结历史诊断未通过；仅保留研究回测，不进入普通选股入口
     tags: [turnover, lowvol, reversal, v13]
-    description: 新架构下的三因子策略骨架，已具备基础因子定义与近似打分逻辑
+    description: 三因子研究策略；冻结历史诊断未通过，当前仅保留研究与前瞻协议观察
 
   - id: v12_legacy
     display_name: 多因子策略

@@ -8,6 +8,7 @@ function strategyDisplayNameById(strategyId) {
 }
 
 function strategyStatusClass(item = {}) {
+  if (item.evidence_status === 'historical_diagnostic_fail') return 'status-error';
   if (item.availability === 'runtime_ready' || item.runtime_ready) return 'status-ok';
   if (item.availability === 'prototype' || item.availability === 'data_not_ready' || item.availability === 'research') return 'status-warn';
   return 'status-muted';
@@ -22,7 +23,9 @@ function renderStrategyCards(data) {
   const items = data.strategies || [];
   strategiesCache = items;
 
-  qs('#strategies-default').textContent = strategyDisplayNameById(data.default_strategy) || '-';
+  qs('#strategies-default').textContent = data.default_strategy
+    ? strategyDisplayNameById(data.default_strategy)
+    : '未设置（需主动选择）';
   qs('#strategies-count').textContent = String(data.summary?.count ?? items.length ?? 0);
   qs('#strategies-loadable-count').textContent = String(data.summary?.loadable_count ?? items.filter((item) => item.loadable).length);
   qs('#strategies-data-ready-count').textContent = String(data.summary?.data_ready_count ?? items.filter((item) => item.data_ready).length);
@@ -43,6 +46,7 @@ function renderStrategyCards(data) {
         <div class="strategy-hero-status-row">
           <span class="strategy-id-chip">${escapeHtml(item.display_name || item.id)}</span>
           ${item.is_default ? '<span class="badge status-ok">默认</span>' : `<span class="badge ${availabilityClass}">${escapeHtml(item.availability_label || '-')}</span>`}
+          ${item.evidence_status === 'historical_diagnostic_fail' ? '<span class="badge status-error">历史诊断未通过</span>' : ''}
         </div>
         <h3>${escapeHtml(item.display_name || item.id)}</h3>
         <div class="strategy-hero-state"><i class="strategy-status-dot ${escapeHtml(item.availability || 'unknown')}"></i>${escapeHtml(item.availability_label || '-')}</div>
@@ -90,7 +94,7 @@ function renderStrategyDetail(strategy = null) {
 
   if (name) name.textContent = strategy.display_name || strategy.id || '-';
   if (status) {
-    status.className = `badge ${strategy.runtime_ready ? 'status-ok' : 'status-warn'}`;
+    status.className = `badge ${strategy.evidence_status === 'historical_diagnostic_fail' ? 'status-error' : strategy.runtime_ready ? 'status-ok' : 'status-warn'}`;
     status.textContent = strategy.availability_label || '-';
   }
 
@@ -102,10 +106,12 @@ function renderStrategyDetail(strategy = null) {
       <div><span>实时状态</span><b>${escapeHtml(strategy.runtime_status || '-')}</b></div>
       <div><span>回测状态</span><b>${escapeHtml(strategy.backtest_status || '-')}</b></div>
       <div><span>验证状态</span><b>${escapeHtml(strategy.validation_status || '-')}</b></div>
+      <div><span>证据状态</span><b>${escapeHtml(strategy.evidence_status || '-')}</b></div>
     </div>
     <div class="strategy-note-box">
       <strong>策略说明</strong>
       <p>${escapeHtml(strategy.description || note || '暂无描述')}</p>
+      ${strategy.evidence_note ? `<p>${escapeHtml(strategy.evidence_note)}</p>` : ''}
       <small>${escapeHtml(factorNames)}</small>
     </div>
     <div class="strategy-detail-metrics compact">
@@ -132,12 +138,24 @@ function renderStrategyReadiness(strategy = null) {
     status: Boolean(item.ready),
     detail: `${item.coverage == null ? (item.row_count == null ? '-' : `${item.row_count} 条`) : formatPercent(item.coverage)} · ${item.latest_at || '-'}`,
   }));
+  const historicalDiagnosticFailed = strategy.evidence_status === 'historical_diagnostic_fail';
   const checks = [
     { label: '策略代码可加载', status: Boolean(strategy.loadable), detail: strategy.load_error || '' },
     { label: '标的类型兼容', status: Boolean(strategy.instrument_compatible), detail: (strategy.supported_instrument_types || []).join(' / ') || '-' },
     ...datasetChecks,
     { label: '实时选股可执行', status: Boolean(strategy.runtime_ready), detail: (strategy.runtime_reasons || [])[0] || strategy.runtime_status || '-' },
     { label: '研究回测可执行', status: Boolean(strategy.backtest_ready), detail: (strategy.backtest_reasons || [])[0] || strategy.backtest_status || '-' },
+    {
+      label: '冻结历史诊断',
+      status: strategy.evidence_status === 'historical_diagnostic_pass',
+      detail: strategy.evidence_note || strategy.evidence_status || '-',
+      resultLabel: historicalDiagnosticFailed
+        ? '● 未通过'
+        : strategy.evidence_status === 'historical_diagnostic_pass'
+          ? '● 通过'
+          : '○ 未执行',
+      resultClass: historicalDiagnosticFailed ? 'down' : '',
+    },
     { label: '交易有效性验证', status: Boolean(strategy.validated), detail: strategy.validation_status || '-' },
   ];
   const reasons = strategy.readiness_reasons || strategy.runtime_reasons || [];
@@ -145,11 +163,11 @@ function renderStrategyReadiness(strategy = null) {
     ${checks.map((item) => `
       <div class="strategy-readiness-item ${item.status ? '' : 'warn'}">
         <span>${escapeHtml(item.label)}</span>
-        <b>${item.status ? '● 就绪' : '○ 未就绪'}</b>
+        <b class="${escapeHtml(item.resultClass || '')}">${escapeHtml(item.resultLabel || (item.status ? '● 就绪' : '○ 未就绪'))}</b>
         <em>${escapeHtml(item.time || item.detail || '-')}</em>
       </div>
     `).join('')}
-    <div class="strategy-warning-note">${escapeHtml(reasons[0] || strategy.evidence_note || '各能力状态均来自注册表声明与当前数据快照。')}</div>
+    <div class="strategy-warning-note">${escapeHtml(historicalDiagnosticFailed ? strategy.evidence_note : reasons[0] || strategy.evidence_note || '各能力状态均来自注册表声明与当前数据快照。')}</div>
   `;
 }
 
@@ -166,7 +184,9 @@ function renderStrategyFactors(strategy = null) {
   }
 
   if (summary) {
-    summary.textContent = strategy.runtime_ready === true
+    summary.textContent = strategy.evidence_status === 'historical_diagnostic_fail'
+      ? '冻结历史诊断未通过；因子数据仅用于复盘和研究，不代表交易有效性。'
+      : strategy.runtime_ready === true
       ? `CI 基于 ${strategy.factor_ci_date || '-'} 的全量候选样本与 T+${strategy.factor_ci_horizon_days || 1} 收盘收益计算。`
       : '当前未接通 V1 执行链路，因子分析以配置说明为主。';
   }

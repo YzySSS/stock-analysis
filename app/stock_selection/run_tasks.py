@@ -95,7 +95,9 @@ class SelectionRunService:
             raise ValueError("选股任务只生成预览结果；请在结果页按条保存到跟踪复盘")
 
         strategy_service = StrategyService()
-        strategy_id = request.get("strategy_id") or strategy_service.get_default_strategy_id()
+        strategy_id = str(request.get("strategy_id") or "").strip()
+        if not strategy_id:
+            raise ValueError("当前未设置默认策略，请明确指定 strategy_id")
         strategy_service.require_runtime_ready(strategy_id, instrument_type=instrument_type)
         effective_limit = request.get("max_picks") if request.get("max_picks") is not None else request.get("limit")
         request_payload = SelectionTaskPayload(

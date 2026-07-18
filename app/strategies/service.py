@@ -30,7 +30,7 @@ class StrategyService:
     def _serialize_strategy_item(
         self,
         item: Dict[str, Any],
-        default_strategy: str,
+        default_strategy: Optional[str],
         instrument_type: str = "stock",
         dataset_snapshot: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -75,7 +75,7 @@ class StrategyService:
         strategy_id: Optional[str] = None,
         instrument_type: str = "stock",
     ) -> Dict[str, Any]:
-        final_strategy_id = strategy_id or self.get_default_strategy_id()
+        final_strategy_id = self._resolve_strategy_id(strategy_id)
         try:
             meta = self.get_strategy_meta(final_strategy_id)
         except StrategyRegistryError as exc:
@@ -108,11 +108,17 @@ class StrategyService:
             raise ValueError(f"策略 {capability.get('id')} 当前不可回测：{reasons[0]}")
         return capability
 
-    def get_default_strategy_id(self) -> str:
+    def get_default_strategy_id(self) -> Optional[str]:
         return self.loader.get_default_strategy_id()
 
-    def get_strategy_meta(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+    def _resolve_strategy_id(self, strategy_id: Optional[str]) -> str:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
+        if not final_strategy_id:
+            raise ValueError("当前未设置默认策略，请明确指定 strategy_id")
+        return final_strategy_id
+
+    def get_strategy_meta(self, strategy_id: Optional[str] = None) -> Dict[str, Any]:
+        final_strategy_id = self._resolve_strategy_id(strategy_id)
         return self.loader.get_strategy_meta(final_strategy_id)
 
     def _load_daily_factor_stats(
@@ -160,7 +166,7 @@ class StrategyService:
         return stats
 
     def get_strategy_detail(self, strategy_id: Optional[str] = None, instrument_type: str = "stock", sample_limit: int = 200) -> Dict[str, Any]:
-        final_strategy_id = strategy_id or self.get_default_strategy_id()
+        final_strategy_id = self._resolve_strategy_id(strategy_id)
         meta = self.get_strategy_meta(final_strategy_id)
         serialized_meta = self._serialize_strategy_item(
             meta,
@@ -739,7 +745,7 @@ class StrategyService:
             operation="selection",
             supported=SUPPORTED_SELECTION_INSTRUMENT_TYPES,
         )
-        final_strategy_id = strategy_id or self.get_default_strategy_id()
+        final_strategy_id = self._resolve_strategy_id(strategy_id)
         strategy_meta = self.get_strategy_meta(final_strategy_id)
         serialized_meta = self.require_runtime_ready(
             final_strategy_id,

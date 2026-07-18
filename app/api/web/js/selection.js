@@ -1,4 +1,3 @@
-let currentDefaultStrategy = null;
 let lastSelectionResponse = null;
 let hasExecutedSelection = false;
 let selectionRunTimer = null;
@@ -303,12 +302,14 @@ function renderStrategySummary(strategy) {
   }
 
   const factors = strategy.factors || [];
+  const historicalDiagnosticFailed = strategy.evidence_status === 'historical_diagnostic_fail';
   const helpText = [
     strategy.description || '暂无策略说明',
     `阈值：${strategy.score_threshold ?? '-'}，最多入选：${strategy.max_picks ?? '-'}`,
     `可用状态：${strategy.availability_label || '-'}`,
+    strategy.evidence_note || '',
     `核心因子：${factors.map((item) => item.name || item.key || '-').join(' / ') || '暂无'}`,
-  ].join('｜');
+  ].filter(Boolean).join('｜');
 
   container.innerHTML = `
     <div class="strategy-item">
@@ -317,12 +318,14 @@ function renderStrategySummary(strategy) {
         <div>
           <span class="badge ${strategy.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(strategy.mode || 'current')}</span>
           <span class="badge ${strategyBadgeClass(strategy)}">${escapeHtml(strategy.availability_label || '-')}</span>
+          ${historicalDiagnosticFailed ? '<span class="badge status-error">历史诊断未通过</span>' : ''}
         </div>
       </div>
       <div class="muted">ID: ${escapeHtml(strategy.id || '-')} · 状态: ${escapeHtml(strategy.status || '-')} · 版本: ${escapeHtml(strategy.version || '-')}</div>
       <div>${escapeHtml(strategy.description || '')}</div>
       <div class="muted">当前运行阈值: ${strategy.score_threshold ?? '-'} 分 · 最大入选: ${strategy.max_picks ?? '-'}</div>
       <div class="muted">核心因子: ${factors.map((item) => escapeHtml(item.name || item.key || '-')).join(' / ') || '暂无'}</div>
+      ${strategy.evidence_note ? `<div class="${historicalDiagnosticFailed ? 'strategy-warning-note' : 'muted'}">${escapeHtml(strategy.evidence_note)}</div>` : ''}
       <div class="muted">${escapeHtml(strategy.availability_note || '暂无状态说明')} · 完整因子分析请前往 <a href="/strategies">选股策略</a> · <button class="icon-help" type="button" data-tooltip="${escapeHtml(helpText)}">ⓘ</button></div>
     </div>
   `;
@@ -1001,18 +1004,30 @@ function renderSelectionResults(data) {
 async function loadStrategies() {
   const data = await fetchJson('/api/strategies');
   const select = qs('#strategy-id');
+  const previousValue = select.value;
   select.innerHTML = '';
 
   const strategies = (data.strategies || []).filter((item) => item.runtime_ready === true);
-  currentDefaultStrategy = strategies.find((item) => item.id === data.default_strategy)?.id || strategies[0]?.id || null;
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = strategies.length
+    ? '请选择策略（当前均未通过交易有效性验证）'
+    : '当前没有可执行策略';
+  placeholder.selected = true;
+  select.appendChild(placeholder);
 
   strategies.forEach((item) => {
     const option = document.createElement('option');
     option.value = item.id;
-    option.textContent = `${item.display_name || item.id} (${item.id})`;
-    if (item.id === currentDefaultStrategy) option.selected = true;
+    const validationLabel = item.validated ? '已验证' : '未验证';
+    option.textContent = `${item.display_name || item.id} (${item.id} · ${validationLabel})`;
     select.appendChild(option);
   });
+
+  if (strategies.some((item) => item.id === previousValue)) {
+    select.value = previousValue;
+  }
 
   if (select.value) {
     await loadStrategyDetail(select.value);
@@ -1022,8 +1037,12 @@ async function loadStrategies() {
 }
 
 async function loadStrategyDetail(strategyId) {
+  if (!strategyId) {
+    renderStrategySummary(null);
+    return;
+  }
   const instrumentType = qs('#instrument-type')?.value || 'stock';
-  const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId || currentDefaultStrategy || '')}&instrument_type=${encodeURIComponent(instrumentType)}&sample_limit=200`);
+  const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId)}&instrument_type=${encodeURIComponent(instrumentType)}&sample_limit=200`);
   renderStrategySummary(data.strategy);
 }
 
@@ -1031,7 +1050,7 @@ async function loadSelectionResults(runIdOverride = null) {
   const instrumentType = qs('#instrument-type').value || 'stock';
   const limit = Number(qs('#limit').value || 3);
   const runIdInput = (qs('#selection-run-id')?.value || '').trim();
-  const strategyId = qs('#strategy-id')?.value || currentDefaultStrategy || '';
+  const strategyId = qs('#strategy-id')?.value || '';
   const runId = runIdOverride || runIdInput;
 
   if (!runId && !hasExecutedSelection) {
@@ -1068,6 +1087,11 @@ async function loadSelectionResults(runIdOverride = null) {
 async function runSelection(event) {
   event.preventDefault();
   const button = event.submitter || qs('#selection-form button[type="submit"]');
+  const strategyId = (qs('#strategy-id')?.value || '').trim();
+  if (!strategyId) {
+    renderSelectionRunError(new Error('请先明确选择一套策略；当前系统不设置默认策略'));
+    return;
+  }
   let runSucceeded = false;
   let finalResult = null;
   startSelectionRunFeedback(button);
@@ -1078,7 +1102,7 @@ async function runSelection(event) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        strategy_id: qs('#strategy-id').value || null,
+        strategy_id: strategyId,
         instrument_type: qs('#instrument-type').value,
         market_board: getMarketBoardValue(),
         limit: Number(qs('#limit').value || 3),
@@ -1164,7 +1188,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       syncMarketBoardSegments();
       hasExecutedSelection = false;
       lastSelectionResponse = null;
-      await loadStrategyDetail(qs('#strategy-id')?.value || currentDefaultStrategy || '');
+      await loadStrategyDetail(qs('#strategy-id')?.value || '');
       renderSelectionPlaceholder();
     });
   });
