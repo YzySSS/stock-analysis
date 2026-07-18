@@ -449,6 +449,7 @@ P0 能力真实性、回测风险、任务锁与公网保护
 P1 可恢复的 selection / backtest / portfolio_advice 任务队列
 P2 实时、舆情和日志数据生命周期
 P3 migration、模块边界与自动化回归
+P4 页面响应性能与性能可观测性
 ```
 
 2026-07-16 当前检查点：能力真实性、任务锁、公网保护、策略 capability/readiness、可信回测工程链以及 selection / backtest / portfolio advice 三类独立 worker 均已部署；C3 已完成进程租约、统一 `/api/readiness`、任务/错误 retention 和日志轮转。D1/D2 已完整收口：全市场 raw 1m 按交易日分区保留 2 天，5m/15m 与 tracked 1m 保留 90 天；舆情新写入改为父快照 + stock/news/source 关系化明细，最近 5 个交易日保留盘中快照、旧日期只保留 EOD；历史任务最终保留 21,772 条 V2 快照、清理 124,545 条冗余记录，legacy/pending/prunable 均为 0。E1 已统一 16 个版本化 schema migration。E2-E6 已完成 Portfolio/Tracking/Dashboard/Selection/Backtest Repository：持仓固定 9 条 SQL；Tracking 分页先圈 ID、冷/缓存约从 7.77s/5.49s 降到 0.313s/0.049s；Dashboard 查询约从 76 条降到固定 17 条；Selection 与 Backtest 的 route/Service/worker 业务层不再直连 MySQL，冻结结果、任务、候选和回测 API 影子响应零差异。P3-3 也已完成：生产 app 对 scripts/src 的反向依赖为 0，ETF/舆情任务实现进入 `app/data_ingestion`，相关脚本变成薄启动器，旧选股 CLI 改为排队，未路由首页和 ETF grid 原型已归档；P3-4 七类最低回归已有覆盖，全量 115 项。readiness 数据新鲜度已改用股票池 95% 完整日线口径，ETF/零星盘中行只标 partial；factor input 新增 18:30 补跑/03:20 兜底、按日期一次预取和 80% 源覆盖护栏。16:53 确认当日 Tushare 已发布 5,524 行、覆盖 99.69%，后台补齐 5,541 条 07-16 factor input 后 readiness 已恢复 `ready + accepting_jobs=true`。独立测试库的真实空库 smoke 也已完成：16 个 migration 首次全部应用、第二遍零变更。舆情存储维护已确认当前实例使用共享 InnoDB 表空间，应用侧单表 `OPTIMIZE` 不能完成物理缩容；只刷新统计并保留 provider 级监控。证书续签按当前决策暂缓，所有回测继续保持 research-only / unvalidated。当前代码内架构整改主线、空库重建和应用侧存储维护均已完成，剩余为已明确的外部/运维项。
@@ -521,6 +522,21 @@ V13 的非重叠 3 日 offset 净收益为 `-5.7802% / -22.0879% / +12.0806%`，
 结论是不创建执行修补型 V14。下一版本必须另开独立信号家族、允许持币、取消非 alpha 股价加分，并在看结果前冻结训练/诊断区间、持有周期、成本与跨 offset 门槛。旧前瞻协议源码指纹复核仍一致。详细结果见：
 
 - [`strategy_failure_attribution_2026-07-18.md`](./strategy_failure_attribution_2026-07-18.md)
+
+### 16. 页面响应性能与性能可观测性（第一阶段已完成，持续治理）
+
+架构整改完成后，页面性能进入独立改进项。目标不是靠隐藏数据或长期返回陈旧缓存换取表面速度，而是把列表、汇总和重型明细拆成与页面用途匹配的查询边界，并为关键接口保存可重复的冷/热基线。
+
+第一目标为“跟踪复盘”。2026-07-18 本机串行实测：`/api/tracking/deep-review/status` 约 `2ms`，`/api/tracking/filters` 约 `15ms`；默认 compact 跟踪接口冷请求约 `3.60s`，60 秒汇总缓存命中后约 `65ms`。慢点集中在汇总缓存未命中时：64 条纳入统计记录会重复加载完整 tracking record，并扫描日线区间、全市场 1 分钟 raw 与 tracked 1 分钟数据；两张分钟表对跟踪标的存在大量重叠。
+
+本阶段按以下顺序整改：
+
+1. 跟踪极值只从长期产品层 `daily_kline + stock_realtime_intraday_tracked` 读取，当前实时价继续由 `stock_realtime_snapshot` 补齐；不再重复扫描只保留 2 个交易日的全市场 raw 1m。
+2. 区间边界按真实 `selection_result.trade_date` 计算，并使用与索引一致的日期/分钟字段，避免以保存时间代替选股日期及按代码扫描全部历史行。
+3. 冻结优化前后的 tracking 响应语义，补 Repository/Route 回归；若查询边界优化后冷请求仍不能稳定达标，再把列表首屏与全局汇总拆成两个可独立完成的请求。
+4. 第一阶段验收目标：本机默认 compact 接口缓存命中 `< 150ms`，缓存未命中 `< 800ms`；页面首屏不被 AI 状态或非首屏明细阻塞。后续再为 Dashboard、Selection、Backtest、Portfolio 建立同样的冷/热基线和慢查询预算。
+
+2026-07-18 第一阶段已部署：跟踪区间改为从真实选股交易日后的首个交易日开始，日线范围强制使用 `code + trade_date` 复合索引；分钟极值只读取 tracked 1m，不再与全市场 raw 1m 重复扫描。该修复同时纠正了“入选当天被计为已跟踪 1 天”的旧口径。API 重启后的真实首次请求由约 `3.60s` 降至 `0.242s`，随后四次为 `0.034～0.038s`；176 项回归、编译、readiness、migration 20/20 与三类空队列均通过。第一阶段目标已达到，后续页面按真实慢点逐项治理，不做无基线的泛化重写。
 
 ---
 

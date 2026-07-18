@@ -109,6 +109,11 @@ class TrackingRepositoryTests(unittest.TestCase):
         self.assertIn("WITH target_selection AS", sql)
         self.assertIn("FROM target_selection target", sql)
         self.assertIn("LIMIT %s OFFSET %s", sql)
+        self.assertIn("DAILY_KLINE DK FORCE INDEX (UNIQ_CODE_DATE)", sql.upper())
+        self.assertIn("DK.TRADE_DATE > SR_INNER.TRADE_DATE", sql.upper())
+        self.assertIn("STOCK_REALTIME_INTRADAY_TRACKED", sql.upper())
+        self.assertIn("RI.QUOTE_MINUTE >= TIMESTAMP(DATE_ADD(SR_INNER.TRADE_DATE, INTERVAL 1 DAY))", sql.upper())
+        self.assertNotIn("INNER JOIN STOCK_REALTIME_INTRADAY RI", sql.upper())
         self.assertEqual(params[-2:], [10, 20])
 
     def test_count_latest_scope_uses_one_query_without_recursive_run_lookup(self):

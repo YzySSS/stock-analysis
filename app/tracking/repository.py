@@ -124,9 +124,9 @@ class TrackingRepository:
                 MIN(dk.low) AS low_price
             FROM target_selection target
             INNER JOIN selection_result sr_inner ON sr_inner.id = target.id
-            INNER JOIN daily_kline dk
+            INNER JOIN daily_kline dk FORCE INDEX (uniq_code_date)
               ON dk.code = sr_inner.code
-             AND dk.trade_date > DATE(sr_inner.created_at)
+             AND dk.trade_date > sr_inner.trade_date
              AND dk.trade_date <= (SELECT MAX(trade_date) FROM daily_kline)
              AND dk.high > 0
              AND dk.low > 0
@@ -141,25 +141,10 @@ class TrackingRepository:
                 MIN(ri.latest_price) AS low_price
             FROM target_selection target
             INNER JOIN selection_result sr_inner ON sr_inner.id = target.id
-            INNER JOIN stock_realtime_intraday ri
-              ON ri.code = sr_inner.code
-             AND ri.quote_time >= sr_inner.created_at
-             AND ri.latest_price IS NOT NULL
-             AND ri.latest_price > 0
-            GROUP BY sr_inner.id, ri.trade_date
-
-            UNION ALL
-
-            SELECT
-                sr_inner.id AS selection_result_id,
-                ri.trade_date,
-                MAX(ri.latest_price) AS high_price,
-                MIN(ri.latest_price) AS low_price
-            FROM target_selection target
-            INNER JOIN selection_result sr_inner ON sr_inner.id = target.id
             INNER JOIN stock_realtime_intraday_tracked ri
               ON ri.code = sr_inner.code
-             AND ri.quote_time >= sr_inner.created_at
+             AND ri.trade_date > sr_inner.trade_date
+             AND ri.quote_minute >= TIMESTAMP(DATE_ADD(sr_inner.trade_date, INTERVAL 1 DAY))
              AND ri.latest_price IS NOT NULL
              AND ri.latest_price > 0
             GROUP BY sr_inner.id, ri.trade_date
