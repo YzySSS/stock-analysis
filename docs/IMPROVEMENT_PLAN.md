@@ -4,7 +4,7 @@
 >
 > 本文作为项目的产品定位、领域边界和长期功能路线，继续保留“个人纪律型投研工作台”的核心方向。
 >
-> 当前工程整改、实施顺序和验收标准以 [`architecture_remediation_plan_2026-07-15.md`](./architecture_remediation_plan_2026-07-15.md) 为准，具体代码边界与任务状态机见 [`target_code_architecture_2026-07-15.md`](./target_code_architecture_2026-07-15.md)。近期先处理能力真实性、回测口径、任务可靠性、数据生命周期和公网保护，再恢复本文中的复盘闭环等产品扩展。
+> 当前运行基线、版本路线、整改顺序和验收标准以 [`CURRENT_VERSION_PLAN.md`](./CURRENT_VERSION_PLAN.md) 为准。[`architecture_remediation_plan_2026-07-15.md`](./architecture_remediation_plan_2026-07-15.md) 已转为完成台账，具体代码边界与任务状态机继续参考 [`target_code_architecture_2026-07-15.md`](./target_code_architecture_2026-07-15.md)。本文保留长期产品方向与阶段背景，不再单独决定当前执行顺序。
 
 ## 2026-06-12 架构更新：纪律型私人投研工作台
 

@@ -1,8 +1,8 @@
 # 股票分析系统目标代码架构（2026-07-15）
 
-> 定位：这是当前整改的代码落地合同，服务于单机模块化单体，不是微服务拆分方案。
+> 状态：**目标边界已完成首轮落地，本文转为架构约束参考（2026-07-18）**。
 >
-> 执行基线见 `docs/architecture_remediation_plan_2026-07-15.md`。本文负责回答“模块放在哪里、依赖怎么走、任务状态怎么定义、每一批如何迁移”。
+> 当前执行顺序见 [`CURRENT_VERSION_PLAN.md`](./CURRENT_VERSION_PLAN.md)；逐批历史证据见 [`architecture_remediation_plan_2026-07-15.md`](./architecture_remediation_plan_2026-07-15.md)。本文继续回答“模块放在哪里、依赖怎么走、任务状态怎么定义”，不再维护阶段待办。
 
 ## 1. 目标与非目标
 

@@ -4,6 +4,8 @@
 
 系统仅用于研究和辅助决策，不构成投资建议。
 
+当前运行基线、版本路线与剩余整改队列见 [`docs/CURRENT_VERSION_PLAN.md`](docs/CURRENT_VERSION_PLAN.md)。历史架构整改文档已转为审计台账，不再作为当前待办来源。
+
 ## 项目结构
 
 ```text
