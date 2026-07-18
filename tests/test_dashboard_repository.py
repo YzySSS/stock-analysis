@@ -29,8 +29,8 @@ class ScriptedCursor:
         self._row = {}
         if "r.latest_price >= ROUND" in normalized:
             self._rows = [
-                {"code": "sh.600000", "name": "浦发银行"},
-                {"code": "sz.000001", "name": "平安银行"},
+                {"code": "sh.600000", "name": "浦发银行", "trade_date": "2026-07-16"},
+                {"code": "sz.000001", "name": "平安银行", "trade_date": "2026-07-16"},
             ]
         elif "FROM sector_opinion_daily" in normalized:
             self._rows = []
@@ -52,8 +52,16 @@ class ScriptedCursor:
             self._rows = []
         elif "INNER JOIN daily_kline dk" in normalized:
             self._rows = [{"code": "sh.600000", "name": "浦发银行"}]
-        elif "FROM stock_realtime_intraday" in normalized:
-            self._rows = [{"code": "sh.600000", "trade_date": "2026-07-16", "latest_price": 10.0, "pre_close": 9.0}]
+        elif "FROM intraday_transition" in normalized:
+            self._rows = [
+                {
+                    "code": "sh.600000",
+                    "trade_date": "2026-07-16",
+                    "open_board_count": 1,
+                    "first_limit_time": "2026-07-16 09:31:00",
+                    "last_open_time": "2026-07-16 10:02:00",
+                }
+            ]
         elif "ROW_NUMBER() OVER" in normalized:
             self._rows = [
                 {"code": "sh.600000", "trade_date": "2026-07-14", "close": 9.0},
@@ -108,7 +116,15 @@ class StubDashboardRepository:
             "hot_limit_rows": [],
             "latest_kline_date": "2026-07-15",
             "reversal_rows": [],
-            "intraday_rows": [],
+            "open_board_rows": [
+                {
+                    "code": "sh.600000",
+                    "trade_date": "2026-07-15",
+                    "open_board_count": 1,
+                    "first_limit_time": "2026-07-15 09:31:00",
+                    "last_open_time": "2026-07-15 10:02:00",
+                }
+            ],
             "history_by_code": {
                 "sh.600000": [
                     {"trade_date": "2026-07-14", "close": 9.0},
@@ -129,6 +145,15 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(len(result["limit_rows"]), 2)
         self.assertEqual(len(result["reversal_rows"]), 1)
         self.assertEqual(len(result["history_by_code"]["sh.600000"]), 2)
+        self.assertEqual(result["open_board_rows"][0]["open_board_count"], 1)
+        self.assertIn("LAG(is_sealed)", factory.executions[-2][0])
+        self.assertIn("GROUP BY code", factory.executions[-2][0])
+        self.assertIn("FORCE INDEX (idx_realtime_intraday_code_time)", factory.executions[-2][0])
+        self.assertIn("quote_minute >= %s", factory.executions[-2][0])
+        self.assertEqual(
+            factory.executions[-2][1][-3:],
+            ["2026-07-16", "2026-07-16", "2026-07-16"],
+        )
         self.assertIn("ROW_NUMBER() OVER", factory.executions[-1][0])
 
     def test_emotion_board_calls_repository_once_without_per_stock_sql(self):
@@ -140,6 +165,8 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(repository.calls, [10])
         self.assertEqual(len(payload["limit_up_pool"]), 1)
         self.assertEqual(payload["limit_up_pool"][0]["code"], "sh.600000")
+        self.assertEqual(payload["limit_up_pool"][0]["open_board_count"], 1)
+        self.assertEqual(payload["limit_up_pool"][0]["open_board_label"], "开板1次")
         source = inspect.getsource(dashboard._dashboard_emotion_board)
         self.assertNotIn("cursor", source)
         self.assertNotIn("mysql_conn", source)

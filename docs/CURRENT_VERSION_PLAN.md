@@ -20,7 +20,7 @@ Research Baseline 2026.07
 | 产品定位 | 个人纪律型投研工作台；辅助研究，不自动交易，不构成投资建议 |
 | 部署形态 | 单机模块化单体；FastAPI + MySQL + Nginx + 3 个独立 worker |
 | 数据库 | migration `0020`，生产与独立 smoke 库均为 `20/20` |
-| 自动回归 | 183 项通过 |
+| 自动回归 | 188 项通过 |
 | 运行状态 | readiness `ready`，3 个 worker healthy/idle，3 类队列均为 0 |
 | 公网边界 | `/api/health` 公开；其余页面/API 由 Basic Auth 保护；重型入口限流 |
 | TLS | Let’s Encrypt，当前有效期至 2026-10-16；Certbot 每日两轮自动续期，续期成功后校验并 reload Nginx |
@@ -54,6 +54,7 @@ Research Baseline 2026.07
 | 策略历史诊断 | 已完成 | 两条冻结诊断均失败，失败归因已完成，不创建执行修补型 V14 |
 | 下一策略研究章程 | 已完成协议层 | `next_strategy_research_v1` 已冻结并加 SHA-256 锁；未写新策略、未创建验证协议、未运行回测 |
 | 跟踪复盘性能 | 已完成第一阶段 | 冷请求从约 3.60s 降至 0.244s，热请求约 0.035s；真实交易日边界同时修正 |
+| Dashboard 性能 | 已完成 | compact 冷请求从约 3.39s 降至 0.40～0.46s，热请求约 0.001s；输出哈希保持一致 |
 
 ## 3. 版本路线
 
@@ -66,7 +67,7 @@ Research Baseline 2026.07
 必须完成：
 
 1. 已完成：原 2026-08-03 到期的 TrustAsia 手工证书已切换为 Let’s Encrypt；新证书到期日为 2026-10-16，Certbot timer 每日两轮自动续期，webroot 和 reload hook 的完整 dry-run 已通过。
-2. 为 Dashboard、Selection、Backtest、Portfolio 建立与 Tracking 相同的冷/热响应基线和查询预算。
+2. Dashboard 已完成；继续为 Portfolio、Selection、Backtest 建立与 Tracking 相同的冷/热响应基线和查询预算。
 3. 只优化有真实慢点的接口；不靠长期陈旧缓存、隐藏字段或一次性大重构制造“看起来很快”。
 
 页面/API 的第一版预算：
@@ -113,7 +114,7 @@ Research Baseline 2026.07
 
 按实际执行顺序：
 
-1. **PERF-2 其余页面基线**：Dashboard → Portfolio → Selection 结果 → Backtest 列表，逐个测、逐个修。
+1. **PERF-2 其余页面基线**：Dashboard 已完成；继续 Portfolio → Selection 结果 → Backtest 列表，逐个测、逐个修。
 2. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
 3. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
 
@@ -146,5 +147,6 @@ Research Baseline 2026.07
 - [`strategy_oos_validation_2026-07-17.md`](./strategy_oos_validation_2026-07-17.md)：冻结历史诊断与真正前瞻协议。
 - [`strategy_failure_attribution_2026-07-18.md`](./strategy_failure_attribution_2026-07-18.md)：失败原因与下一策略研究边界。
 - [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)：下一策略不可变研究章程、时间分区、执行成本与人工晋级合同。
+- [`page_response_performance_2026-07-19.md`](./page_response_performance_2026-07-19.md)：四个主要页面的统一预算、实测基线和逐页整改证据。
 
 如果历史文档中的“下一步”与本文冲突，以本文为准。

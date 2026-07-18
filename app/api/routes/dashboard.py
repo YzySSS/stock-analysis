@@ -308,37 +308,19 @@ def _is_limit_up(price: float | None, pre_close: float | None, code: str | None,
     return price >= limit_price
 
 
-def _limit_open_board_stats(rows: list[dict[str, Any]]) -> dict[str, dict]:
-    grouped: dict[str, list[dict]] = {}
-    for row in rows:
-        grouped.setdefault(row.get("code"), []).append(row)
-
+def _normalized_open_board_stats(rows: list[dict[str, Any]]) -> dict[str, dict]:
     stats: dict[str, dict] = {}
-    for code, items in grouped.items():
-        was_sealed = False
-        ever_sealed = False
-        open_count = 0
-        first_limit_time = None
-        last_open_time = None
-        trade_date = None
-        for row in items:
-            price = _to_float(row.get("latest_price"))
-            pre_close = _to_float(row.get("pre_close"))
-            is_sealed = _is_limit_up(price, pre_close, code, row.get("name"))
-            if is_sealed and not ever_sealed:
-                first_limit_time = row.get("quote_minute")
-            if ever_sealed and was_sealed and not is_sealed:
-                open_count += 1
-                last_open_time = row.get("quote_minute")
-            ever_sealed = ever_sealed or is_sealed
-            was_sealed = is_sealed
-            trade_date = row.get("trade_date")
+    for row in rows:
+        code = str(row.get("code") or "")
+        if not code:
+            continue
+        open_count = int(row.get("open_board_count") or 0)
         stats[code] = {
             "open_board_count": open_count,
             "open_board_label": f"开板{open_count}次" if open_count else None,
-            "first_limit_time": str(first_limit_time) if first_limit_time else None,
-            "last_open_time": str(last_open_time) if last_open_time else None,
-            "intraday_trade_date": str(trade_date) if trade_date else None,
+            "first_limit_time": str(row.get("first_limit_time")) if row.get("first_limit_time") else None,
+            "last_open_time": str(row.get("last_open_time")) if row.get("last_open_time") else None,
+            "intraday_trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
         }
     return stats
 
@@ -496,7 +478,7 @@ def _dashboard_emotion_board(limit: int = 8) -> dict:
     history_by_code = inputs["history_by_code"]
 
     limit_pool = []
-    open_board_stats = _limit_open_board_stats(inputs["intraday_rows"])
+    open_board_stats = _normalized_open_board_stats(inputs["open_board_rows"])
     for row in limit_rows:
         code = row.get("code")
         name = row.get("name")

@@ -44,6 +44,7 @@ class DashboardRepository:
                         r.code,
                         COALESCE(r.name, sb.name) AS name,
                         sb.industry,
+                        r.trade_date,
                         r.latest_price,
                         r.pct_chg,
                         r.pre_close,
@@ -191,28 +192,89 @@ class DashboardRepository:
                     reversal_rows = cursor.fetchall() or []
 
                 limit_codes = list(dict.fromkeys(str(row.get("code")) for row in limit_rows if row.get("code")))
+                intraday_trade_date = max(
+                    (row.get("trade_date") for row in limit_rows if row.get("trade_date")),
+                    default=None,
+                )
                 history_codes = list(
                     dict.fromkeys(
                         [*limit_codes, *[str(row.get("code")) for row in reversal_rows if row.get("code")]]
                     )
                 )
 
-                intraday_rows: list[dict[str, Any]] = []
-                if limit_codes:
+                open_board_rows: list[dict[str, Any]] = []
+                if limit_codes and intraday_trade_date:
                     placeholders = self._placeholders(limit_codes)
                     cursor.execute(
                         f"""
-                        SELECT code, name, trade_date, quote_minute, latest_price, pre_close
-                        FROM stock_realtime_intraday
-                        WHERE code IN ({placeholders})
-                          AND trade_date = (SELECT MAX(trade_date) FROM stock_realtime_intraday)
-                          AND latest_price IS NOT NULL
-                          AND pre_close IS NOT NULL
-                        ORDER BY code, quote_minute
+                        WITH intraday_state AS (
+                            SELECT
+                                code,
+                                trade_date,
+                                quote_minute,
+                                CASE
+                                    WHEN latest_price >= ROUND(
+                                        pre_close * (
+                                            1 + CASE
+                                                WHEN code LIKE 'bj.%%' THEN 0.30
+                                                WHEN code LIKE 'sz.300%%'
+                                                  OR code LIKE 'sz.301%%'
+                                                  OR code LIKE 'sh.688%%' THEN 0.20
+                                                WHEN name LIKE '*ST%%'
+                                                  OR name LIKE 'ST%%'
+                                                  OR name LIKE '退市%%' THEN 0.05
+                                                ELSE 0.10
+                                            END
+                                        ),
+                                        2
+                                    ) THEN 1
+                                    ELSE 0
+                                END AS is_sealed
+                            FROM stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)
+                            WHERE code IN ({placeholders})
+                              AND trade_date = %s
+                              AND quote_minute >= %s
+                              AND quote_minute < DATE_ADD(%s, INTERVAL 1 DAY)
+                              AND latest_price IS NOT NULL
+                              AND pre_close IS NOT NULL
+                        ), intraday_transition AS (
+                            SELECT
+                                code,
+                                trade_date,
+                                quote_minute,
+                                is_sealed,
+                                LAG(is_sealed) OVER (
+                                    PARTITION BY code
+                                    ORDER BY quote_minute
+                                ) AS previous_is_sealed
+                            FROM intraday_state
+                        )
+                        SELECT
+                            code,
+                            MAX(trade_date) AS trade_date,
+                            SUM(
+                                CASE
+                                    WHEN previous_is_sealed = 1 AND is_sealed = 0 THEN 1
+                                    ELSE 0
+                                END
+                            ) AS open_board_count,
+                            MIN(CASE WHEN is_sealed = 1 THEN quote_minute END) AS first_limit_time,
+                            MAX(
+                                CASE
+                                    WHEN previous_is_sealed = 1 AND is_sealed = 0 THEN quote_minute
+                                END
+                            ) AS last_open_time
+                        FROM intraday_transition
+                        GROUP BY code
                         """,
-                        limit_codes,
+                        [
+                            *limit_codes,
+                            intraday_trade_date,
+                            intraday_trade_date,
+                            intraday_trade_date,
+                        ],
                     )
-                    intraday_rows = cursor.fetchall() or []
+                    open_board_rows = cursor.fetchall() or []
 
                 history_by_code: dict[str, list[dict[str, Any]]] = {}
                 if history_codes:
@@ -240,7 +302,7 @@ class DashboardRepository:
             "hot_limit_rows": hot_limit_rows,
             "latest_kline_date": latest_kline_date,
             "reversal_rows": reversal_rows,
-            "intraday_rows": intraday_rows,
+            "open_board_rows": open_board_rows,
             "history_by_code": history_by_code,
         }
 
