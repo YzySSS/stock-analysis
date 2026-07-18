@@ -56,6 +56,7 @@ Research Baseline 2026.07
 | 跟踪复盘性能 | 已完成第一阶段 | 冷请求从约 3.60s 降至 0.244s，热请求约 0.035s；真实交易日边界同时修正 |
 | Dashboard 性能 | 已完成 | compact 冷请求从约 3.39s 降至 0.40～0.46s，热请求约 0.001s；输出哈希保持一致 |
 | Portfolio 性能 | 已完成基线 | 完整持仓 API 首次约 0.047s、热约 0.033s；首屏只有一个数据请求，无需改代码或加缓存 |
+| Selection 性能 | 已完成基线 | 最近/run/strategy 三条结果读取约 0.051～0.084s；详细字段均由页面实际使用，不裁剪产品信息 |
 
 ## 3. 版本路线
 
@@ -68,7 +69,7 @@ Research Baseline 2026.07
 必须完成：
 
 1. 已完成：原 2026-08-03 到期的 TrustAsia 手工证书已切换为 Let’s Encrypt；新证书到期日为 2026-10-16，Certbot timer 每日两轮自动续期，webroot 和 reload hook 的完整 dry-run 已通过。
-2. Dashboard、Portfolio 已完成；继续为 Selection、Backtest 建立与 Tracking 相同的冷/热响应基线和查询预算。
+2. Dashboard、Portfolio、Selection 已完成；继续为 Backtest 建立与 Tracking 相同的冷/热响应基线和查询预算。
 3. 只优化有真实慢点的接口；不靠长期陈旧缓存、隐藏字段或一次性大重构制造“看起来很快”。
 
 页面/API 的第一版预算：
@@ -115,7 +116,7 @@ Research Baseline 2026.07
 
 按实际执行顺序：
 
-1. **PERF-2 其余页面基线**：Dashboard、Portfolio 已完成；继续 Selection 结果 → Backtest 列表，逐个测、逐个修。
+1. **PERF-2 其余页面基线**：Dashboard、Portfolio、Selection 已完成；继续 Backtest 列表与首屏 waterfall。
 2. **DQ-ONGOING 已知缺口观察**：保留 `sh.689009` 历史名称未知、指数月度快照不是精确调仓事件等警告，不猜值。
 3. **PRODUCT-1 建议复盘闭环**：在上述基线稳定后恢复。
 

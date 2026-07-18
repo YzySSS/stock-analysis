@@ -66,3 +66,19 @@ API 串行重启后 `NRestarts=0`，页面和 API 均为 200，响应字段哈�
 前端 `DOMContentLoaded` 虽写成先 `loadStrategies()` 再 `loadPortfolio()`，但 Portfolio 的 `loadStrategies()` 只在浏览器内填充“短期/波段/长期”三个固定选项，不发网络请求，也不读取共享策略 API。首屏只有一次真实数据请求 `/api/portfolio`，不存在需要并行化的网络 waterfall。
 
 因此本切片不修改 Portfolio Service/Repository、前端加载顺序或缓存。已有 Repository 将持仓市场上下文固定为 9 条批量 SQL，当前两个持仓的完整响应约 9.0 KiB；继续优化只会增加复杂度，没有真实收益。测量工具已同步移除误归类到 Portfolio 的 `/api/strategies` 目标。Portfolio 判定完成，下一页进入 Selection。
+
+## 5. Selection 切片
+
+线上五次串行基线：HTML 首次/热中位数 `3.09 / 1.27ms`，JS `1.37 / 1.24ms`，初始策略列表 `184.34 / 15.08ms`，最近选股结果 `57.16 / 52.86ms`，全部达标。
+
+结果读取继续覆盖三个真实产品分支：
+
+| 分支 | 首次 | 热中位数 | 响应大小 |
+| --- | ---: | ---: | ---: |
+| 默认最近结果 | 51.94ms | 51.65ms | 64.1 KiB |
+| 显式 `run_id` | 84.03ms | 50.67ms | 64.1 KiB |
+| 按 `strategy_id` 最近结果 | 52.13ms | 51.67ms | 64.1 KiB |
+
+三条结果约 64 KiB，其中每条主要由 `factor_scores`、`sentiment_context` 和 `trade_plan` 构成。Selection 页面会在主表/详情实际展示因子、舆情依据、原因风险和交易计划；这些不是无用 debug 字段，删除或另藏会回退已经确认的结果可读性。首屏默认只加载策略列表，不会自动拉历史结果；运行选股继续通过 worker 异步入队。
+
+因此本切片不修改 Selection Repository、响应字段、前端加载或缓存。三个读取分支均远低于预算，Selection 判定完成，下一页进入 Backtest。

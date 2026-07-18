@@ -1012,3 +1012,9 @@ BacktestRepository 现在按信号日连接生命周期和历史名称区间，�
 Portfolio HTML/JS 首次均低于 4ms，完整 `GET /api/portfolio` 首次约 `47.41ms`、热中位约 `32.61ms`。前端 `loadStrategies()` 只填充本地持有风格常量，不请求共享策略 API；首屏实际只有一次持仓数据请求，不存在串行网络 waterfall。
 
 因此本切片不修改已批量化为固定 9 条 SQL 的 Portfolio Service/Repository，不增加缓存，也不为几十毫秒接口引入额外抽象。只修正 benchmark 目标清单和记录基线，下一切片进入 Selection。
+
+### 2026-07-19：PERF-2C Selection 基线已收口
+
+Selection HTML/JS 约 1～3ms，策略列表首次/热约 `184.34/15.08ms`；默认最近、显式 run、按 strategy 最近三条真实结果分支均约 `51～84ms`。结果包约 64 KiB，主要来自页面实际渲染的因子分、舆情上下文和交易计划，不能把删除产品字段当性能优化。
+
+首屏默认只加载策略列表，历史结果按用户运行或筛选后读取；选股计算继续异步入 selection worker。本切片不修改 Selection Repository、字段、加载顺序或缓存，下一切片进入 Backtest 列表与首屏 waterfall。
