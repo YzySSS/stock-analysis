@@ -12,7 +12,7 @@ from pydantic import BaseModel
 import requests
 
 from app.error_learning.tracker import SelectionResultTracker
-from app.tracking.repository import TrackingRepository
+from app.tracking.repository import TRACKING_STATS_MAX_AGE_DAYS, TrackingRepository
 
 router = APIRouter(tags=["tracking"])
 _TRACKING_REPOSITORY = TrackingRepository()
@@ -129,7 +129,11 @@ def _build_tracking_summary(items: list[dict]) -> dict:
 
 
 def _stats_items(items: list[dict]) -> list[dict]:
-    return [item for item in items if item.get("include_in_stats", True)]
+    return [
+        item
+        for item in items
+        if item.get("include_in_stats", True) and not item.get("stats_window_expired", False)
+    ]
 
 
 def _list_tracking_runs(
@@ -223,6 +227,9 @@ def _compact_tracking_item(item: dict[str, Any]) -> dict[str, Any]:
         "max_drawdown_pct": item.get("max_drawdown_pct"),
         "review_status": item.get("review_status"),
         "include_in_stats": item.get("include_in_stats", True),
+        "stats_window_expired": item.get("stats_window_expired", False),
+        "stats_age_days": item.get("stats_age_days"),
+        "stats_exclusion_reason": item.get("stats_exclusion_reason"),
         "trade_plan": _compact_trade_plan(item.get("trade_plan")),
         "trade_plan_status": {
             "status": status.get("status"),
@@ -247,6 +254,12 @@ def _tracking_payload(
     include_runs: bool = True,
 ) -> dict:
     tracker = SelectionResultTracker(repository=_TRACKING_REPOSITORY)
+    auto_excluded_count = tracker.enforce_stats_retention(
+        instrument_type=instrument_type,
+        max_age_days=TRACKING_STATS_MAX_AGE_DAYS,
+    )
+    if auto_excluded_count > 0:
+        _invalidate_tracking_summary_cache()
     resolved_run_id = run_id
     total = _count_tracking_items(
         instrument_type=instrument_type,
@@ -310,6 +323,11 @@ def _tracking_payload(
         "filtered_summary": cached_summary["filtered_summary"],
         "strategy_summaries": cached_summary["strategy_summaries"],
         "items": response_items,
+        "stats_retention": {
+            "max_age_days": TRACKING_STATS_MAX_AGE_DAYS,
+            "basis": "selection_datetime",
+            "auto_excluded_count": auto_excluded_count,
+        },
         "pagination": {
             "total": total,
             "limit": limit,
@@ -359,6 +377,9 @@ def _compact_review_item(item: dict[str, Any]) -> dict[str, Any]:
         "tracking_days": item.get("tracking_days"),
         "review_status": item.get("review_status"),
         "include_in_stats": item.get("include_in_stats", True),
+        "stats_window_expired": item.get("stats_window_expired", False),
+        "stats_age_days": item.get("stats_age_days"),
+        "stats_exclusion_reason": item.get("stats_exclusion_reason"),
         "realtime_pct_chg": item.get("realtime_pct_chg"),
         "realtime_quote_time": item.get("realtime_quote_time"),
         "trade_signal": {
@@ -510,6 +531,17 @@ def update_tracking_item_stats(
     strategy_id: str = Query(...),
     instrument_type: str = Query(default="stock"),
 ) -> dict:
+    if payload.include_in_stats and _TRACKING_REPOSITORY.is_stats_window_expired(
+        code=code,
+        selection_date=selection_date,
+        strategy_id=strategy_id,
+        instrument_type=instrument_type,
+        max_age_days=TRACKING_STATS_MAX_AGE_DAYS,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"该记录已超过 {TRACKING_STATS_MAX_AGE_DAYS} 个自然日统计窗口，不能重新纳入统计",
+        )
     matched_count = _set_tracking_include_in_stats(
         code=code,
         selection_date=selection_date,

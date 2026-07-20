@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from app.error_learning.models import SelectionTrackingRecord
 from app.shared.sentiment_scoring import enrich_opinion_news_item
 from app.stock_selection.trade_plan import build_selection_trade_plan
-from app.tracking.repository import TrackingRepository
+from app.tracking.repository import TRACKING_STATS_MAX_AGE_DAYS, TrackingRepository
 
 
 class SelectionResultTracker:
@@ -48,6 +48,27 @@ class SelectionResultTracker:
             "trade_signal_state": factor_scores.get("trade_signal_state"),
             "trade_signal_label": factor_scores.get("trade_signal_label"),
             "trade_signal_reason": factor_scores.get("trade_signal_reason"),
+            "trade_grade_state": factor_scores.get("trade_grade_state"),
+            "trade_grade_label": factor_scores.get("trade_grade_label"),
+            "trade_grade_reason": factor_scores.get("trade_grade_reason"),
+            "theme_trade_slot_state": factor_scores.get("theme_trade_slot_state"),
+            "daily_trend_state": factor_scores.get("daily_trend_state"),
+            "daily_trend_label": factor_scores.get("daily_trend_label"),
+            "chip_structure_state": factor_scores.get("chip_structure_state"),
+            "chip_structure_label": factor_scores.get("chip_structure_label"),
+            "market_context_score": factor_scores.get("market_context"),
+            "market_context_label": factor_scores.get("market_context_label"),
+            "market_context_reason": factor_scores.get("market_context_reason"),
+            "market_index_trend_score": factor_scores.get("market_index_trend_score"),
+            "market_index_day_score": factor_scores.get("market_index_day_score"),
+            "market_index_pct_chg": factor_scores.get("market_index_pct_chg"),
+            "market_breadth_score": factor_scores.get("market_breadth_score"),
+            "market_volume_score": factor_scores.get("market_volume_score"),
+            "market_index_count": factor_scores.get("market_index_count"),
+            "market_index_codes": factor_scores.get("market_index_codes"),
+            "csi300_pct_chg": factor_scores.get("csi300_pct_chg"),
+            "csi500_pct_chg": factor_scores.get("csi500_pct_chg"),
+            "csi1000_pct_chg": factor_scores.get("csi1000_pct_chg"),
         }
 
     def build_latest_selection_snapshot(
@@ -74,6 +95,19 @@ class SelectionResultTracker:
         if rows:
             return [self._build_record_from_selection_result(row) for row in rows]
         return []
+
+    def enforce_stats_retention(
+        self,
+        *,
+        instrument_type: str = "stock",
+        max_age_days: int = TRACKING_STATS_MAX_AGE_DAYS,
+        as_of_datetime: datetime | None = None,
+    ) -> int:
+        return self.repository.exclude_expired_from_stats(
+            instrument_type=instrument_type,
+            max_age_days=max_age_days,
+            as_of_datetime=as_of_datetime,
+        )
 
     def _fetch_from_selection_result(
         self,
@@ -145,6 +179,22 @@ class SelectionResultTracker:
         if not start or not end:
             return None
         return max((end - start).days, 0)
+
+    @staticmethod
+    def _stats_window_state(
+        selection_datetime: datetime | None,
+        *,
+        as_of_datetime: datetime | None = None,
+        max_age_days: int = TRACKING_STATS_MAX_AGE_DAYS,
+    ) -> tuple[bool, float | None, str | None]:
+        if selection_datetime is None:
+            return False, None, None
+        current = (as_of_datetime or datetime.now()).replace(tzinfo=None)
+        elapsed_seconds = max((current - selection_datetime.replace(tzinfo=None)).total_seconds(), 0.0)
+        age_days = round(elapsed_seconds / 86400.0, 2)
+        expired = elapsed_seconds > max(1, int(max_age_days)) * 86400
+        reason = f"已超过入选后 {max(1, int(max_age_days))} 个自然日统计窗口" if expired else None
+        return expired, age_days, reason
 
     @staticmethod
     def _combine_period_extreme(period_value: float | None, realtime_value: float | None, prefer_max: bool) -> float | None:
@@ -257,6 +307,7 @@ class SelectionResultTracker:
         realtime_trade_date = str(row["realtime_trade_date"]) if row.get("realtime_trade_date") else None
         metric_trade_date = str(row["metric_trade_date"]) if row.get("metric_trade_date") else latest_trade_date
         selection_datetime = self._to_datetime(row.get("selection_datetime"))
+        stats_window_expired, stats_age_days, stats_exclusion_reason = self._stats_window_state(selection_datetime)
         realtime_quote_dt = self._to_datetime(row.get("realtime_quote_time"))
         selection_dt = selection_datetime.date() if selection_datetime else self._to_date(row.get("selection_date"))
         latest_dt = self._to_date(row.get("latest_trade_date"))
@@ -384,6 +435,9 @@ class SelectionResultTracker:
             industry=row.get("industry"),
             score=self._to_float(row.get("score")),
             include_in_stats=bool(row.get("include_in_stats", 1)),
+            stats_window_expired=stats_window_expired,
+            stats_age_days=stats_age_days,
+            stats_exclusion_reason=stats_exclusion_reason,
             factor_scores=factor_scores,
             selected_open_price=selected_open_price,
             selected_close_price=selected_close_price,
@@ -487,6 +541,9 @@ class SelectionResultTracker:
                 "strategy_id": item.strategy_id,
                 "score": item.score,
                 "include_in_stats": item.include_in_stats,
+                "stats_window_expired": item.stats_window_expired,
+                "stats_age_days": item.stats_age_days,
+                "stats_exclusion_reason": item.stats_exclusion_reason,
                 "strategy_display_name": item.strategy_display_name,
                 "strategy_version": item.strategy_version,
                 "industry": item.industry,

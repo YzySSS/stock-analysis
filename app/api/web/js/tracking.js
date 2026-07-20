@@ -35,7 +35,8 @@ function updateTrackingStats(summary = {}, items = []) {
   }
 }
 
-function statsToggleLabel(includeInStats) {
+function statsToggleLabel(includeInStats, statsWindowExpired = false) {
+  if (statsWindowExpired) return '超14天自动排除';
   return includeInStats ? '纳入统计' : '不统计';
 }
 
@@ -75,8 +76,10 @@ function formatTradePlanInline(plan = null, status = null) {
   const firstTakeProfit = takeProfit[0] || {};
   const entryLow = entryZone.low ?? plan.entry_price;
   const entryHigh = entryZone.high ?? plan.entry_price;
+  const riskReward = plan.risk_control?.take_profit_1_risk_reward_at_entry_high ?? plan.risk_control?.take_profit_1_risk_reward;
+  const riskRewardText = riskReward != null ? ` · 盈亏比 ${formatNumber(riskReward, 2)}` : '';
   const statusText = status?.status_label ? ` · ${status.status_label}` : '';
-  return `买入 ${formatNumber(entryLow, 3)}-${formatNumber(entryHigh, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${statusText}`;
+  return `买入 ${formatNumber(entryLow, 3)}-${formatNumber(entryHigh, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${riskRewardText}${statusText}`;
 }
 
 function getTradePlanBadgeClass(status = null) {
@@ -238,7 +241,11 @@ function renderTrackingTable(items, summary = {}) {
         : '需重点复盘回撤';
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     const planBadgeClass = getTradePlanBadgeClass(item.trade_plan_status);
-    const includeInStats = item.include_in_stats !== false;
+    const tradeGradeLabel = item.sentiment_context?.trade_grade_label;
+    const tradeGradeClass = item.sentiment_context?.trade_grade_state === 'tradable' ? 'status-ok' : 'status-warn';
+    const statsWindowExpired = item.stats_window_expired === true;
+    const includeInStats = item.include_in_stats !== false && !statsWindowExpired;
+    const statsExclusionReason = item.stats_exclusion_reason || '已超过入选后 14 个自然日统计窗口';
     return `
       <tr class="${includeInStats ? '' : 'tracking-excluded-row'}" data-tracking-key="${escapeHtml(`${item.code || ''}__${item.selection_date || ''}__${item.strategy_id || ''}`)}">
         <td>
@@ -259,14 +266,15 @@ function renderTrackingTable(items, summary = {}) {
         <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
         <td>
           <span class="badge ${planBadgeClass}">${escapeHtml(item.trade_plan_status?.status_label || item.review_status || '-')}</span>
+          ${tradeGradeLabel ? `<div><span class="badge ${tradeGradeClass}">${escapeHtml(tradeGradeLabel)}</span></div>` : ''}
         </td>
         <td>
           <div>${escapeHtml(reviewNote)}</div>
           ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
         </td>
         <td>
-          <button class="btn btn-sm ${includeInStats ? 'btn-secondary' : 'btn-warning'}" type="button" data-action="toggle-tracking-stats" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}" data-include-in-stats="${includeInStats ? 'true' : 'false'}">
-            ${escapeHtml(statsToggleLabel(includeInStats))}
+          <button class="btn btn-sm ${includeInStats ? 'btn-secondary' : 'btn-warning'}" type="button" data-action="toggle-tracking-stats" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}" data-include-in-stats="${includeInStats ? 'true' : 'false'}" data-stats-window-expired="${statsWindowExpired ? 'true' : 'false'}" title="${escapeHtml(statsWindowExpired ? statsExclusionReason : '手动切换该记录是否参与统计')}" ${statsWindowExpired ? 'disabled' : ''}>
+            ${escapeHtml(statsToggleLabel(includeInStats, statsWindowExpired))}
           </button>
         </td>
         <td><button class="btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}">删除</button></td>
@@ -289,8 +297,11 @@ function renderTrackingCards(items = [], summary = {}) {
     const excessReturn = pct != null && summary.benchmark_return_pct != null
       ? Number(pct) - Number(summary.benchmark_return_pct)
       : null;
-    const includeInStats = item.include_in_stats !== false;
+    const statsWindowExpired = item.stats_window_expired === true;
+    const includeInStats = item.include_in_stats !== false && !statsWindowExpired;
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
+    const tradeGradeLabel = item.sentiment_context?.trade_grade_label;
+    const tradeGradeClass = item.sentiment_context?.trade_grade_state === 'tradable' ? 'status-ok' : 'status-warn';
     return `
       <article class="tracking-record-card ${includeInStats ? '' : 'tracking-excluded-row'}">
         <div class="tracking-record-head">
@@ -311,7 +322,10 @@ function renderTrackingCards(items = [], summary = {}) {
         ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
         <div class="tracking-record-foot">
           <span>${escapeHtml(formatSelectionTime(item))} · ${escapeHtml(item.realtime_quote_time || '无实时')}</span>
-          <span class="badge ${getTradePlanBadgeClass(item.trade_plan_status)}">${escapeHtml(item.trade_plan_status?.status_label || (includeInStats ? '纳入统计' : '不统计'))}</span>
+          <span>
+            ${tradeGradeLabel ? `<span class="badge ${tradeGradeClass}">${escapeHtml(tradeGradeLabel)}</span>` : ''}
+            <span class="badge ${getTradePlanBadgeClass(item.trade_plan_status)}">${escapeHtml(statsWindowExpired ? '超14天自动排除' : (item.trade_plan_status?.status_label || (includeInStats ? '纳入统计' : '不统计')))}</span>
+          </span>
         </div>
       </article>
     `;
@@ -412,6 +426,7 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
   const pageSummary = data.summary || {};
   const strategySummaries = data.strategy_summaries || [];
   const pagination = data.pagination || {};
+  const statsRetention = data.stats_retention || {};
   lastTrackingState = {
     runId,
     strategyId,
@@ -435,7 +450,11 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
         ? '当前显示该策略全部历史复盘列表'
         : '当前显示全部策略历史复盘列表';
   const excludedText = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
-  if (summaryText) summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}`;
+  const retentionText = `；统计窗口为入选后 ${statsRetention.max_age_days || 14} 个自然日`;
+  const autoExcludedText = statsRetention.auto_excluded_count
+    ? `，本次自动排除 ${statsRetention.auto_excluded_count} 条到期记录`
+    : '';
+  if (summaryText) summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}${retentionText}${autoExcludedText}`;
 }
 
 async function runDeepReview() {
@@ -480,7 +499,12 @@ async function toggleTrackingStats(button) {
   const selectionDate = button?.dataset?.selectionDate || '';
   const strategyId = button?.dataset?.strategyId || '';
   const includeInStats = button?.dataset?.includeInStats !== 'false';
+  const statsWindowExpired = button?.dataset?.statsWindowExpired === 'true';
   const instrumentType = lastTrackingState.instrumentType || 'stock';
+  if (statsWindowExpired) {
+    qs('#tracking-summary-text').textContent = '该记录已超过 14 个自然日统计窗口，不能重新纳入统计';
+    return;
+  }
   if (!code || !selectionDate || !strategyId) {
     qs('#tracking-summary-text').textContent = '切换统计状态失败：当前行缺少 code / selection_date / strategy_id';
     return;

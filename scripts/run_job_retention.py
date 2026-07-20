@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--portfolio-snapshot-days", type=int, default=90)
     parser.add_argument("--error-summary-days", type=int, default=365)
     parser.add_argument("--abandoned-task-hours", type=int, default=24)
+    parser.add_argument("--tracking-stats-days", type=int, default=14)
     args = parser.parse_args()
 
     policy = JobRetentionPolicy(
@@ -37,6 +38,7 @@ def main() -> None:
         portfolio_snapshot_days=args.portfolio_snapshot_days,
         error_summary_days=args.error_summary_days,
         abandoned_task_hours=args.abandoned_task_hours,
+        tracking_stats_days=args.tracking_stats_days,
     )
     service = JobRetentionService(policy)
     if not args.apply:

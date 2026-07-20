@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from app.api.routes import tracking as tracking_route
+from app.error_learning.tracker import SelectionResultTracker
 from app.tracking.repository import TrackingRepository
 
 
@@ -53,6 +55,11 @@ class RecordingConnectionFactory:
 class FakeTracker:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.retention_calls: list[dict[str, Any]] = []
+
+    def enforce_stats_retention(self, **kwargs):
+        self.retention_calls.append(dict(kwargs))
+        return 0
 
     def build_latest_selection_snapshot(self, **kwargs):
         self.calls.append(dict(kwargs))
@@ -92,6 +99,40 @@ class FakeTracker:
 
 
 class TrackingRepositoryTests(unittest.TestCase):
+    def test_expired_stats_update_uses_strict_fourteen_day_cutoff(self):
+        factory = RecordingConnectionFactory()
+        repository = TrackingRepository(connection_factory=factory)
+        as_of = datetime(2026, 7, 20, 12, 0, 0)
+
+        changed = repository.exclude_expired_from_stats(
+            instrument_type="stock",
+            max_age_days=14,
+            as_of_datetime=as_of,
+        )
+
+        self.assertEqual(changed, 0)
+        self.assertEqual(len(factory.executions), 1)
+        sql, params = factory.executions[0]
+        self.assertIn("SET sr.include_in_stats = 0", sql)
+        self.assertIn("sr.created_at < %s", sql)
+        self.assertEqual(params, (datetime(2026, 7, 6, 12, 0, 0), "stock"))
+
+    def test_stats_window_expires_only_after_full_fourteen_days(self):
+        selected_at = datetime(2026, 7, 6, 12, 0, 0)
+
+        at_boundary = SelectionResultTracker._stats_window_state(
+            selected_at,
+            as_of_datetime=selected_at + timedelta(days=14),
+        )
+        after_boundary = SelectionResultTracker._stats_window_state(
+            selected_at,
+            as_of_datetime=selected_at + timedelta(days=14, seconds=1),
+        )
+
+        self.assertFalse(at_boundary[0])
+        self.assertTrue(after_boundary[0])
+        self.assertIn("14 个自然日", after_boundary[2])
+
     def test_enrichment_query_scopes_expensive_joins_to_target_page(self):
         factory = RecordingConnectionFactory()
         repository = TrackingRepository(connection_factory=factory)
@@ -152,6 +193,8 @@ class TrackingRepositoryTests(unittest.TestCase):
         self.assertEqual(first["pagination"]["total"], 176)
         self.assertEqual(first["filtered_summary"]["total_count"], 176)
         self.assertEqual(first["filtered_summary"]["excluded_count"], 175)
+        self.assertEqual(first["stats_retention"]["max_age_days"], 14)
+        self.assertEqual(len(fake_tracker.retention_calls), 2)
         self.assertEqual(fake_tracker.calls[0]["limit"], 10)
         self.assertEqual(fake_tracker.calls[0]["offset"], 20)
         self.assertFalse(fake_tracker.calls[0].get("include_in_stats_only", False))
@@ -160,6 +203,25 @@ class TrackingRepositoryTests(unittest.TestCase):
         self.assertEqual(fake_tracker.calls[2]["limit"], 10)
         self.assertEqual(len(fake_tracker.calls), 3)
         self.assertEqual(second["filtered_summary"], first["filtered_summary"])
+
+    def test_expired_tracking_item_cannot_be_reincluded(self):
+        request = tracking_route.TrackingStatsToggleRequest(include_in_stats=True)
+        with patch.object(
+            tracking_route._TRACKING_REPOSITORY,
+            "is_stats_window_expired",
+            return_value=True,
+        ), patch.object(tracking_route, "_set_tracking_include_in_stats") as update_mock:
+            with self.assertRaises(tracking_route.HTTPException) as context:
+                tracking_route.update_tracking_item_stats(
+                    request,
+                    code="sh.600000",
+                    selection_date="2026-07-01",
+                    strategy_id="strategy-a",
+                    instrument_type="stock",
+                )
+
+        self.assertEqual(context.exception.status_code, 409)
+        update_mock.assert_not_called()
 
     def test_route_and_tracker_have_no_direct_sql_connection(self):
         for path in [

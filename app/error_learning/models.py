@@ -37,5 +37,8 @@ class SelectionTrackingRecord:
     realtime_quote_time: Optional[str] = None
     realtime_price_change_pct: Optional[float] = None
     include_in_stats: bool = True
+    stats_window_expired: bool = False
+    stats_age_days: Optional[float] = None
+    stats_exclusion_reason: Optional[str] = None
     trade_plan: Optional[Dict[str, Any]] = None
     trade_plan_status: Optional[Dict[str, Any]] = None

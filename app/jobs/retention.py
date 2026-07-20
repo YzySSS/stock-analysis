@@ -19,6 +19,7 @@ class JobRetentionPolicy:
     error_summary_days: int = 365
     obsolete_worker_days: int = 30
     abandoned_task_hours: int = 24
+    tracking_stats_days: int = 14
 
     def validate(self) -> None:
         for field, value in asdict(self).items():
@@ -30,8 +31,9 @@ class JobRetentionService:
     """Apply bounded retention without deleting formal product history.
 
     Formal backtests, validation baselines, portfolio advice summaries/outcomes,
-    and saved selection results remain intact. Only replaceable queue details,
-    old system smoke tests, and large expired AI payloads are pruned.
+    and saved selection-result rows remain stored. Their stats eligibility is
+    age-bounded; only replaceable queue details, old system smoke tests, and
+    large expired AI payloads are pruned.
     """
 
     def __init__(self, policy: JobRetentionPolicy | None = None) -> None:
@@ -110,6 +112,15 @@ class JobRetentionService:
                 """,
                 (self.policy.error_summary_days,),
             ),
+            "tracking_stats_exclude": (
+                """
+                SELECT COUNT(*) AS count
+                FROM selection_result
+                WHERE COALESCE(include_in_stats, 1) = 1
+                  AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+                """,
+                (self.policy.tracking_stats_days,),
+            ),
         }
         counts: dict[str, int] = {}
         with mysql_conn() as conn:
@@ -146,6 +157,7 @@ class JobRetentionService:
         changed["portfolio_snapshot_pruned"] = self._prune_portfolio_snapshots()
         changed["obsolete_worker_rows_deleted"] = self._delete_obsolete_worker_rows()
         changed["error_summary_deleted"] = self._delete_old_error_summaries()
+        changed["tracking_stats_excluded"] = self._exclude_expired_tracking_stats()
         return {
             "mode": "apply",
             "policy": asdict(self.policy),
@@ -321,6 +333,17 @@ class JobRetentionService:
               AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
             """,
             (self.policy.selection_task_days,),
+        )
+
+    def _exclude_expired_tracking_stats(self) -> int:
+        return self._execute(
+            """
+            UPDATE selection_result
+            SET include_in_stats=0
+            WHERE COALESCE(include_in_stats, 1)=1
+              AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """,
+            (self.policy.tracking_stats_days,),
         )
 
     def _delete_old_backtest_system_tests(self) -> dict[str, int]:

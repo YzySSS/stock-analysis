@@ -417,6 +417,14 @@ Tracking 的 SQL 已从 `app/api/routes/tracking.py` 和 `app/error_learning/tra
 
 全量 88 项回归通过，run/date/strategy/latest 四种查询分支均在真实库验证。API active、`NRestarts=0`，migration `ExecStartPre` 退出 0；Dashboard、selection results 和公网 health 均 200，公网 tracking 未认证仍为 401。
 
+### 跟踪统计 14 个自然日窗口（2026-07-20）
+
+- `selection_result.created_at` 是统计窗口起点；第 14 天整仍纳入，超过完整 `14 × 24` 小时后，持久化把 `include_in_stats` 改为 `0`。页面原有 `tracking_days` 是交易日口径，继续只用于持有期展示，不参与到期判断。
+- 到期记录不会删除，仍保留在复盘历史中，但不再进入平均收益、胜率、最大回撤和策略汇总；compact API 返回 `stats_window_expired / stats_age_days / stats_exclusion_reason`，页面显示“超14天自动排除”。
+- 过期记录不能手工重新纳入统计，接口返回 `409`；未过期记录仍保留原手工开关。
+- 每次读取跟踪复盘时即时补偿更新，现有每天 `04:15` 的 `job_retention` 也会主动执行一次，因此不依赖用户打开页面。
+- 首次上线迁移把 `44` 行到期股票记录从纳入统计改为排除；迁移后股票记录共 `182` 行、纳入统计 `23` 行、逾期仍纳入 `0` 行。`201` 项回归、真实库 compact API、到期重纳入 `409`、每日任务 dry-run、本地静态资源和公网 health 均验证通过；API `active`、`NRestarts=0`。
+
 ## Dashboard Repository（2026-07-16）
 
 首页三块 read model 已统一通过 `app/dashboard/repository.py` 访问 MySQL：市场概览 7 条、热点主题 3 条、短线情绪榜 7 条，Dashboard route 不再含 SQL。情绪榜过去逐只查询候选日线，单次 66 条；现以 window query 一次读取所有候选最近 9 根 K 线，并批量读取分钟开板数据。Dashboard 自身 SQL 总数约从 76 降到固定 17。

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from app.shared.db import mysql_conn
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
+TRACKING_STATS_MAX_AGE_DAYS = 14
 
 
 class TrackingRepository:
@@ -17,6 +19,16 @@ class TrackingRepository:
 
     def _connect(self, *, dict_cursor: bool = True):
         return self._connection_factory(dict_cursor=dict_cursor)
+
+    @staticmethod
+    def _stats_cutoff(
+        *,
+        max_age_days: int = TRACKING_STATS_MAX_AGE_DAYS,
+        as_of_datetime: datetime | None = None,
+    ) -> datetime:
+        normalized_days = max(1, int(max_age_days))
+        current = as_of_datetime or datetime.now()
+        return current.replace(tzinfo=None) - timedelta(days=normalized_days)
 
     @staticmethod
     def _latest_business_key_condition() -> str:
@@ -84,6 +96,9 @@ class TrackingRepository:
 
         if include_in_stats_only:
             conditions.append("COALESCE(sr.include_in_stats, 1) = 1")
+            conditions.append(
+                f"sr.created_at >= DATE_SUB(NOW(), INTERVAL {TRACKING_STATS_MAX_AGE_DAYS} DAY)"
+            )
         return " AND ".join(f"({condition.strip()})" for condition in conditions), params, order_by
 
     def list_selection_result_rows(
@@ -290,10 +305,21 @@ class TrackingRepository:
         instrument_type: str,
         include_in_stats: bool,
     ) -> int:
+        cutoff = self._stats_cutoff()
+        active_window_sql = "AND sr.created_at >= %s" if include_in_stats else ""
+        params: list[Any] = [
+            1 if include_in_stats else 0,
+            code,
+            selection_date,
+            strategy_id,
+            instrument_type,
+        ]
+        if include_in_stats:
+            params.append(cutoff)
         with self._connect(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    """
+                    f"""
                     UPDATE selection_result sr
                     INNER JOIN stock_basic sb ON sr.code = sb.code
                     SET sr.include_in_stats = %s
@@ -301,10 +327,66 @@ class TrackingRepository:
                       AND sr.trade_date = %s
                       AND sr.strategy_id = %s
                       AND sb.instrument_type = %s
+                      {active_window_sql}
                     """,
-                    (1 if include_in_stats else 0, code, selection_date, strategy_id, instrument_type),
+                    params,
                 )
                 return int(cursor.rowcount or 0)
+
+    def exclude_expired_from_stats(
+        self,
+        *,
+        instrument_type: str,
+        max_age_days: int = TRACKING_STATS_MAX_AGE_DAYS,
+        as_of_datetime: datetime | None = None,
+    ) -> int:
+        """Persistently exclude saved selections after their calendar-time window expires."""
+        cutoff = self._stats_cutoff(max_age_days=max_age_days, as_of_datetime=as_of_datetime)
+        with self._connect(dict_cursor=False) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE selection_result sr
+                    INNER JOIN stock_basic sb ON sr.code = sb.code
+                    SET sr.include_in_stats = 0
+                    WHERE COALESCE(sr.include_in_stats, 1) = 1
+                      AND sr.created_at < %s
+                      AND sb.instrument_type = %s
+                    """,
+                    (cutoff, instrument_type),
+                )
+                return int(cursor.rowcount or 0)
+
+    def is_stats_window_expired(
+        self,
+        *,
+        code: str,
+        selection_date: str,
+        strategy_id: str,
+        instrument_type: str,
+        max_age_days: int = TRACKING_STATS_MAX_AGE_DAYS,
+        as_of_datetime: datetime | None = None,
+    ) -> bool:
+        """Return whether the latest saved row for a business key is outside the stats window."""
+        cutoff = self._stats_cutoff(max_age_days=max_age_days, as_of_datetime=as_of_datetime)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS row_count,
+                        CASE WHEN MAX(sr.created_at) < %s THEN 1 ELSE 0 END AS is_expired
+                    FROM selection_result sr
+                    INNER JOIN stock_basic sb ON sr.code = sb.code
+                    WHERE sr.code = %s
+                      AND sr.trade_date = %s
+                      AND sr.strategy_id = %s
+                      AND sb.instrument_type = %s
+                    """,
+                    (cutoff, code, selection_date, strategy_id, instrument_type),
+                )
+                row = cursor.fetchone() or {}
+                return bool(int(row.get("row_count") or 0) > 0 and int(row.get("is_expired") or 0) == 1)
 
     def delete_item(
         self,

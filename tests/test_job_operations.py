@@ -133,6 +133,23 @@ class RetentionSafetyTests(unittest.TestCase):
             self.assertIn("validation_baseline_id IS NULL", normalized)
             self.assertIn("status IN ('success','failed','cancelled')", normalized)
 
+    def test_tracking_stats_retention_updates_flag_without_deleting_results(self):
+        statements = []
+
+        class CapturingService(JobRetentionService):
+            def _execute(self, sql, params=()):
+                statements.append((" ".join(sql.split()), params))
+                return 0
+
+        CapturingService()._exclude_expired_tracking_stats()
+
+        self.assertEqual(len(statements), 1)
+        sql, params = statements[0]
+        self.assertIn("UPDATE selection_result", sql)
+        self.assertIn("SET include_in_stats=0", sql)
+        self.assertNotIn("DELETE", sql.upper())
+        self.assertEqual(params, (14,))
+
 
 if __name__ == "__main__":
     unittest.main()

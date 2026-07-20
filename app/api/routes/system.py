@@ -1073,6 +1073,7 @@ def system_status() -> dict:
             "realtime_tracked_raw_trade_days": 90,
             "market_opinion_intraday_trade_days": 5,
             "market_opinion_daily_trade_days": 90,
+            "tracking_stats_days": 14,
         },
         "market_opinion_update": _market_opinion_update_status(task_runs),
     }
