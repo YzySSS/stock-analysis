@@ -215,7 +215,7 @@ strategies:
     display_name: A股舆情选股
     entrypoint: app.strategies.active.thematic_strategies.AShareSentimentStrategy
     config_path: app/strategies/registry/configs/a_share_sentiment.yaml
-    version: 0.3.0
+    version: 0.3.1
     status: experimental
     mode: current
     executable: true
@@ -228,6 +228,6 @@ strategies:
       backtest_status: disabled
       validation_status: unvalidated
       evidence_status: observed
-      evidence_note: 0.3.0已增加宽基指数市场环境、同主题可交易级上限与统一风险收益约束；收益样本仍不足且未通过样本外验证
+      evidence_note: 0.3.1已统一60分入选底线，并从固定收盘后时点开始保留完整前瞻样本；当前仍在观察期，未通过正式样本外验证
     tags: [sentiment, news, moneyflow, market-index, risk-control, experimental]
     description: 贴合 A 股新闻/公告/题材驱动特征，优先使用本地舆情缓存，后续可对 TopN 接 DeepSeek 精排

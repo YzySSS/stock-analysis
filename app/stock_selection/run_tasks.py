@@ -14,6 +14,7 @@ from pymysql.err import IntegrityError
 from app.jobs.errors import record_job_error
 from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
 from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, require_supported_instrument
+from app.stock_selection.forward_observation import ForwardObservationRepository
 from app.stock_selection.repository import SelectionRepository
 from app.strategies.service import StrategyService
 
@@ -65,6 +66,8 @@ class SelectionTaskPayload(BaseModel):
     max_picks: int = Field(default=3, ge=1, le=200)
     score_threshold: float | None = Field(default=None, ge=0, le=100)
     save: bool = False
+    forward_protocol_id: str | None = Field(default=None, min_length=1, max_length=96)
+    forward_observation_id: str | None = Field(default=None, min_length=1, max_length=96)
 
 
 class SelectionRunService:
@@ -110,6 +113,8 @@ class SelectionRunService:
                 "save": False,
             }
         ).model_dump()
+        if bool(request_payload.get("forward_protocol_id")) != bool(request_payload.get("forward_observation_id")):
+            raise ValueError("forward_protocol_id and forward_observation_id must be supplied together")
         idempotency_date = self._latest_data_trade_date()
         idempotency_key = self._idempotency_key(request_payload, idempotency_date)
         existing = self._get_active_by_idempotency(idempotency_key)
@@ -179,6 +184,7 @@ class SelectionRunService:
         stop_event = threading.Event()
         cancel_seen = threading.Event()
         heartbeat: threading.Thread | None = None
+        request: SelectionTaskPayload | None = None
         try:
             if not self.job_states.owns_running_job(run_id, worker_id):
                 raise RuntimeError("worker does not own this running selection task")
@@ -188,6 +194,8 @@ class SelectionRunService:
                 return
 
             self._mark_execution_stage(run_id, worker_id)
+            if request.forward_observation_id:
+                ForwardObservationRepository().mark_running(request.forward_observation_id, run_id)
             heartbeat = threading.Thread(
                 target=self._worker_heartbeat,
                 args=(run_id, worker_id, stop_event, cancel_seen),
@@ -210,7 +218,7 @@ class SelectionRunService:
                 return
             if self.job_states.finish_cancelled_if_requested(run_id, worker_id):
                 return
-            self._finish_success(run_id, worker_id, result)
+            self._finish_success(run_id, worker_id, result, request)
         except Exception as exc:
             stop_event.set()
             if heartbeat:
@@ -219,7 +227,7 @@ class SelectionRunService:
                 return
             logger.exception("selection run failed run_id=%s", run_id)
             error_code = "invalid_request" if isinstance(exc, ValidationError) else "selection_failed"
-            self._finish_failed(run_id, worker_id, error_code, str(exc))
+            self._finish_failed(run_id, worker_id, error_code, str(exc), request)
 
     def _latest_data_trade_date(self) -> date:
         value = self.repository.latest_data_trade_date()
@@ -274,7 +282,13 @@ class SelectionRunService:
     def _mark_execution_stage(self, run_id: str, worker_id: str) -> None:
         self.repository.mark_execution_stage(run_id, worker_id)
 
-    def _finish_success(self, run_id: str, worker_id: str, result: Dict[str, Any]) -> None:
+    def _finish_success(
+        self,
+        run_id: str,
+        worker_id: str,
+        result: Dict[str, Any],
+        request: SelectionTaskPayload | None = None,
+    ) -> None:
         result_count = int(result.get("count") or len(result.get("results") or []))
         updated = self.repository.finish_success(
             run_id=run_id,
@@ -284,8 +298,41 @@ class SelectionRunService:
         )
         if not updated:
             logger.warning("selection success ignored after ownership/status change run_id=%s", run_id)
+            return
+        if request and request.forward_protocol_id and request.forward_observation_id:
+            try:
+                ForwardObservationRepository().finalize_success(
+                    protocol_id=request.forward_protocol_id,
+                    observation_id=request.forward_observation_id,
+                    selection_run_id=run_id,
+                    result=result,
+                )
+            except Exception as exc:
+                logger.exception("forward observation finalization failed run_id=%s", run_id)
+                try:
+                    ForwardObservationRepository().mark_failed(
+                        observation_id=request.forward_observation_id,
+                        selection_run_id=run_id,
+                        error_code="observation_persist_failed",
+                        error_message=str(exc),
+                    )
+                except Exception:
+                    logger.exception("forward observation failure state could not be persisted run_id=%s", run_id)
+                record_job_error(
+                    "selection",
+                    "strategy_forward_observation",
+                    "observation_persist_failed",
+                    str(exc),
+                )
 
-    def _finish_failed(self, run_id: str, worker_id: str, error_code: str, error_message: str) -> None:
+    def _finish_failed(
+        self,
+        run_id: str,
+        worker_id: str,
+        error_code: str,
+        error_message: str,
+        request: SelectionTaskPayload | None = None,
+    ) -> None:
         updated = self.repository.finish_failed(
             run_id=run_id,
             worker_id=worker_id,
@@ -294,6 +341,16 @@ class SelectionRunService:
         )
         if updated:
             record_job_error("selection", "selection", error_code, error_message)
+            if request and request.forward_observation_id:
+                try:
+                    ForwardObservationRepository().mark_failed(
+                        observation_id=request.forward_observation_id,
+                        selection_run_id=run_id,
+                        error_code=error_code,
+                        error_message=error_message,
+                    )
+                except Exception:
+                    logger.exception("forward observation failure state could not be persisted run_id=%s", run_id)
 
     def _normalize_row(self, row: Dict[str, Any], include_result: bool = True) -> Dict[str, Any]:
         request = _from_json(row.get("request_json")) or {}

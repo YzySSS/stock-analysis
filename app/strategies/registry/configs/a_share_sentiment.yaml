@@ -1,6 +1,7 @@
 selection:
   max_picks: 3
-  score_threshold: 45
+  # 产品、API 与正式前瞻观察统一使用 60 分底线；低于 60 的候选不进入结果池。
+  score_threshold: 60
 
 hard_filters:
   min_amount: 50000000

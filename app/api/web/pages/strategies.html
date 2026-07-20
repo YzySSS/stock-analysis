@@ -106,6 +106,80 @@
             </div>
           </section>
 
+          <section class="card strategy-forward-console">
+            <div class="card-header">
+              <div>
+                <p class="card-kicker">Prospective Evidence</p>
+                <h2>前瞻观察与执行复盘</h2>
+                <p id="strategy-forward-note" class="muted">请选择策略后查看固定协议下的真实前瞻样本。</p>
+              </div>
+              <span id="strategy-forward-status" class="badge status-muted">未选择</span>
+            </div>
+
+            <div id="strategy-forward-protocol" class="strategy-forward-protocol empty-state">请选择策略</div>
+            <section id="strategy-forward-summary" class="stat-grid compact-stats strategy-forward-summary"></section>
+
+            <div class="strategy-forward-columns">
+              <article class="strategy-forward-panel">
+                <div class="card-header compact-card-header">
+                  <p class="card-kicker">Advice Quality</p>
+                  <h3>建议质量（所有候选）</h3>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>持有期</th>
+                        <th>成熟样本</th>
+                        <th>平均收益</th>
+                        <th>胜率</th>
+                        <th>相对沪深300</th>
+                      </tr>
+                    </thead>
+                    <tbody id="strategy-forward-metrics">
+                      <tr><td colspan="5" class="empty-state">暂无前瞻样本</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+
+              <article class="strategy-forward-panel">
+                <div class="card-header compact-card-header">
+                  <p class="card-kicker">User Discipline</p>
+                  <h3>执行纪律（用户动作）</h3>
+                </div>
+                <div id="strategy-forward-discipline" class="strategy-forward-discipline empty-state">暂无操作记录</div>
+              </article>
+            </div>
+
+            <div class="card-header strategy-forward-picks-header">
+              <div>
+                <p class="card-kicker">Observation Log</p>
+                <h3>最近前瞻候选</h3>
+              </div>
+              <small>“初步样本达标”不等于“策略已验证”</small>
+            </div>
+            <div class="table-wrapper strategy-forward-picks-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>信号日</th>
+                    <th>候选</th>
+                    <th>分数/主题</th>
+                    <th>1日</th>
+                    <th>3日</th>
+                    <th>5日</th>
+                    <th>20日</th>
+                    <th>动作记录</th>
+                  </tr>
+                </thead>
+                <tbody id="strategy-forward-picks-body">
+                  <tr><td colspan="8" class="empty-state">暂无前瞻候选</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <section class="card strategy-table-console">
             <div class="card-header">
               <div>
@@ -140,6 +214,6 @@
   </div>
 
   <script src="/static/js/common.js"></script>
-  <script src="/static/js/strategies.js?v=20260718a1"></script>
+  <script src="/static/js/strategies.js?v=20260720f1"></script>
 </body>
 </html>

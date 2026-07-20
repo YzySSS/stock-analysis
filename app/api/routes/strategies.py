@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
+from app.stock_selection.forward_observation import ForwardObservationRepository, ForwardObservationService
 from app.strategies.service import StrategyService
 
 router = APIRouter(tags=["strategies"])
+
+
+class ForwardActionRequest(BaseModel):
+    observation_id: str = Field(..., min_length=1, max_length=96)
+    code: str = Field(..., min_length=1, max_length=16)
+    action_type: str = Field(..., min_length=1, max_length=32)
+    action_price: float | None = Field(default=None, gt=0)
+    note: str | None = Field(default=None, max_length=500)
 
 
 @router.get("/strategies")
@@ -45,3 +55,21 @@ def get_strategy_detail(
             sample_limit=sample_limit,
         ),
     }
+
+
+@router.get("/strategies/forward-evidence")
+def get_forward_evidence(
+    strategy_id: str = Query(min_length=1, max_length=64),
+) -> dict:
+    return {
+        "forward_evidence": ForwardObservationService().evidence_summary(strategy_id),
+    }
+
+
+@router.post("/strategies/forward-actions")
+def record_forward_action(payload: ForwardActionRequest) -> dict:
+    try:
+        action = ForwardObservationRepository().record_action(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"action": action}

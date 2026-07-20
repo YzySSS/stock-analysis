@@ -5315,6 +5315,131 @@ body[data-page="strategies"] tr.selected-row td {
   background: rgba(14, 165, 233, 0.08);
 }
 
+body[data-page="strategies"] .strategy-forward-console {
+  margin: 0 0 14px !important;
+  border-radius: 12px !important;
+}
+
+body[data-page="strategies"] .strategy-forward-console .card-header > div > p.muted {
+  margin: 5px 0 0;
+}
+
+body[data-page="strategies"] .strategy-forward-protocol {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+body[data-page="strategies"] .strategy-forward-protocol > span {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid rgba(59, 130, 246, .20);
+  border-radius: 9px;
+  background: rgba(7, 25, 45, .72);
+}
+
+body[data-page="strategies"] .strategy-forward-protocol b {
+  color: #dbeafe;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+body[data-page="strategies"] .strategy-forward-protocol small,
+body[data-page="strategies"] .strategy-forward-picks-header small {
+  color: #8fa3bd;
+}
+
+body[data-page="strategies"] .strategy-forward-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+body[data-page="strategies"] .strategy-forward-summary .stat-card {
+  min-height: 82px;
+  padding: 12px;
+}
+
+body[data-page="strategies"] .strategy-forward-ai-value {
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+body[data-page="strategies"] .strategy-forward-columns {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+body[data-page="strategies"] .strategy-forward-panel {
+  padding: 13px;
+  border: 1px solid rgba(59, 130, 246, .20);
+  border-radius: 10px;
+  background: rgba(7, 25, 45, .62);
+}
+
+body[data-page="strategies"] .strategy-forward-panel h3,
+body[data-page="strategies"] .strategy-forward-picks-header h3 {
+  margin: 0;
+  color: #eaf6ff;
+  font-size: 15px;
+}
+
+body[data-page="strategies"] .strategy-forward-discipline {
+  display: grid;
+  gap: 9px;
+}
+
+body[data-page="strategies"] .strategy-forward-discipline > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(15, 35, 59, .65);
+  color: #a9bdd5;
+  font-size: 12px;
+}
+
+body[data-page="strategies"] .strategy-forward-discipline b {
+  color: #dbeafe;
+}
+
+body[data-page="strategies"] .strategy-forward-discipline small {
+  grid-column: 1 / -1;
+  color: #7f94ad;
+}
+
+body[data-page="strategies"] .strategy-forward-picks-header {
+  margin-top: 4px;
+}
+
+body[data-page="strategies"] .strategy-forward-picks-table td small {
+  display: block;
+  margin-top: 4px;
+  color: #7f94ad;
+}
+
+body[data-page="strategies"] .strategy-forward-action-log,
+body[data-page="strategies"] .strategy-forward-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 230px;
+}
+
+body[data-page="strategies"] .strategy-forward-action-buttons {
+  margin-top: 7px;
+}
+
+body[data-page="strategies"] .forward-action-btn {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 @media (max-width: 1480px) {
   .strategy-hero-card-grid,
   .strategy-summary-strip {
@@ -5323,6 +5448,10 @@ body[data-page="strategies"] tr.selected-row td {
 
   .strategy-detail-columns {
     grid-template-columns: 1fr;
+  }
+
+  body[data-page="strategies"] .strategy-forward-protocol {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -5335,6 +5464,12 @@ body[data-page="strategies"] tr.selected-row td {
 
   .strategy-hero-card-grid,
   .strategy-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="strategies"] .strategy-forward-protocol,
+  body[data-page="strategies"] .strategy-forward-summary,
+  body[data-page="strategies"] .strategy-forward-columns {
     grid-template-columns: 1fr;
   }
 }

@@ -29,6 +29,8 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "data_quality_audit",
                 "fundamental_pit_backfill",
                 "index_constituent_pit_backfill",
+                "strategy_forward_observation_submit",
+                "strategy_forward_outcome_update",
             }.issubset(TRACKED_TASKS)
         )
 

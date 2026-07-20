@@ -12,6 +12,7 @@ from typing import Any, Callable
 from app.jobs.schema import ensure_job_ops_schema
 from app.orchestration.backtest_validation_schema import ensure_backtest_validation_schema
 from app.orchestration.feature_cache_schema import ensure_feature_cache_schema
+from app.orchestration.forward_observation_schema import ensure_forward_observation_schema
 from app.orchestration.fundamental_pit_schema import ensure_fundamental_pit_schema
 from app.orchestration.init_project import init_mysql_schema
 from app.orchestration.intraday_bar_schema import ensure_intraday_bar_schema
@@ -98,6 +99,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0018", "point-in-time fundamental announcement schema", ensure_fundamental_pit_schema),
     Migration("0019", "point-in-time index constituent schema", ensure_index_constituent_pit_schema),
     Migration("0020", "frozen out-of-sample validation protocol schema", ensure_backtest_validation_schema),
+    Migration("0021", "prospective strategy observation and action schema", ensure_forward_observation_schema),
 )
 
 
