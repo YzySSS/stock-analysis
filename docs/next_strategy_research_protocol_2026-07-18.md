@@ -91,10 +91,12 @@ research_only / unvalidated
 ## 6. 分阶段开发边界
 
 1. **Charter lock（已完成）**：冻结本协议与哈希；不写策略、不跑回测。
-2. **Factor spec lock（待开始）**：只用开发集完成公式、阈值、缺失值、标准化和候选日志，输出不可变 spec 与哈希。
-3. **Implementation lock（待开始）**：独立策略文件与配置；补齐调整收益；验证 DQ、测试、源码/配置/数据截止日指纹，并生成真正前瞻日期。
+2. **Factor spec lock（已完成）**：只用开发集完成公式、阈值、缺失值、标准化和 4 份候选日志；不可变 spec 与 SHA-256 已落盘。
+3. **Implementation lock（被数据前置条件阻断）**：开发区间 1,835,321 条日线的 `adj_factor` 覆盖为 0；必须先补齐并审计 point-in-time 调整收益，禁止退回未复权收益后写策略。
 4. **Historical diagnostic（待开始）**：冻结实现只跑一次历史诊断；只能否决或判定证据不足，任何修改都必须换候选与协议。
 5. **Prospective OOS（待开始）**：窗口闭合前只记录，不调参、不提前看结论。
 6. **Manual promotion review（待开始）**：即使全部通过，也只形成候选；人工复核数据、方法论、实现、五个 offset 和风险后，才能另行决定是否进入普通选股。
 
-下一步不是马上写 `pit_quality_trend_liquidity_v1`，而是先为其他页面建立性能基线。策略研究恢复时，从 Factor spec lock 单独立项开始。
+冻结产物为 [`pit_quality_trend_liquidity_factor_spec_v1.yaml`](../config/research_protocols/pit_quality_trend_liquidity_factor_spec_v1.yaml)，SHA-256 为 `6a385b6cec053e8c0618b580efbdb1d05b1bf2337ec5456dddcef5bbd668add6`。它固定了公告日 PIT 质量 60%、20/60 日中期趋势 40%、流动性/波动硬门槛、70 分入场线、2 分边界区分度、0～3 只与持币规则；没有读取历史诊断区间做选型，也没有运行策略回测。
+
+下一步只能先解决调整因子历史覆盖和总回报口径。该数据门槛通过前，不创建 `pit_quality_trend_liquidity_v1` 策略实现、数据库 validation protocol 或历史诊断 run。
