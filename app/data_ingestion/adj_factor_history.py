@@ -13,6 +13,8 @@ from app.shared.db import mysql_conn
 
 DEFAULT_MINIMUM_COVERAGE_RATIO = 0.995
 MAX_RESULT_DATE_SAMPLES = 20
+COVERAGE_SCOPE = "daily_kline joined to stock_basic.instrument_type=stock"
+COVERAGE_SCOPE_VERSION = "stock_instrument_type_v1"
 
 
 def _date_text(value: Any) -> str:
@@ -88,10 +90,12 @@ class AdjFactorHistoryBackfill:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT DISTINCT trade_date
-                    FROM daily_kline
-                    WHERE trade_date BETWEEN %s AND %s
-                    ORDER BY trade_date
+                    SELECT DISTINCT dk.trade_date
+                    FROM daily_kline dk
+                    INNER JOIN stock_basic sb
+                      ON sb.code=dk.code AND sb.instrument_type='stock'
+                    WHERE dk.trade_date BETWEEN %s AND %s
+                    ORDER BY dk.trade_date
                     """,
                     (start_date, end_date),
                 )
@@ -101,7 +105,12 @@ class AdjFactorHistoryBackfill:
         with self._connection_factory() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT MIN(trade_date) AS min_date, MAX(trade_date) AS max_date FROM daily_kline"
+                    """
+                    SELECT MIN(dk.trade_date) AS min_date, MAX(dk.trade_date) AS max_date
+                    FROM daily_kline dk
+                    INNER JOIN stock_basic sb
+                      ON sb.code=dk.code AND sb.instrument_type='stock'
+                    """
                 )
                 row = cursor.fetchone() or {}
         if not row.get("min_date") or not row.get("max_date"):
@@ -131,6 +140,8 @@ class AdjFactorHistoryBackfill:
                            COUNT(*) AS expected_rows,
                            COUNT(af.code) AS matched_rows
                     FROM daily_kline dk
+                    INNER JOIN stock_basic sb
+                      ON sb.code=dk.code AND sb.instrument_type='stock'
                     LEFT JOIN adj_factor_daily af
                       ON af.code=dk.code AND af.trade_date=dk.trade_date
                     WHERE dk.trade_date BETWEEN %s AND %s
@@ -158,6 +169,8 @@ class AdjFactorHistoryBackfill:
                              WHERE stored_factor.trade_date=%s
                            ) AS stored_rows
                     FROM daily_kline dk
+                    INNER JOIN stock_basic sb
+                      ON sb.code=dk.code AND sb.instrument_type='stock'
                     LEFT JOIN adj_factor_daily af
                       ON af.code=dk.code AND af.trade_date=dk.trade_date
                     WHERE dk.trade_date=%s
@@ -181,8 +194,16 @@ class AdjFactorHistoryBackfill:
                     WHERE trade_date BETWEEN %s AND %s
                       AND status='success'
                       AND coverage_ratio >= %s
+                      AND JSON_UNQUOTE(
+                            JSON_EXTRACT(metadata_json,'$.coverage_scope_version')
+                          ) = %s
                     """,
-                    (start_date, end_date, minimum_coverage_ratio),
+                    (
+                        start_date,
+                        end_date,
+                        minimum_coverage_ratio,
+                        COVERAGE_SCOPE_VERSION,
+                    ),
                 )
                 return {
                     _date_text(row["trade_date"])
@@ -267,6 +288,8 @@ class AdjFactorHistoryBackfill:
             **coverage,
             "reconciled_existing_rows": True,
             "upstream_called": False,
+            "coverage_scope": COVERAGE_SCOPE,
+            "coverage_scope_version": COVERAGE_SCOPE_VERSION,
         }
         self._mark_terminal(
             trade_date,
@@ -303,6 +326,8 @@ class AdjFactorHistoryBackfill:
                 "saved_rows": saved_rows,
                 **coverage,
                 "minimum_coverage_ratio": minimum_coverage_ratio,
+                "coverage_scope": COVERAGE_SCOPE,
+                "coverage_scope_version": COVERAGE_SCOPE_VERSION,
             }
             self._mark_terminal(
                 trade_date,
@@ -464,13 +489,21 @@ class AdjFactorHistoryBackfill:
                            SUM(expected_rows) AS kline_rows,
                            SUM(matched_rows) AS matched_rows,
                            SUM(expected_rows-matched_rows) AS missing_rows,
-                           MIN(matched_rows/NULLIF(expected_rows,0)) AS minimum_partition_coverage_ratio,
-                           SUM(matched_rows/NULLIF(expected_rows,0) < %s) AS incomplete_days
+                           MIN(
+                               CAST(matched_rows AS DECIMAL(30,12))
+                               / NULLIF(expected_rows,0)
+                           ) AS minimum_partition_coverage_ratio,
+                           SUM(
+                               CAST(matched_rows AS DECIMAL(30,12))
+                               / NULLIF(expected_rows,0) < %s
+                           ) AS incomplete_days
                     FROM (
                         SELECT dk.trade_date,
                                COUNT(*) AS expected_rows,
                                COUNT(af.code) AS matched_rows
                         FROM daily_kline dk
+                        INNER JOIN stock_basic sb
+                          ON sb.code=dk.code AND sb.instrument_type='stock'
                         LEFT JOIN adj_factor_daily af
                           ON af.code=dk.code AND af.trade_date=dk.trade_date
                         WHERE dk.trade_date BETWEEN %s AND %s
@@ -492,11 +525,24 @@ class AdjFactorHistoryBackfill:
                            SUM(matched_rows) AS matched_rows,
                            SUM(missing_rows) AS missing_rows,
                            MIN(coverage_ratio) AS minimum_partition_coverage_ratio,
-                           SUM(coverage_ratio < %s OR status <> 'success') AS incomplete_days
+                           SUM(coverage_ratio < %s OR status <> 'success') AS incomplete_days,
+                           SUM(
+                               COALESCE(
+                                   JSON_UNQUOTE(
+                                       JSON_EXTRACT(metadata_json,'$.coverage_scope_version')
+                                   ),
+                                   ''
+                               ) <> %s
+                           ) AS scope_mismatch_days
                     FROM adj_factor_sync_manifest
                     WHERE trade_date BETWEEN %s AND %s
                     """,
-                    (minimum_coverage_ratio, start_date, end_date),
+                    (
+                        minimum_coverage_ratio,
+                        COVERAGE_SCOPE_VERSION,
+                        start_date,
+                        end_date,
+                    ),
                 )
                 manifest = cursor.fetchone() or {}
                 cursor.execute(
@@ -531,6 +577,7 @@ class AdjFactorHistoryBackfill:
         missing_manifest_days = max(expected_days - manifest_days, 0)
         incomplete_days = _int(actual.get("incomplete_days"))
         manifest_incomplete_days = _int(manifest.get("incomplete_days"))
+        scope_mismatch_days = _int(manifest.get("scope_mismatch_days"))
         invalid_rows = _int(invalid.get("invalid_factor_rows"))
         future_rows = _int(invalid.get("future_factor_rows"))
         ready = bool(
@@ -538,6 +585,7 @@ class AdjFactorHistoryBackfill:
             and missing_manifest_days == 0
             and incomplete_days == 0
             and manifest_incomplete_days == 0
+            and scope_mismatch_days == 0
             and coverage_ratio >= minimum_coverage_ratio
             and invalid_rows == 0
             and future_rows == 0
@@ -558,6 +606,7 @@ class AdjFactorHistoryBackfill:
             "running_days": _int(manifest.get("running_days")),
             "incomplete_days": incomplete_days,
             "manifest_incomplete_days": manifest_incomplete_days,
+            "manifest_scope_mismatch_days": scope_mismatch_days,
             "kline_rows": expected_rows,
             "manifest_expected_rows": _int(manifest.get("expected_rows")),
             "manifest_matched_rows": _int(manifest.get("matched_rows")),
@@ -579,6 +628,8 @@ class AdjFactorHistoryBackfill:
             else None,
             "invalid_factor_rows": invalid_rows,
             "future_factor_rows": future_rows,
+            "coverage_scope": COVERAGE_SCOPE,
+            "coverage_scope_version": COVERAGE_SCOPE_VERSION,
             "missing_factor_policy": "fail_closed_per_candidate_path",
             "return_formula": "end_price*end_factor/(start_price*start_factor)-1",
         }

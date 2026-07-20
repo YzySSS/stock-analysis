@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.data_ingestion.adj_factor_history import (
+    COVERAGE_SCOPE_VERSION,
     AdjFactorHistoryBackfill,
     adjusted_total_return,
     partition_status,
@@ -25,6 +26,17 @@ class AdjFactorHistoryUnitTests(unittest.TestCase):
         )
         self.assertNotIn("adj_factor_daily stored\n", source)
         self.assertIn("adj_factor_daily stored_factor", source)
+
+    def test_coverage_scope_is_limited_to_the_declared_stock_universe(self):
+        source = (PROJECT_ROOT / "app/data_ingestion/adj_factor_history.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertGreaterEqual(source.count("sb.instrument_type='stock'"), 5)
+        self.assertIn(
+            'COVERAGE_SCOPE = "daily_kline joined to stock_basic.instrument_type=stock"',
+            source,
+        )
+        self.assertEqual(COVERAGE_SCOPE_VERSION, "stock_instrument_type_v1")
 
     def test_partition_status_enforces_coverage_threshold(self):
         self.assertEqual(
