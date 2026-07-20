@@ -85,6 +85,252 @@ def _trade_signal_state(
     return {"state": "tradable", "label": "强势可交易", "reason": "舆情与交易确认匹配"}
 
 
+def _pct_distance(value: float | None, anchor: float | None) -> float | None:
+    if value is None or anchor is None or anchor <= 0:
+        return None
+    return (value - anchor) / anchor * 100
+
+
+def _sentiment_market_structure(item: Dict[str, Any], price_signal: float) -> Dict[str, Any]:
+    """Score daily trend, volume and chip structure without filtering candidates."""
+
+    reference_price = _to_float(item.get("realtime_price"), None) or _to_float(item.get("close"), None)
+    ma5 = _to_float(item.get("ma5"), None)
+    ma10 = _to_float(item.get("ma10"), None)
+    ma20 = _to_float(item.get("ma20"), None)
+    ma30 = _to_float(item.get("ma30"), None)
+
+    ma5_distance = _pct_distance(reference_price, ma5)
+    ma20_distance = _pct_distance(reference_price, ma20)
+    ma30_distance = _pct_distance(reference_price, ma30)
+    ma5_ma10_spread = _pct_distance(ma5, ma10)
+    ma20_ma30_spread = _pct_distance(ma20, ma30)
+
+    daily_trend = 50.0
+    if ma20_distance is not None:
+        daily_trend += max(-22.0, min(ma20_distance * 2.0, 18.0))
+    if ma5_ma10_spread is not None:
+        daily_trend += max(-15.0, min(ma5_ma10_spread * 4.0, 15.0))
+    if ma20_ma30_spread is not None:
+        daily_trend += max(-10.0, min(ma20_ma30_spread * 2.0, 10.0))
+    if ma5_distance is not None:
+        if -1.0 <= ma5_distance <= 5.0:
+            daily_trend += 8.0
+        elif ma5_distance < -1.0:
+            daily_trend += max(ma5_distance * 2.0, -12.0)
+        elif ma5_distance > 8.0:
+            daily_trend -= min((ma5_distance - 8.0) * 2.0, 15.0)
+    daily_trend = _clamp(daily_trend)
+
+    if ma5_distance is not None and ma5_distance > 8.0:
+        daily_state = "extended"
+        daily_label = "日线偏离过大"
+    elif (
+        reference_price is not None
+        and ma20 is not None
+        and reference_price >= ma20
+        and ma5 is not None
+        and ma10 is not None
+        and ma5 >= ma10
+        and (ma30 is None or ma20 >= ma30)
+    ):
+        daily_state = "confirmed"
+        daily_label = "日线趋势确认"
+    elif reference_price is not None and ma20 is not None and ma5 is not None and reference_price >= ma20 and reference_price >= ma5:
+        daily_state = "breakout"
+        daily_label = "日线突破修复"
+    elif reference_price is not None and ma20 is not None and ma5 is not None and ma10 is not None and reference_price < ma20 and ma5 < ma10:
+        daily_state = "weak"
+        daily_label = "日线趋势偏弱"
+    else:
+        daily_state = "neutral"
+        daily_label = "日线结构中性"
+
+    amount = _to_float(item.get("amount"), None)
+    avg_amount_5 = _to_float(item.get("avg_amount_5"), None)
+    avg_amount_20 = _to_float(item.get("avg_amount_20"), None)
+    amount_ratio_5d = amount / avg_amount_5 if amount is not None and avg_amount_5 and avg_amount_5 > 0 else None
+    amount_ratio_20d = amount / avg_amount_20 if amount is not None and avg_amount_20 and avg_amount_20 > 0 else None
+    volume_ratio = _to_float(item.get("volume_ratio"), None)
+    realtime_amount_ratio = _to_float(item.get("realtime_amount_ratio"), None)
+    volume_confirm = _clamp(
+        _score_peak(volume_ratio, 1.5, 1.4, 30) * 0.50
+        + _score_peak(amount_ratio_20d, 1.35, 1.2, 35) * 0.30
+        + _score_peak(amount_ratio_5d, 1.20, 1.0, 40) * 0.20
+    )
+    if amount_ratio_20d is not None and amount_ratio_20d >= 1.1 and price_signal >= 1.0:
+        volume_confirm = _clamp(volume_confirm + 5.0)
+    if realtime_amount_ratio is not None and realtime_amount_ratio >= 1.5 and price_signal <= 2.0:
+        volume_confirm = _clamp(volume_confirm - min((realtime_amount_ratio - 1.5) * 22 + (2.0 - price_signal) * 8, 45))
+
+    cost50 = _to_float(item.get("chip_cost_50pct"), None)
+    weight_avg = _to_float(item.get("chip_weight_avg"), None)
+    chip_center = cost50 or weight_avg
+    cost15 = _to_float(item.get("chip_cost_15pct"), None)
+    cost85 = _to_float(item.get("chip_cost_85pct"), None)
+    winner_rate = _to_float(item.get("chip_winner_rate"), None)
+    chip_center_distance = _pct_distance(reference_price, chip_center)
+    chip_upper_distance = _pct_distance(reference_price, cost85)
+    chip_band_width = (
+        (cost85 - cost15) / chip_center * 100
+        if cost85 is not None and cost15 is not None and chip_center is not None and chip_center > 0 and cost85 >= cost15
+        else None
+    )
+    chip_structure = _clamp(
+        _score_peak(chip_center_distance, 3.0, 12.0, 20) * 0.40
+        + _score_peak(winner_rate, 55.0, 45.0, 30) * 0.25
+        + _score_peak(chip_band_width, 18.0, 22.0, 30) * 0.20
+        + _score_peak(chip_upper_distance, 0.0, 12.0, 35) * 0.15
+    )
+    if chip_center is None and winner_rate is None and chip_band_width is None:
+        chip_state = "unavailable"
+        chip_label = "筹码数据待补"
+    elif chip_center_distance is not None and chip_center_distance < -8.0:
+        chip_state = "below_cost"
+        chip_label = "筹码中枢下方"
+    elif (chip_center_distance is not None and chip_center_distance > 15.0) or (winner_rate is not None and winner_rate >= 85.0):
+        chip_state = "overheated"
+        chip_label = "获利盘压力偏高"
+    elif (
+        chip_center_distance is not None
+        and -3.0 <= chip_center_distance <= 8.0
+        and (chip_band_width is None or chip_band_width <= 30.0)
+    ):
+        chip_state = "supportive"
+        chip_label = "筹码结构有支撑"
+    else:
+        chip_state = "neutral"
+        chip_label = "筹码结构中性"
+
+    reasons: List[str] = []
+    risks: List[str] = []
+    if daily_state in {"confirmed", "breakout"}:
+        reasons.append(f"{daily_label}，日线结构对舆情形成价格确认")
+    elif daily_state == "weak":
+        risks.append("日线趋势偏弱，本次仅在综合评分中降权，不作硬过滤")
+    elif daily_state == "extended":
+        risks.append("价格偏离 MA5 较远，综合评分计入追高风险")
+    if volume_confirm >= 65:
+        reasons.append("量能相对近期均值形成确认")
+    elif volume_confirm <= 35:
+        risks.append("量能确认偏弱，综合评分相应降低")
+    if chip_state == "supportive":
+        reasons.append("现价与筹码成本区匹配，筹码结构提供一定支撑")
+    elif chip_state in {"below_cost", "overheated"}:
+        risks.append(f"{chip_label}，筹码结构在综合评分中降权")
+
+    return {
+        "factors": {
+            "daily_trend": daily_trend,
+            "volume_confirm": volume_confirm,
+            "chip_structure": chip_structure,
+        },
+        "raw_metrics": {
+            "daily_trend_state": daily_state,
+            "daily_trend_label": daily_label,
+            "ma5": ma5,
+            "ma10": ma10,
+            "ma20": ma20,
+            "ma30": ma30,
+            "ma5_distance_pct": round(ma5_distance, 4) if ma5_distance is not None else None,
+            "ma20_distance_pct": round(ma20_distance, 4) if ma20_distance is not None else None,
+            "ma30_distance_pct": round(ma30_distance, 4) if ma30_distance is not None else None,
+            "ma5_ma10_spread_pct": round(ma5_ma10_spread, 4) if ma5_ma10_spread is not None else None,
+            "ma20_ma30_spread_pct": round(ma20_ma30_spread, 4) if ma20_ma30_spread is not None else None,
+            "amount_ratio_5d": round(amount_ratio_5d, 4) if amount_ratio_5d is not None else None,
+            "amount_ratio_20d": round(amount_ratio_20d, 4) if amount_ratio_20d is not None else None,
+            "chip_structure_state": chip_state,
+            "chip_structure_label": chip_label,
+            "chip_center": chip_center,
+            "chip_center_distance_pct": round(chip_center_distance, 4) if chip_center_distance is not None else None,
+            "chip_upper_distance_pct": round(chip_upper_distance, 4) if chip_upper_distance is not None else None,
+            "chip_band_width_pct": round(chip_band_width, 4) if chip_band_width is not None else None,
+            "chip_winner_rate": winner_rate,
+        },
+        "reasons": reasons,
+        "risks": risks,
+    }
+
+
+def _sentiment_market_context(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a soft market score from broad-index and whole-market signals."""
+
+    components = [
+        ("index_trend", _to_float(item.get("market_index_trend_score"), None), 0.40),
+        ("index_day", _to_float(item.get("market_index_day_score"), None), 0.20),
+        ("breadth", _to_float(item.get("market_breadth_score"), None), 0.25),
+        ("volume", _to_float(item.get("market_volume_score"), None), 0.15),
+    ]
+    available = [(name, value, weight) for name, value, weight in components if value is not None]
+    if available:
+        available_weight = sum(weight for _, _, weight in available) or 1.0
+        score = _clamp(sum(float(value) * weight for _, value, weight in available) / available_weight)
+    else:
+        score = _clamp(_to_float(item.get("market_strength"), 50.0) or 50.0)
+
+    index_count = int(_to_float(item.get("market_index_count"), 0) or 0)
+    index_codes = str(item.get("market_index_codes") or "")
+    if score >= 65:
+        state = "strong"
+        label = "大盘指数偏强"
+    elif score >= 55:
+        state = "supportive"
+        label = "大盘环境有支撑"
+    elif score <= 35:
+        state = "weak"
+        label = "大盘指数偏弱"
+    elif score <= 45:
+        state = "pressured"
+        label = "大盘环境承压"
+    else:
+        state = "neutral"
+        label = "大盘环境中性"
+
+    index_pct = _to_float(item.get("market_index_pct_chg"), None)
+    if index_count >= 3:
+        coverage_text = "沪深300、中证500和中证1000"
+    elif index_count:
+        coverage_text = f"{index_count}个宽基指数"
+    else:
+        coverage_text = "现有市场环境数据"
+    reason = f"{coverage_text}与全A涨跌宽度共同评估，市场环境分 {score:.1f}"
+    if index_pct is not None:
+        reason += f"，宽基指数平均涨跌 {index_pct:+.2f}%"
+
+    reasons: List[str] = []
+    risks: List[str] = []
+    if state in {"strong", "supportive"}:
+        reasons.append(f"{label}，题材交易的市场背景较好")
+    elif state in {"weak", "pressured"}:
+        risks.append(f"{label}，宽基指数与市场宽度对短线题材形成压制")
+
+    return {
+        "score": score,
+        "state": state,
+        "label": label,
+        "reason": reason,
+        "reasons": reasons,
+        "risks": risks,
+        "raw_metrics": {
+            "market_strength": item.get("market_strength"),
+            "market_state": item.get("market_state"),
+            "market_context_state": state,
+            "market_context_label": label,
+            "market_context_reason": reason,
+            "market_index_trend_score": item.get("market_index_trend_score"),
+            "market_index_day_score": item.get("market_index_day_score"),
+            "market_index_pct_chg": item.get("market_index_pct_chg"),
+            "market_breadth_score": item.get("market_breadth_score"),
+            "market_volume_score": item.get("market_volume_score"),
+            "market_index_count": index_count,
+            "market_index_codes": index_codes or None,
+            "csi300_pct_chg": item.get("csi300_pct_chg"),
+            "csi500_pct_chg": item.get("csi500_pct_chg"),
+            "csi1000_pct_chg": item.get("csi1000_pct_chg"),
+        },
+    }
+
+
 class _ZScoreMixin:
     @staticmethod
     def _zscore_by_factor(stocks: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
@@ -1099,8 +1345,11 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
             open_drawdown = _to_float(item.get("intraday_open_drawdown_pct"), None)
             amount_ratio = _to_float(item.get("realtime_amount_ratio"), None)
             price_signal = realtime_pct if realtime_pct is not None else pct1
-            vol_ratio = _to_float(item.get("volume_ratio"), 1) or 1
-            market_strength = _to_float(item.get("market_strength"), 50) or 50
+            market_structure = _sentiment_market_structure(item, price_signal)
+            daily_trend = market_structure["factors"]["daily_trend"]
+            volume_confirm = market_structure["factors"]["volume_confirm"]
+            chip_structure = market_structure["factors"]["chip_structure"]
+            market_context = _sentiment_market_context(item)
             realtime_mf_net = _to_float(item.get("realtime_mf_net"), None)
             realtime_mf_amount = _to_float(item.get("realtime_mf_amount"), None)
             realtime_mf_quote_time = item.get("realtime_mf_quote_time")
@@ -1154,9 +1403,6 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     price_confirm -= min(abs(high_drawdown) * 4.5, 55)
                 if open_drawdown is not None and open_drawdown < 0:
                     price_confirm -= min(abs(open_drawdown) * 2.5, 25)
-                volume_confirm = _score_peak(vol_ratio, 1.5, 1.5, 35)
-                if amount_ratio is not None and amount_ratio >= 1.5 and price_signal <= 2:
-                    volume_confirm -= min((amount_ratio - 1.5) * 22 + (2 - price_signal) * 8, 45)
                 intraday_confirm = 72.0
                 if high_drawdown is not None and high_drawdown < 0:
                     intraday_confirm -= min(abs(high_drawdown) * 4.0, 50)
@@ -1198,11 +1444,13 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     "stock_recognition": _clamp(recognition_score),
                     "popularity_heat": popularity_heat,
                     "fund_flow": fund_flow_score,
+                    "daily_trend": daily_trend,
+                    "chip_structure": chip_structure,
                     "price_confirm": _clamp(price_confirm),
                     "volume_confirm": _clamp(volume_confirm),
                     "intraday_confirm": _clamp(intraday_confirm),
                     "market_theme": _clamp(theme_alignment),
-                    "market_context": _clamp(market_strength),
+                    "market_context": market_context["score"],
                 }
                 notes = [
                     "先按 NewsNow/RSS/AkShare 热点聚合识别板块/主题，再在热点内选股",
@@ -1268,7 +1516,10 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     "market_theme_match_adjustment": item.get("market_theme_match_adjustment"),
                     "market_theme_reason": item.get("market_theme_reason"),
                     "market_theme_fund_flow": item.get("market_theme_fund_flow"),
+                    **market_context["raw_metrics"],
+                    **market_structure["raw_metrics"],
                 }
+                notes.extend(market_context["reasons"])
                 notes.append(f"主题层级：{theme_label}，{item.get('market_theme_reason') or '暂无主线分层原因'}")
                 if item.get("opinion_stock_recognition_label"):
                     notes.append(f"板块辨识度：{item.get('opinion_stock_recognition_label')}，{item.get('opinion_stock_recognition_reason')}")
@@ -1293,9 +1544,11 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     "stock_recognition": 50.0,
                     "popularity_heat": popularity_heat,
                     "fund_flow": fund_flow_score,
+                    "daily_trend": daily_trend,
+                    "chip_structure": chip_structure,
                     "price_confirm": _clamp(52 + pct1 * 4 - max(pct1 - 7, 0) * 7),
-                    "volume_confirm": _score_peak(vol_ratio, 1.5, 1.5, 35),
-                    "market_context": _clamp(market_strength),
+                    "volume_confirm": volume_confirm,
+                    "market_context": market_context["score"],
                 }
                 notes = ["未取到有效板块舆情聚合时，回退到旧版个股舆情缓存，但仍使用新版舆情主导权重口径"]
                 raw_metrics = {
@@ -1319,6 +1572,8 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     "popularity_heat": popularity_heat,
                     "popularity_quote_time": item.get("popularity_quote_time"),
                     "amount_attention_score": amount_attention,
+                    **market_context["raw_metrics"],
+                    **market_structure["raw_metrics"],
                 }
 
             candidate_risks = list(item.get("candidate_risks") or [])
@@ -1328,12 +1583,17 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                 candidate_risks.append(raw_metrics.get("trade_signal_reason") or "盘中交易确认不足")
             elif raw_metrics.get("trade_signal_state") == "weak":
                 candidate_risks.append(raw_metrics.get("trade_signal_reason") or "走势未确认")
+            candidate_risks.extend(market_structure["risks"])
+            candidate_risks.extend(market_context["risks"])
             rows.append({
                 **item,
                 "factors": factors,
                 "strategy_notes": notes,
                 "strategy_raw_metrics": raw_metrics,
-                "candidate_reasons": (item.get("candidate_reasons") or []) + [item.get("opinion_match_reason") or "舆情热度与交易确认共同筛选"],
+                "candidate_reasons": (item.get("candidate_reasons") or [])
+                + [item.get("opinion_match_reason") or "舆情热度与交易确认共同筛选"]
+                + market_structure["reasons"]
+                + market_context["reasons"],
                 "candidate_risks": candidate_risks,
             })
         return rows

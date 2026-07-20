@@ -134,6 +134,8 @@ function factorLabel(key) {
     amplification: '传播热度',
     stock_match: '个股匹配',
     fund_flow: '资金确认',
+    daily_trend: '日线趋势',
+    chip_structure: '筹码结构',
     price_confirm: '价格确认',
     volume_confirm: '成交确认',
     intraday_confirm: '分时确认',
@@ -157,7 +159,7 @@ function getDisplayFactorEntries(factorScores) {
     'trend', 'momentum', 'quality', 'sentiment', 'value', 'liquidity',
     'turnover_score', 'turnover', 'lowvol_score', 'lowvol', 'reversal_score', 'reversal',
     'sector_heat', 'source_credibility', 'info_importance', 'amplification', 'stock_match',
-    'fund_flow', 'price_confirm', 'volume_confirm', 'intraday_confirm', 'market_context', 'deepseek_sentiment',
+    'fund_flow', 'daily_trend', 'chip_structure', 'price_confirm', 'volume_confirm', 'intraday_confirm', 'market_context', 'deepseek_sentiment',
   ];
   const rawMetricKeys = new Set([
     'open', 'high', 'low', 'close', 'volume', 'amount', 'trade_date',

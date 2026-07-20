@@ -86,6 +86,15 @@ class SelectionRepositoryTests(unittest.TestCase):
         self.assertEqual(rows, [{"code": "sh.600000"}])
         sql, params = cursor.executed[0]
         self.assertEqual(sql.count("trade_date <= %s"), 3)
+        self.assertIn("AS ma5", sql)
+        self.assertIn("AS ma10", sql)
+        self.assertIn("AS ma30", sql)
+        self.assertIn("AS avg_amount_5", sql)
+        self.assertIn("WHERE rn <= 30", sql)
+        self.assertIn("AVG(trend_score) AS market_index_trend_score", sql)
+        self.assertIn("COUNT(DISTINCT index_code) AS market_index_count", sql)
+        self.assertIn("'000300.SH', '000905.SH', '000852.SH'", sql)
+        self.assertIn("AS csi1000_pct_chg", sql)
         self.assertIn("sb.code REGEXP '^sz\\.(000|001|002)'", sql)
         self.assertTrue(sql.rstrip().endswith("LIMIT %s"))
         self.assertEqual(

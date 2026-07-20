@@ -818,6 +818,13 @@ class StrategyService:
                     market_board=market_board,
                 )
 
+            # Progressive/AI rerank paths bypass StockSelector.run(), so apply
+            # the same trade-plan and per-theme trade-grade finalization here.
+            if progressive_rerank_results is not None:
+                progressive_rerank_results = selector.finalize_sentiment_results(progressive_rerank_results)
+            if deepseek_rerank_results is not None:
+                deepseek_rerank_results = selector.finalize_sentiment_results(deepseek_rerank_results)
+
         if save:
             if sentiment_prefetch_results is not None or progressive_rerank_results is not None or deepseek_rerank_results is not None:
                 selected_items = (

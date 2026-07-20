@@ -62,42 +62,49 @@ progressive_rerank:
   min_credibility: 0.35
   min_confidence_for_boost: 0.35
 
+trade_grading:
+  # 只限制“可交易级”，同主题其余候选仍保留为观察级。
+  max_tradable_per_theme: 1
+  required_daily_states: [confirmed, breakout]
+  accepted_chip_states: [supportive, neutral]
+  require_risk_control_compliance: true
+
 factors:
   sector_heat:
     name: 板块/主题热度
     category: sentiment
     direction: positive
-    weight: 0.17
+    weight: 0.11
     description: 基于 NewsNow/RSS/AkShare 聚合的热点板块/主题分，是新版舆情选股的主因子。
   source_credibility:
     name: 信源可信度
     category: sentiment
     direction: positive
-    weight: 0.09
+    weight: 0.07
     description: 来源数量、可靠度和正负面新闻结构共同影响，避免单一低质来源噪音。
   info_importance:
     name: 信息重要度
     category: sentiment
     direction: positive
-    weight: 0.13
+    weight: 0.10
     description: 根据政策、订单、业绩、技术突破、涨价等事件类型估计信息催化强度。
   amplification:
     name: 传播热度
     category: sentiment
     direction: positive
-    weight: 0.07
+    weight: 0.05
     description: 热榜排名、新闻数量和多源覆盖反映市场扩散程度。
   stock_match:
     name: 个股映射强度
     category: sentiment
     direction: positive
-    weight: 0.08
+    weight: 0.07
     description: 板块/主题落到个股时的匹配强度，直接命中优于仅行业兜底。
   stock_recognition:
     name: 板块内辨识度
     category: sentiment
     direction: positive
-    weight: 0.12
+    weight: 0.11
     description: 衡量个股在当前热点主题中的前排程度，综合板块内排名、涨幅、成交额、直接新闻命中与涨停记忆。
   market_theme:
     name: 主线/支线层级
@@ -109,35 +116,47 @@ factors:
     name: 个股人气热度
     category: sentiment
     direction: positive
-    weight: 0.09
+    weight: 0.06
     description: 结合百度股市热搜/后续可扩展个股人气榜与实时成交额关注度，补足“市场正在看谁”。
   fund_flow:
     name: 资金确认
     category: moneyflow
     direction: positive
-    weight: 0.05
+    weight: 0.06
     description: 舆情之后用资金流入做交易确认，不再主导选股。
+  daily_trend:
+    name: 日线趋势结构
+    category: technical
+    direction: positive
+    weight: 0.08
+    description: 结合现价与 MA5/MA20/MA30、短中期均线排列和偏离程度做软评分，不作为硬过滤。
+  chip_structure:
+    name: 筹码结构
+    category: chip
+    direction: neutral
+    weight: 0.06
+    description: 结合现价与筹码中枢、成本带宽和获利盘比例判断承接与抛压，只参与综合评分。
   price_confirm:
     name: 价格确认
     category: technical
     direction: neutral
-    weight: 0.05
+    weight: 0.04
     description: 温和确认更优，极端追高、冲高大回落、高开低走降分。
   volume_confirm:
     name: 成交确认
     category: volume
     direction: neutral
-    weight: 0.04
-    description: 放量确认舆情发酵，放量滞涨或放量回落降分。
+    weight: 0.06
+    description: 综合量比、相对5日/20日成交额判断放量确认；放量滞涨或放量回落降分。
   intraday_confirm:
     name: 分时确认
     category: technical
     direction: positive
-    weight: 0.03
+    weight: 0.02
     description: 观察开盘后承接、日内高点回撤和放量滞涨，强舆情但分时走坏只保留为观察。
   market_context:
     name: 市场环境
     category: market
     direction: positive
-    weight: 0.02
-    description: 市场环境越强，题材延续概率越高。
+    weight: 0.05
+    description: 综合沪深300、中证500、中证1000的趋势与当日涨跌，再结合全A涨跌宽度和指数量能进行软评分。

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any, Dict, Optional
 
 from app.shared.db import mysql_conn
+
+
+SENTIMENT_MAX_STOP_LOSS_PCT = 5.0
+SENTIMENT_MIN_TP1_RISK_REWARD = 1.2
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -20,6 +25,14 @@ def _to_float(value: Any) -> Optional[float]:
 
 def _round_price(value: float) -> float:
     return round(float(value), 3)
+
+
+def _ceil_price(value: float) -> float:
+    return math.ceil((float(value) - 1e-12) * 1000) / 1000
+
+
+def _floor_price(value: float) -> float:
+    return math.floor((float(value) + 1e-12) * 1000) / 1000
 
 
 def _moving_average(values: list[float], days: int) -> Optional[float]:
@@ -120,6 +133,7 @@ def _build_technical_levels(
     technical: Dict[str, Any],
     raw_metrics: Dict[str, Any],
 ) -> Dict[str, Any]:
+    is_sentiment = strategy_id == "a_share_sentiment"
     atr = _to_float(technical.get("atr14")) or max(entry_price * 0.03, 0.01)
     ma5 = _to_float(technical.get("ma5"))
     ma10 = _to_float(technical.get("ma10"))
@@ -138,37 +152,55 @@ def _build_technical_levels(
     first_resistance = resistance_candidates[0] if resistance_candidates else None
     second_resistance = resistance_candidates[1] if len(resistance_candidates) > 1 else None
 
-    if nearest_support is not None:
+    if is_sentiment:
+        # Sentiment selections are short-term event trades.  Keep the risk
+        # budget comparable across candidates instead of letting ATR/support
+        # create materially different stop widths for each stock.
+        stop_loss = entry_price * (1 - SENTIMENT_MAX_STOP_LOSS_PCT / 100)
+        if nearest_support is not None:
+            stop_reason = (
+                f"短线风控统一使用入选价下方约 {SENTIMENT_MAX_STOP_LOSS_PCT:.0f}%；"
+                f"最近技术支撑 {nearest_support:.3f} 作为盘中观察位"
+            )
+        else:
+            stop_reason = f"短线风控统一使用入选价下方约 {SENTIMENT_MAX_STOP_LOSS_PCT:.0f}%"
+    elif nearest_support is not None:
         stop_loss = nearest_support - atr * 0.35
         stop_reason = f"止损放在最近技术支撑 {nearest_support:.3f} 下方，预留 ATR 缓冲"
     else:
-        stop_loss = entry_price - atr * (1.25 if strategy_id == "a_share_sentiment" else 1.5)
+        stop_loss = entry_price - atr * 1.5
         stop_reason = "支撑位不足，使用 ATR 波动止损兜底"
 
-    min_stop_gap = atr * 0.75
-    if entry_price - stop_loss < min_stop_gap:
-        stop_loss = entry_price - min_stop_gap
-        stop_reason += "；原止损过近，按 ATR 最小安全距离下移"
+    if not is_sentiment:
+        min_stop_gap = atr * 0.75
+        if entry_price - stop_loss < min_stop_gap:
+            stop_loss = entry_price - min_stop_gap
+            stop_reason += "；原止损过近，按 ATR 最小安全距离下移"
     stop_loss = max(stop_loss, 0.01)
 
     if first_resistance is not None:
         tp1 = first_resistance - atr * 0.15
         tp1_reason = f"第一止盈参考上方最近压力 {first_resistance:.3f}"
     else:
-        tp1 = entry_price + atr * (1.15 if strategy_id == "a_share_sentiment" else 1.35)
+        tp1 = entry_price + atr * (1.15 if is_sentiment else 1.35)
         tp1_reason = "上方压力不足，使用 ATR 目标位"
-    min_tp1_gap = atr * (0.85 if strategy_id == "a_share_sentiment" else 1.0)
+    stop_risk = max(entry_price - stop_loss, 0.001)
+    required_tp1_gap = stop_risk * SENTIMENT_MIN_TP1_RISK_REWARD if is_sentiment else 0.0
+    min_tp1_gap = max(atr * (0.85 if is_sentiment else 1.0), required_tp1_gap)
     if tp1 - entry_price < min_tp1_gap:
         tp1 = entry_price + min_tp1_gap
-        tp1_reason += "；压力位过近，按 ATR 最小目标位上移"
+        if is_sentiment and required_tp1_gap >= atr * 0.85:
+            tp1_reason += f"；压力位过近，按最低 {SENTIMENT_MIN_TP1_RISK_REWARD:.1f} 盈亏比上移"
+        else:
+            tp1_reason += "；压力位过近，按 ATR 最小目标位上移"
 
     if second_resistance is not None and second_resistance > tp1:
         tp2 = second_resistance - atr * 0.1
         tp2_reason = f"第二止盈参考下一压力 {second_resistance:.3f}"
     else:
-        tp2 = max(tp1 + atr * 1.1, entry_price + atr * (2.0 if strategy_id == "a_share_sentiment" else 2.4))
+        tp2 = max(tp1 + atr * 1.1, entry_price + atr * (2.0 if is_sentiment else 2.4))
         tp2_reason = "第二压力不足，使用 ATR 扩展目标"
-    min_tp2_gap = atr * (0.9 if strategy_id == "a_share_sentiment" else 1.1)
+    min_tp2_gap = atr * (0.9 if is_sentiment else 1.1)
     if tp2 - tp1 < min_tp2_gap:
         tp2 = tp1 + min_tp2_gap
         tp2_reason += "；与第一止盈过近，按 ATR 扩展第二目标"
@@ -179,20 +211,60 @@ def _build_technical_levels(
     if entry_low > entry_high:
         entry_low = entry_price - atr * 0.35
     if stop_loss >= entry_low:
-        stop_loss = max(entry_low - atr * 0.25, 0.01)
-        stop_reason += "；止损需低于建议买入区间，按 ATR 缓冲下移"
+        if is_sentiment:
+            entry_buffer = max(min(atr * 0.15, stop_risk * 0.25), 0.001)
+            entry_low = min(entry_high, stop_loss + entry_buffer)
+        else:
+            stop_loss = max(entry_low - atr * 0.25, 0.01)
+            stop_reason += "；止损需低于建议买入区间，按 ATR 缓冲下移"
+
+    rounded_stop = _ceil_price(stop_loss) if is_sentiment else _round_price(stop_loss)
+    rounded_tp1 = _round_price(tp1)
+    rounded_tp2 = _round_price(tp2)
+    if is_sentiment:
+        rounded_risk = max(entry_price - rounded_stop, 0.001)
+        required_rounded_tp1 = _ceil_price(entry_price + rounded_risk * SENTIMENT_MIN_TP1_RISK_REWARD)
+        if rounded_tp1 < required_rounded_tp1:
+            rounded_tp1 = required_rounded_tp1
+            tp1_reason += f"；按三位价格精度校准至最低 {SENTIMENT_MIN_TP1_RISK_REWARD:.1f} 盈亏比"
+        if rounded_tp2 <= rounded_tp1:
+            rounded_tp2 = _ceil_price(rounded_tp1 + max(atr * 0.9, rounded_risk * 0.5))
+            tp2_reason += "；随第一止盈上移以保持目标层级"
+    risk_reward_ratio = (
+        (rounded_tp1 - entry_price) / max(entry_price - rounded_stop, 0.001)
+        if rounded_tp1 > entry_price and rounded_stop < entry_price
+        else None
+    )
+    rounded_entry_high = max(_round_price(entry_high), 0.01)
+    if is_sentiment:
+        max_entry_high_for_rr = (
+            rounded_tp1 + SENTIMENT_MIN_TP1_RISK_REWARD * rounded_stop
+        ) / (1 + SENTIMENT_MIN_TP1_RISK_REWARD)
+        rounded_entry_high = min(rounded_entry_high, _floor_price(max_entry_high_for_rr))
+        rounded_entry_high = max(rounded_entry_high, _round_price(entry_price))
+    rounded_entry_low = min(max(_round_price(entry_low), 0.01), rounded_entry_high)
+    entry_high_risk_reward_ratio = (
+        (rounded_tp1 - rounded_entry_high) / max(rounded_entry_high - rounded_stop, 0.001)
+        if rounded_tp1 > rounded_entry_high and rounded_stop < rounded_entry_high
+        else None
+    )
 
     return {
-        "entry_low": max(_round_price(entry_low), 0.01),
-        "entry_high": max(_round_price(entry_high), 0.01),
-        "stop_loss": _round_price(stop_loss),
-        "take_profit_1": _round_price(tp1),
-        "take_profit_2": _round_price(tp2),
+        "entry_low": rounded_entry_low,
+        "entry_high": rounded_entry_high,
+        "stop_loss": rounded_stop,
+        "take_profit_1": rounded_tp1,
+        "take_profit_2": rounded_tp2,
         "stop_reason": stop_reason,
         "take_profit_1_reason": tp1_reason,
         "take_profit_2_reason": tp2_reason,
         "support_candidates": [_round_price(value) for value in support_candidates[-4:]],
         "resistance_candidates": [_round_price(value) for value in resistance_candidates[:4]],
+        "risk_reward_ratio": round(risk_reward_ratio, 4) if risk_reward_ratio is not None else None,
+        "entry_high_risk_reward_ratio": round(entry_high_risk_reward_ratio, 4) if entry_high_risk_reward_ratio is not None else None,
+        "target_stop_loss_pct": SENTIMENT_MAX_STOP_LOSS_PCT if is_sentiment else None,
+        "max_stop_loss_pct": SENTIMENT_MAX_STOP_LOSS_PCT if is_sentiment else None,
+        "min_take_profit_1_risk_reward": SENTIMENT_MIN_TP1_RISK_REWARD if is_sentiment else None,
     }
 
 
@@ -255,7 +327,11 @@ def build_selection_trade_plan(
         reasons.append(f"舆情交易状态：{trade_signal_label}{'，' + str(trade_signal_reason) if trade_signal_reason else ''}")
 
     return {
-        "version": "selection_trade_plan_v2_technical",
+        "version": (
+            "selection_trade_plan_v3_risk_control"
+            if is_sentiment
+            else "selection_trade_plan_v2_technical"
+        ),
         "strategy_id": strategy_id,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "entry_policy": "selection_price",
@@ -291,6 +367,27 @@ def build_selection_trade_plan(
         "technical_levels": {
             "support_candidates": levels["support_candidates"],
             "resistance_candidates": levels["resistance_candidates"],
+        },
+        "risk_control": {
+            "target_stop_loss_pct": levels.get("target_stop_loss_pct"),
+            "max_stop_loss_pct": levels.get("max_stop_loss_pct"),
+            "actual_stop_loss_pct": round((entry_price - levels["stop_loss"]) / entry_price * 100, 4),
+            "min_take_profit_1_risk_reward": levels.get("min_take_profit_1_risk_reward"),
+            "take_profit_1_risk_reward": levels.get("risk_reward_ratio"),
+            "take_profit_1_risk_reward_at_entry_high": levels.get("entry_high_risk_reward_ratio"),
+            "compliant": (
+                not is_sentiment
+                or (
+                    levels.get("risk_reward_ratio") is not None
+                    and float(levels["risk_reward_ratio"]) >= SENTIMENT_MIN_TP1_RISK_REWARD
+                    and levels.get("entry_high_risk_reward_ratio") is not None
+                    and float(levels["entry_high_risk_reward_ratio"]) >= SENTIMENT_MIN_TP1_RISK_REWARD
+                    and abs(
+                        (entry_price - levels["stop_loss"]) / entry_price * 100
+                        - SENTIMENT_MAX_STOP_LOSS_PCT
+                    ) <= 0.15
+                )
+            ),
         },
         "expire_trade_days": expire_trade_days,
         "completion_rule": "入选后先触及第一止盈或计划止损，即视为本轮选股交易完成并冻结收益口径",

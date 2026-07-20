@@ -406,13 +406,17 @@ class StockSelector:
         open_price = float(row["open"]) if row.get("open") is not None else None
         high_price = float(row["high"]) if row.get("high") is not None else None
         low_price = float(row["low"]) if row.get("low") is not None else None
+        ma5 = float(row["ma5"]) if row.get("ma5") is not None else None
+        ma10 = float(row["ma10"]) if row.get("ma10") is not None else None
         ma20 = float(row["ma20"]) if row.get("ma20") is not None else None
+        ma30 = float(row["ma30"]) if row.get("ma30") is not None else None
         ma60 = float(row["ma60"]) if row.get("ma60") is not None else None
         close_5d = float(row["close_5d"]) if row.get("close_5d") is not None else None
         close_20d = float(row["close_20d"]) if row.get("close_20d") is not None else None
         prev_close_1d = float(row["prev_close_1d"]) if row.get("prev_close_1d") is not None else None
         max_close_20 = float(row["max_close_20"]) if row.get("max_close_20") is not None else None
         min_close_20 = float(row["min_close_20"]) if row.get("min_close_20") is not None else None
+        avg_amount_5 = float(row["avg_amount_5"]) if row.get("avg_amount_5") is not None else None
         avg_amount_20 = float(row["avg_amount_20"]) if row.get("avg_amount_20") is not None else None
         kline_count_20 = int(row.get("kline_count_20") or 0)
         kline_count_60 = int(row.get("kline_count_60") or 0)
@@ -618,13 +622,17 @@ class StockSelector:
             "low": low_price,
             "close": close,
             "amount": amount,
+            "ma5": ma5,
+            "ma10": ma10,
             "ma20": ma20,
+            "ma30": ma30,
             "ma60": ma60,
             "close_5d": close_5d,
             "close_20d": close_20d,
             "prev_close_1d": prev_close_1d,
             "max_close_20": max_close_20,
             "min_close_20": min_close_20,
+            "avg_amount_5": avg_amount_5,
             "avg_amount_20": avg_amount_20,
             "kline_count_20": kline_count_20,
             "kline_count_60": kline_count_60,
@@ -698,6 +706,16 @@ class StockSelector:
             "news_count": int(row.get("news_count") or 0),
             "market_strength": float(row["market_strength"]) if row.get("market_strength") is not None else None,
             "market_state": row.get("market_state"),
+            "market_index_trend_score": float(row["market_index_trend_score"]) if row.get("market_index_trend_score") is not None else None,
+            "market_index_day_score": float(row["market_index_day_score"]) if row.get("market_index_day_score") is not None else None,
+            "market_index_pct_chg": float(row["market_index_pct_chg"]) if row.get("market_index_pct_chg") is not None else None,
+            "market_breadth_score": float(row["market_breadth_score"]) if row.get("market_breadth_score") is not None else None,
+            "market_volume_score": float(row["market_volume_score"]) if row.get("market_volume_score") is not None else None,
+            "market_index_count": int(row.get("market_index_count") or 0),
+            "market_index_codes": row.get("market_index_codes"),
+            "csi300_pct_chg": float(row["csi300_pct_chg"]) if row.get("csi300_pct_chg") is not None else None,
+            "csi500_pct_chg": float(row["csi500_pct_chg"]) if row.get("csi500_pct_chg") is not None else None,
+            "csi1000_pct_chg": float(row["csi1000_pct_chg"]) if row.get("csi1000_pct_chg") is not None else None,
             "fundamental_context": fundamental_context,
             "value_score": self._round_score(value_score),
             "quality_score": self._round_score(quality_score),
@@ -991,13 +1009,17 @@ class StockSelector:
             "open": item.get("open"),
             "close": item.get("close"),
             "industry": item.get("industry"),
+            "ma5": item.get("ma5"),
+            "ma10": item.get("ma10"),
             "ma20": item.get("ma20"),
+            "ma30": item.get("ma30"),
             "ma60": item.get("ma60"),
             "close_5d": item.get("close_5d"),
             "close_20d": item.get("close_20d"),
             "prev_close_1d": item.get("prev_close_1d"),
             "max_close_20": item.get("max_close_20"),
             "min_close_20": item.get("min_close_20"),
+            "avg_amount_5": item.get("avg_amount_5"),
             "avg_amount_20": item.get("avg_amount_20"),
             "kline_count_20": item.get("kline_count_20"),
             "kline_count_60": item.get("kline_count_60"),
@@ -1082,6 +1104,20 @@ class StockSelector:
             "news_count": item.get("news_count"),
             "market_strength": item.get("market_strength"),
             "market_state": item.get("market_state"),
+            "market_index_trend_score": item.get("market_index_trend_score"),
+            "market_index_day_score": item.get("market_index_day_score"),
+            "market_index_pct_chg": item.get("market_index_pct_chg"),
+            "market_breadth_score": item.get("market_breadth_score"),
+            "market_volume_score": item.get("market_volume_score"),
+            "market_index_count": item.get("market_index_count"),
+            "market_index_codes": item.get("market_index_codes"),
+            "csi300_pct_chg": item.get("csi300_pct_chg"),
+            "csi500_pct_chg": item.get("csi500_pct_chg"),
+            "csi1000_pct_chg": item.get("csi1000_pct_chg"),
+            "trade_grade_state": item.get("trade_grade_state"),
+            "trade_grade_label": item.get("trade_grade_label"),
+            "trade_grade_reason": item.get("trade_grade_reason"),
+            "theme_trade_slot_state": item.get("theme_trade_slot_state"),
             "trade_date": item.get("trade_date"),
         }
         if extra:
@@ -1116,6 +1152,7 @@ class StockSelector:
             **(explain.get("raw_metrics") or {}),
             **(item.get("strategy_raw_metrics") or {}),
         }
+        factor_scores = item.get("factors") or explain.get("factors") or {}
         sector_name = item.get("opinion_sector_name") or raw_metrics.get("opinion_sector_name")
         if not sector_name and raw_metrics.get("sentiment_mode") != "market_opinion_v2":
             return None
@@ -1154,6 +1191,29 @@ class StockSelector:
             "trade_signal_state": raw_metrics.get("trade_signal_state"),
             "trade_signal_label": raw_metrics.get("trade_signal_label"),
             "trade_signal_reason": raw_metrics.get("trade_signal_reason"),
+            "trade_grade_state": item.get("trade_grade_state") or raw_metrics.get("trade_grade_state"),
+            "trade_grade_label": item.get("trade_grade_label") or raw_metrics.get("trade_grade_label"),
+            "trade_grade_reason": item.get("trade_grade_reason") or raw_metrics.get("trade_grade_reason"),
+            "theme_trade_slot_state": item.get("theme_trade_slot_state") or raw_metrics.get("theme_trade_slot_state"),
+            "daily_trend_state": raw_metrics.get("daily_trend_state"),
+            "daily_trend_label": raw_metrics.get("daily_trend_label"),
+            "daily_trend_score": factor_scores.get("daily_trend"),
+            "chip_structure_state": raw_metrics.get("chip_structure_state"),
+            "chip_structure_label": raw_metrics.get("chip_structure_label"),
+            "chip_structure_score": factor_scores.get("chip_structure"),
+            "market_context_score": factor_scores.get("market_context"),
+            "market_context_label": raw_metrics.get("market_context_label"),
+            "market_context_reason": raw_metrics.get("market_context_reason"),
+            "market_index_trend_score": raw_metrics.get("market_index_trend_score"),
+            "market_index_day_score": raw_metrics.get("market_index_day_score"),
+            "market_index_pct_chg": raw_metrics.get("market_index_pct_chg"),
+            "market_breadth_score": raw_metrics.get("market_breadth_score"),
+            "market_volume_score": raw_metrics.get("market_volume_score"),
+            "market_index_count": raw_metrics.get("market_index_count"),
+            "market_index_codes": raw_metrics.get("market_index_codes"),
+            "csi300_pct_chg": raw_metrics.get("csi300_pct_chg"),
+            "csi500_pct_chg": raw_metrics.get("csi500_pct_chg"),
+            "csi1000_pct_chg": raw_metrics.get("csi1000_pct_chg"),
             "market_theme_tier": raw_metrics.get("market_theme_tier"),
             "market_theme_label": raw_metrics.get("market_theme_label"),
             "market_theme_trend_score": raw_metrics.get("market_theme_trend_score"),
@@ -1168,6 +1228,139 @@ class StockSelector:
                 "summary": item.get("deepseek_summary"),
             } if item.get("deepseek_sentiment_score") is not None or item.get("deepseek_summary") else None,
         }
+
+    @staticmethod
+    def _append_unique(values: List[str], value: str) -> List[str]:
+        if value and value not in values:
+            values.append(value)
+        return values
+
+    def finalize_sentiment_results(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Attach risk-controlled trade grades without removing ranked candidates.
+
+        Only the highest-ranked eligible stock in a theme can be marked
+        tradable.  Other stocks remain in the result pool as observation-grade
+        candidates, preserving the soft-scoring semantics of the strategy.
+        """
+        if self.strategy_id != "a_share_sentiment":
+            return items
+
+        grade_config = self.strategy.config.get("trade_grading", {}) or {}
+        max_tradable_per_theme = max(int(grade_config.get("max_tradable_per_theme") or 1), 1)
+        required_daily_states = set(grade_config.get("required_daily_states") or ["confirmed", "breakout"])
+        accepted_chip_states = set(grade_config.get("accepted_chip_states") or ["supportive", "neutral"])
+        require_risk_compliance = bool(grade_config.get("require_risk_control_compliance", True))
+        claimed_themes: Dict[str, int] = {}
+        finalized: List[Dict[str, Any]] = []
+        for index, original in enumerate(items, start=1):
+            item = {**original, "rank_no": original.get("rank_no") or index}
+            existing_explain = item.get("explain") if isinstance(item.get("explain"), dict) else {}
+            strategy_raw_metrics = {
+                **(existing_explain.get("raw_metrics") or {}),
+                **(item.get("strategy_raw_metrics") or {}),
+            }
+            trade_plan = item.get("trade_plan") or build_selection_trade_plan(
+                item,
+                strategy_id="a_share_sentiment",
+                raw_metrics=self._build_raw_metrics(item, strategy_raw_metrics),
+            )
+            if trade_plan:
+                item["trade_plan"] = trade_plan
+
+            trade_signal_state = strategy_raw_metrics.get("trade_signal_state")
+            daily_trend_state = strategy_raw_metrics.get("daily_trend_state")
+            chip_structure_state = strategy_raw_metrics.get("chip_structure_state")
+            risk_control = trade_plan.get("risk_control") if isinstance(trade_plan, dict) else {}
+            risk_compliant = bool(risk_control and risk_control.get("compliant"))
+
+            eligible = True
+            grade_reason = ""
+            if trade_signal_state != "tradable":
+                eligible = False
+                grade_reason = strategy_raw_metrics.get("trade_signal_reason") or "盘中价格与资金尚未形成可交易确认"
+            elif daily_trend_state not in required_daily_states:
+                eligible = False
+                grade_reason = "日线趋势尚未达到确认或突破状态"
+            elif chip_structure_state not in accepted_chip_states:
+                eligible = False
+                grade_reason = (
+                    "筹码数据不足，暂不升级为可交易级"
+                    if chip_structure_state == "unavailable"
+                    else "筹码结构尚未形成有效承接"
+                )
+            elif require_risk_compliance and not risk_compliant:
+                eligible = False
+                grade_reason = "交易计划未同时满足约5%止损和第一止盈盈亏比不低于1.2"
+
+            theme_name = str(
+                item.get("opinion_sector_name")
+                or strategy_raw_metrics.get("opinion_sector_name")
+                or ""
+            ).strip()
+            theme_key = theme_name.casefold() if theme_name else f"__code__:{item.get('code') or index}"
+            theme_trade_slot_state = "not_eligible"
+            if eligible and claimed_themes.get(theme_key, 0) >= max_tradable_per_theme:
+                eligible = False
+                theme_trade_slot_state = "duplicate_theme"
+                grade_reason = f"同一主题“{theme_name}”已保留排名更高的一只可交易级标的"
+            elif eligible:
+                claimed_themes[theme_key] = claimed_themes.get(theme_key, 0) + 1
+                theme_trade_slot_state = "primary"
+                grade_reason = "舆情、盘中确认、日线、筹码和交易计划均满足要求，且为本主题最高排名的合格标的"
+
+            grade_state = "tradable" if eligible else "watch"
+            grade_label = "可交易级" if eligible else "观察级"
+            item.update(
+                {
+                    "trade_grade_state": grade_state,
+                    "trade_grade_label": grade_label,
+                    "trade_grade_reason": grade_reason,
+                    "theme_trade_slot_state": theme_trade_slot_state,
+                }
+            )
+            if isinstance(trade_plan, dict):
+                trade_plan.update(
+                    {
+                        "trade_signal_state": trade_signal_state,
+                        "trade_signal_label": strategy_raw_metrics.get("trade_signal_label"),
+                        "trade_signal_reason": strategy_raw_metrics.get("trade_signal_reason"),
+                        "trade_grade_state": grade_state,
+                        "trade_grade_label": grade_label,
+                        "trade_grade_reason": grade_reason,
+                    }
+                )
+            strategy_raw_metrics.update(
+                {
+                    "trade_grade_state": grade_state,
+                    "trade_grade_label": grade_label,
+                    "trade_grade_reason": grade_reason,
+                    "theme_trade_slot_state": theme_trade_slot_state,
+                    "trade_grade_inputs": {
+                        "trade_signal_state": trade_signal_state,
+                        "daily_trend_state": daily_trend_state,
+                        "chip_structure_state": chip_structure_state,
+                        "risk_control_compliant": risk_compliant,
+                    },
+                }
+            )
+            item["strategy_raw_metrics"] = strategy_raw_metrics
+
+            reasons = list(item.get("candidate_reasons") or [])
+            risks = list(item.get("candidate_risks") or [])
+            if eligible:
+                self._append_unique(reasons, f"可交易级：{grade_reason}")
+            else:
+                self._append_unique(risks, f"观察级：{grade_reason}")
+            item["candidate_reasons"] = reasons
+            item["candidate_risks"] = risks
+
+            refreshed_explain = self._enhance_explain(item)
+            item["explain"] = {**existing_explain, **refreshed_explain}
+            sentiment_context = self._build_sentiment_context(item, item["explain"])
+            if sentiment_context:
+                item["sentiment_context"] = sentiment_context
+            finalized.append(item)
+        return finalized
 
     def _selection_price_snapshot(self, item: Dict[str, Any], clock_mode: Optional[str] = None) -> Dict[str, Any]:
         clock_mode = clock_mode or self._selection_clock_mode()
@@ -1325,7 +1518,7 @@ class StockSelector:
             if trade_plan:
                 enriched["trade_plan"] = trade_plan
             results.append(enriched)
-        return results
+        return self.finalize_sentiment_results(results) if self.strategy_id == "a_share_sentiment" else results
 
     def run_from_mysql(
         self,

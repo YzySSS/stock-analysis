@@ -366,13 +366,17 @@ class SelectionRepository:
             dk.close,
             dk.amount,
             dk.trade_date,
+            ma.ma5,
+            ma.ma10,
             COALESCE(lf.ma20, ma.ma20) AS ma20,
+            ma.ma30,
             lf.ma60,
             lf.close_5d,
             COALESCE(lf.close_20d, ma.close_20d) AS close_20d,
             lf.prev_close_1d,
             COALESCE(lf.max_close_20, ma.max_close_20) AS max_close_20,
             COALESCE(lf.min_close_20, ma.min_close_20) AS min_close_20,
+            ma.avg_amount_5,
             COALESCE(lf.avg_amount_20, ma.avg_amount_20) AS avg_amount_20,
             COALESCE(lf.kline_count_20, ma.kline_count_20) AS kline_count_20,
             lf.kline_count_60,
@@ -423,7 +427,17 @@ class SelectionRepository:
             ssd.sentiment_score,
             ssd.news_count,
             mcd.market_strength,
-            mcd.market_state
+            mcd.market_state,
+            mcd.market_index_trend_score,
+            mcd.market_index_day_score,
+            mcd.market_index_pct_chg,
+            mcd.market_breadth_score,
+            mcd.market_volume_score,
+            mcd.market_index_count,
+            mcd.market_index_codes,
+            mcd.csi300_pct_chg,
+            mcd.csi500_pct_chg,
+            mcd.csi1000_pct_chg
         FROM stock_basic sb
         LEFT JOIN (
             SELECT d1.code, d1.trade_date, d1.open, d1.high, d1.low, d1.close, d1.amount
@@ -438,12 +452,16 @@ class SelectionRepository:
         LEFT JOIN (
             SELECT
                 code,
-                AVG(close) AS ma20,
+                AVG(CASE WHEN rn <= 5 THEN close END) AS ma5,
+                AVG(CASE WHEN rn <= 10 THEN close END) AS ma10,
+                AVG(CASE WHEN rn <= 20 THEN close END) AS ma20,
+                AVG(CASE WHEN rn <= 30 THEN close END) AS ma30,
                 MAX(CASE WHEN rn = 20 THEN close END) AS close_20d,
-                MAX(close) AS max_close_20,
-                MIN(close) AS min_close_20,
-                AVG(amount) AS avg_amount_20,
-                COUNT(*) AS kline_count_20
+                MAX(CASE WHEN rn <= 20 THEN close END) AS max_close_20,
+                MIN(CASE WHEN rn <= 20 THEN close END) AS min_close_20,
+                AVG(CASE WHEN rn <= 5 THEN amount END) AS avg_amount_5,
+                AVG(CASE WHEN rn <= 20 THEN amount END) AS avg_amount_20,
+                SUM(CASE WHEN rn <= 20 THEN 1 ELSE 0 END) AS kline_count_20
             FROM (
                 SELECT
                     code,
@@ -459,12 +477,12 @@ class SelectionRepository:
                         FROM daily_kline
                         {daily_kline_recent_filter}
                         ORDER BY trade_date DESC
-                        LIMIT 30
+                        LIMIT 45
                     ) recent_trade_dates
                 )
                 {daily_kline_window_filter}
             ) ranked
-            WHERE rn <= 20
+            WHERE rn <= 30
             GROUP BY code
         ) ma ON sb.code = ma.code
         LEFT JOIN lowvol_reversal_feature_daily lf ON lf.code = sb.code AND lf.trade_date = dk.trade_date
@@ -481,7 +499,29 @@ class SelectionRepository:
               WHERE s2.code = sb.code
                 AND (dk.trade_date IS NULL OR s2.trade_date <= dk.trade_date)
           )
-        LEFT JOIN market_context_daily mcd ON dk.trade_date = mcd.trade_date AND mcd.index_code = '000300.SH'
+        LEFT JOIN (
+            SELECT
+                trade_date,
+                AVG(market_strength) AS market_strength,
+                CASE
+                    WHEN AVG(market_strength) >= 60 THEN 'bull'
+                    WHEN AVG(market_strength) <= 40 THEN 'bear'
+                    ELSE 'neutral'
+                END AS market_state,
+                AVG(trend_score) AS market_index_trend_score,
+                AVG(sentiment_score) AS market_index_day_score,
+                AVG(index_pct_chg) AS market_index_pct_chg,
+                AVG(breadth_score) AS market_breadth_score,
+                AVG(volume_score) AS market_volume_score,
+                COUNT(DISTINCT index_code) AS market_index_count,
+                GROUP_CONCAT(DISTINCT index_code ORDER BY index_code SEPARATOR ',') AS market_index_codes,
+                MAX(CASE WHEN index_code = '000300.SH' THEN index_pct_chg END) AS csi300_pct_chg,
+                MAX(CASE WHEN index_code = '000905.SH' THEN index_pct_chg END) AS csi500_pct_chg,
+                MAX(CASE WHEN index_code = '000852.SH' THEN index_pct_chg END) AS csi1000_pct_chg
+            FROM market_context_daily
+            WHERE index_code IN ('000300.SH', '000905.SH', '000852.SH')
+            GROUP BY trade_date
+        ) mcd ON dk.trade_date = mcd.trade_date
         WHERE sb.is_delisted = 0
           AND sb.instrument_type = %s
           {market_board_filter}

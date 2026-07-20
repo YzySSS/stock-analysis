@@ -17,6 +17,7 @@ from app.shared.db import mysql_conn
 from app.shared.task_log import TaskRunLogger
 
 TASK_NAME = "market_context_daily_update"
+DEFAULT_INDEX_CODES = ("000300.SH", "000905.SH", "000852.SH")
 
 
 def _latest_trade_date() -> str:
@@ -129,25 +130,51 @@ def save_context(trade_date: str, index_code: str, payload: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--trade-date")
-    parser.add_argument("--index-code", default="000300.SH")
+    parser.add_argument(
+        "--index-code",
+        dest="index_codes",
+        action="append",
+        help="可重复指定；未传时默认同步沪深300、中证500、中证1000",
+    )
     args = parser.parse_args()
     trade_date = args.trade_date or _latest_trade_date()
-    run_id = f"market_context_{trade_date.replace('-', '')}_{args.index_code.replace('.', '')}"
+    index_codes = list(dict.fromkeys(args.index_codes or DEFAULT_INDEX_CODES))
+    run_suffix = "broad" if tuple(index_codes) == DEFAULT_INDEX_CODES else "_".join(code.replace(".", "") for code in index_codes)
+    run_id = f"market_context_{trade_date.replace('-', '')}_{run_suffix}"
     logger = TaskRunLogger()
-    logger.start(TASK_NAME, run_id, {"trade_date": trade_date, "index_code": args.index_code})
+    logger.start(TASK_NAME, run_id, {"trade_date": trade_date, "index_codes": index_codes})
     try:
         breadth_score, breadth_meta = _local_breadth_score(trade_date)
-        index_rows = _fetch_index_rows(args.index_code, trade_date)
-        payload = _score_market(index_rows, breadth_score)
-        payload["breadth_score"] = breadth_score
-        payload["breadth_meta"] = breadth_meta
-        payload["trade_date"] = trade_date
-        payload["index_code"] = args.index_code
-        save_context(trade_date, args.index_code, payload)
-        logger.finish(TASK_NAME, run_id, "success", f"market context updated, strength={payload.get('market_strength')}", payload)
-        print(json.dumps(payload, ensure_ascii=False))
+        records = []
+        for index_code in index_codes:
+            index_rows = _fetch_index_rows(index_code, trade_date)
+            payload = _score_market(index_rows, breadth_score)
+            payload["breadth_score"] = breadth_score
+            payload["breadth_meta"] = breadth_meta
+            payload["trade_date"] = trade_date
+            payload["index_code"] = index_code
+            save_context(trade_date, index_code, payload)
+            records.append(payload)
+        strengths = [float(item["market_strength"]) for item in records if item.get("market_strength") is not None]
+        summary = {
+            "trade_date": trade_date,
+            "index_codes": index_codes,
+            "index_count": len(records),
+            "average_market_strength": round(sum(strengths) / len(strengths), 2) if strengths else None,
+            "breadth_score": breadth_score,
+            "breadth_meta": breadth_meta,
+            "records": records,
+        }
+        logger.finish(
+            TASK_NAME,
+            run_id,
+            "success",
+            f"market context updated for {len(records)} indices, strength={summary.get('average_market_strength')}",
+            summary,
+        )
+        print(json.dumps(summary, ensure_ascii=False))
     except Exception as exc:
-        logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], {"trade_date": trade_date, "index_code": args.index_code})
+        logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], {"trade_date": trade_date, "index_codes": index_codes})
         raise
 
 

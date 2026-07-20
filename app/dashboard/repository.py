@@ -419,9 +419,12 @@ class DashboardRepository:
                 if current_trade_date:
                     cursor.execute(
                         """
-                        SELECT trade_date, market_strength
+                        SELECT trade_date, AVG(market_strength) AS market_strength
                         FROM market_context_daily
-                        WHERE market_strength IS NOT NULL AND trade_date < %s
+                        WHERE market_strength IS NOT NULL
+                          AND index_code IN ('000300.SH', '000905.SH', '000852.SH')
+                          AND trade_date < %s
+                        GROUP BY trade_date
                         ORDER BY trade_date DESC
                         LIMIT 1
                         """,
@@ -430,9 +433,11 @@ class DashboardRepository:
                 else:
                     cursor.execute(
                         """
-                        SELECT trade_date, market_strength
+                        SELECT trade_date, AVG(market_strength) AS market_strength
                         FROM market_context_daily
                         WHERE market_strength IS NOT NULL
+                          AND index_code IN ('000300.SH', '000905.SH', '000852.SH')
+                        GROUP BY trade_date
                         ORDER BY trade_date DESC
                         LIMIT 1
                         """

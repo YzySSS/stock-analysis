@@ -502,6 +502,8 @@ const FACTOR_LABELS = {
   stock_recognition: '板块辨识度',
   market_theme: '主线层级',
   fund_flow: '资金确认',
+  daily_trend: '日线趋势',
+  chip_structure: '筹码结构',
   price_confirm: '价格确认',
   volume_confirm: '成交确认',
   intraday_confirm: '分时确认',
@@ -548,6 +550,29 @@ function normalizeSentimentContext(item = {}) {
     trade_signal_state: metrics.trade_signal_state,
     trade_signal_label: metrics.trade_signal_label,
     trade_signal_reason: metrics.trade_signal_reason,
+    trade_grade_state: metrics.trade_grade_state,
+    trade_grade_label: metrics.trade_grade_label,
+    trade_grade_reason: metrics.trade_grade_reason,
+    theme_trade_slot_state: metrics.theme_trade_slot_state,
+    daily_trend_state: metrics.daily_trend_state,
+    daily_trend_label: metrics.daily_trend_label,
+    daily_trend_score: metrics.daily_trend,
+    chip_structure_state: metrics.chip_structure_state,
+    chip_structure_label: metrics.chip_structure_label,
+    chip_structure_score: metrics.chip_structure,
+    market_context_score: metrics.market_context,
+    market_context_label: metrics.market_context_label,
+    market_context_reason: metrics.market_context_reason,
+    market_index_trend_score: metrics.market_index_trend_score,
+    market_index_day_score: metrics.market_index_day_score,
+    market_index_pct_chg: metrics.market_index_pct_chg,
+    market_breadth_score: metrics.market_breadth_score,
+    market_volume_score: metrics.market_volume_score,
+    market_index_count: metrics.market_index_count,
+    market_index_codes: metrics.market_index_codes,
+    csi300_pct_chg: metrics.csi300_pct_chg,
+    csi500_pct_chg: metrics.csi500_pct_chg,
+    csi1000_pct_chg: metrics.csi1000_pct_chg,
     market_theme_tier: metrics.market_theme_tier,
     market_theme_label: metrics.market_theme_label,
     market_theme_trend_score: metrics.market_theme_trend_score,
@@ -579,7 +604,10 @@ function formatSourceName(source) {
 
 function renderSentimentContextInline(context) {
   if (!context) return '';
+  const gradeLabel = context.trade_grade_label ? ` · ${context.trade_grade_label}` : '';
   const tradeLabel = context.trade_signal_label ? ` · ${context.trade_signal_label}` : '';
+  const dailyLabel = context.daily_trend_label ? ` · ${context.daily_trend_label}` : '';
+  const chipLabel = context.chip_structure_label ? ` · ${context.chip_structure_label}` : '';
   const themeLabel = context.market_theme_label ? ` · ${context.market_theme_label}` : '';
   const recognition = context.stock_recognition_label
     ? ` · ${context.stock_recognition_label}${context.stock_rank ? `#${context.stock_rank}` : ''}`
@@ -590,7 +618,7 @@ function renderSentimentContextInline(context) {
     context.positive != null ? `正 ${context.positive}` : '',
     context.negative != null ? `负 ${context.negative}` : '',
   ].filter(Boolean).join(' · ');
-  return `舆情主题：${context.sector_name || '-'}${context.sector_type ? `（${context.sector_type}）` : ''}${themeLabel}${recognition}${tradeLabel}${context.as_of ? ` · ${context.as_of}` : ''}${counts ? ` · ${counts}` : ''}`;
+  return `舆情主题：${context.sector_name || '-'}${context.sector_type ? `（${context.sector_type}）` : ''}${themeLabel}${recognition}${gradeLabel}${tradeLabel}${dailyLabel}${chipLabel}${context.as_of ? ` · ${context.as_of}` : ''}${counts ? ` · ${counts}` : ''}`;
 }
 
 function renderSentimentContextBlock(context) {
@@ -602,7 +630,12 @@ function renderSentimentContextBlock(context) {
     <div class="muted">匹配说明：${escapeHtml(context.opinion_match_reason || '-')}</div>
     ${context.market_theme_label ? `<div class="muted">主线层级：${escapeHtml(context.market_theme_label)} · 趋势分 ${formatNumber(context.market_theme_trend_score, 1)} · ${escapeHtml(context.market_theme_reason || '-')}</div>` : ''}
     ${context.stock_recognition_label ? `<div class="muted">板块辨识度：${escapeHtml(context.stock_recognition_label)} · 分数 ${formatNumber(context.stock_recognition_score, 1)} · ${escapeHtml(context.stock_recognition_reason || '-')}</div>` : ''}
+    ${context.trade_grade_label ? `<div class="muted">最终分级：${escapeHtml(context.trade_grade_label)} · ${escapeHtml(context.trade_grade_reason || '-')}</div>` : ''}
     ${context.trade_signal_label ? `<div class="muted">交易状态：${escapeHtml(context.trade_signal_label)} · ${escapeHtml(context.trade_signal_reason || '-')}</div>` : ''}
+    ${context.daily_trend_label ? `<div class="muted">日线趋势：${escapeHtml(context.daily_trend_label)} · 分数 ${formatNumber(context.daily_trend_score, 1)}</div>` : ''}
+    ${context.chip_structure_label ? `<div class="muted">筹码结构：${escapeHtml(context.chip_structure_label)} · 分数 ${formatNumber(context.chip_structure_score, 1)}</div>` : ''}
+    ${context.market_context_label ? `<div class="muted">大盘环境：${escapeHtml(context.market_context_label)} · 分数 ${formatNumber(context.market_context_score, 1)} · ${escapeHtml(context.market_context_reason || '-')}</div>` : ''}
+    ${context.market_index_count ? `<div class="muted">宽基指数：沪深300 ${formatPercent(context.csi300_pct_chg)} · 中证500 ${formatPercent(context.csi500_pct_chg)} · 中证1000 ${formatPercent(context.csi1000_pct_chg)}</div>` : ''}
     ${context.source_credibility_level ? `<div class="muted">信源评级：${escapeHtml(context.source_credibility_level)} · ${formatNumber(context.source_credibility_score, 2)} · ${escapeHtml(context.source_credibility_reason || '-')}</div>` : ''}
     ${context.deepseek?.summary ? `<div class="muted">DeepSeek：${escapeHtml(context.deepseek.summary)}${context.deepseek.confidence != null ? ` · 置信度 ${formatNumber(context.deepseek.confidence, 2)}` : ''}</div>` : ''}
     <div class="muted">新闻来源：${escapeHtml(sources)}</div>
@@ -616,8 +649,10 @@ function formatTradePlanInline(plan = null, status = null) {
   const stopLoss = plan.stop_loss || {};
   const takeProfit = Array.isArray(plan.take_profit) ? plan.take_profit : [];
   const firstTakeProfit = takeProfit[0] || {};
+  const riskReward = plan.risk_control?.take_profit_1_risk_reward_at_entry_high ?? plan.risk_control?.take_profit_1_risk_reward;
+  const riskRewardText = riskReward != null ? ` · 盈亏比 ${formatNumber(riskReward, 2)}` : '';
   const statusText = status?.status_label ? ` · ${status.status_label}` : '';
-  return `买入 ${formatNumber(entryZone.low ?? plan.entry_price, 3)}-${formatNumber(entryZone.high ?? plan.entry_price, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${statusText}`;
+  return `买入 ${formatNumber(entryZone.low ?? plan.entry_price, 3)}-${formatNumber(entryZone.high ?? plan.entry_price, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${riskRewardText}${statusText}`;
 }
 
 function renderTradePlanBlock(plan = null, status = null) {
@@ -646,8 +681,8 @@ function renderSelectionResultCards(items = [], emptyText = '暂无达标标的'
     const reasons = (item.reason_summary || []).slice(0, 2).join('；') || '暂无原因摘要';
     const risks = (item.risk_summary || []).slice(0, 1).join('；') || '暂无明显风险提示';
     const sentimentContext = normalizeSentimentContext(item);
-    const tradeLabel = sentimentContext?.trade_signal_label || item.factor_scores?.trade_signal_label || '';
-    const tradeState = sentimentContext?.trade_signal_state || item.factor_scores?.trade_signal_state || '';
+    const tradeLabel = sentimentContext?.trade_grade_label || item.trade_grade_label || sentimentContext?.trade_signal_label || item.factor_scores?.trade_signal_label || '';
+    const tradeState = sentimentContext?.trade_grade_state || item.trade_grade_state || sentimentContext?.trade_signal_state || item.factor_scores?.trade_signal_state || '';
     const tradeBadgeClass = tradeState === 'tradable' ? 'status-ok' : tradeState === 'weak' ? 'status-error' : tradeState === 'watch' ? 'status-warn' : 'status-muted';
     const pctClass = getPctClass(item.price_change_pct) || '';
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
@@ -764,6 +799,10 @@ function normalizeRunResponse(result) {
       trade_signal_state: item.strategy_raw_metrics?.trade_signal_state || explain.raw_metrics?.trade_signal_state || null,
       trade_signal_label: item.strategy_raw_metrics?.trade_signal_label || explain.raw_metrics?.trade_signal_label || null,
       trade_signal_reason: item.strategy_raw_metrics?.trade_signal_reason || explain.raw_metrics?.trade_signal_reason || null,
+      trade_grade_state: item.trade_grade_state || item.strategy_raw_metrics?.trade_grade_state || explain.raw_metrics?.trade_grade_state || null,
+      trade_grade_label: item.trade_grade_label || item.strategy_raw_metrics?.trade_grade_label || explain.raw_metrics?.trade_grade_label || null,
+      trade_grade_reason: item.trade_grade_reason || item.strategy_raw_metrics?.trade_grade_reason || explain.raw_metrics?.trade_grade_reason || null,
+      theme_trade_slot_state: item.theme_trade_slot_state || item.strategy_raw_metrics?.theme_trade_slot_state || explain.raw_metrics?.theme_trade_slot_state || null,
       trade_plan: item.trade_plan || null,
       trade_plan_status: item.trade_plan_status || null,
     };
@@ -861,8 +900,8 @@ function renderSelectionResults(data) {
     const detailId = `selection-detail-${index}`;
     const factorScores = item.factor_scores || {};
     const sentimentContext = normalizeSentimentContext(item);
-    const tradeLabel = sentimentContext?.trade_signal_label || factorScores.trade_signal_label || item.trade_signal_label || '';
-    const tradeState = sentimentContext?.trade_signal_state || factorScores.trade_signal_state || item.trade_signal_state || '';
+    const tradeLabel = sentimentContext?.trade_grade_label || item.trade_grade_label || factorScores.trade_grade_label || sentimentContext?.trade_signal_label || factorScores.trade_signal_label || item.trade_signal_label || '';
+    const tradeState = sentimentContext?.trade_grade_state || item.trade_grade_state || factorScores.trade_grade_state || sentimentContext?.trade_signal_state || factorScores.trade_signal_state || item.trade_signal_state || '';
     const tradeBadgeClass = tradeState === 'tradable' ? 'status-ok' : tradeState === 'weak' ? 'status-error' : tradeState === 'watch' ? 'status-warn' : 'status-muted';
     const saveKey = buildSelectionPersistKey(item);
     const isSaved = savedSelectionKeys.has(saveKey);
@@ -891,6 +930,7 @@ function renderSelectionResults(data) {
       `因子得分：${factorSummary}`,
       renderSentimentContextInline(sentimentContext),
       `交易状态：${tradeLabel || '-'}${sentimentContext?.trade_signal_reason ? `，${sentimentContext.trade_signal_reason}` : ''}`,
+      `分级说明：${sentimentContext?.trade_grade_reason || item.trade_grade_reason || '-'}`,
       `买卖计划：${tradePlanText || '-'}`,
       `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
       peStatusHint,
