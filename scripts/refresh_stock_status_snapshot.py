@@ -41,6 +41,20 @@ def normalize_date(value: object) -> str | None:
     return raw[:10]
 
 
+def normalize_stock_code(code: object, market_name: object = None) -> str:
+    symbol = str(code or "").strip()
+    market = str(market_name or "").strip()
+    if "北京" in market or symbol.startswith(("4", "8", "920")):
+        prefix = "bj"
+    elif "上海" in market or symbol.startswith("6"):
+        prefix = "sh"
+    elif "深圳" in market:
+        prefix = "sz"
+    else:
+        prefix = "sz"
+    return f"{prefix}.{symbol}"
+
+
 def resolve_trade_date() -> str:
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
@@ -88,6 +102,7 @@ def fetch_recent_suspension_map(trade_date: str) -> dict[str, dict]:
                 "resume_date": normalize_date(row.get("停牌截止时间")),
                 "reason": row.get("停牌原因"),
                 "expected_resume_date": normalize_date(row.get("预计复牌时间")),
+                "market_name": row.get("所属市场"),
             }
     return result
 
@@ -104,7 +119,7 @@ def build_snapshot_rows(trade_date: str) -> list[StockStatusSnapshotRow]:
         suspension = suspension_map.get(code, {})
         rows.append(
             StockStatusSnapshotRow(
-                code=f"sh.{code}" if code.startswith("6") else f"sz.{code}",
+                code=normalize_stock_code(code, "上海证券交易所"),
                 trade_date=trade_date,
                 status_label="paused_listing",
                 status_reason=suspension.get("reason") or "暂停上市",
@@ -121,7 +136,7 @@ def build_snapshot_rows(trade_date: str) -> list[StockStatusSnapshotRow]:
             continue
         rows.append(
             StockStatusSnapshotRow(
-                code=f"sh.{code}" if code.startswith("6") else f"sz.{code}",
+                code=normalize_stock_code(code, suspension.get("market_name")),
                 trade_date=trade_date,
                 status_label="suspended",
                 status_reason=suspension.get("reason") or "停牌",

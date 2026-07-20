@@ -257,6 +257,36 @@ class DataQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(status_by_id["daily_kline_coverage"], "warn")
         self.assertEqual(status_by_id["factor_input_market_fields"], "warn")
 
+    def test_new_listing_volume_ratio_warmup_is_not_an_actionable_failure(self):
+        snapshot = healthy_snapshot()
+        snapshot["factor_input_daily"]["market_field_gaps"].update(
+            {
+                "missing_total": 1,
+                "expected_non_trading": 0,
+                "new_listing_pending": 0,
+                "indicator_warmup": 1,
+                "actionable_missing": 0,
+            }
+        )
+        snapshot["factor_input_daily"]["samples"] = [
+            {
+                "code": "bj.920117",
+                "classification": "indicator_warmup",
+                "missing_volume_ratio": 1,
+                "consecutive_missing_trade_days": 3,
+            }
+        ]
+
+        result = evaluate_data_quality(snapshot)
+        check = next(
+            item for item in result["checks"] if item["check_id"] == "factor_input_market_fields"
+        )
+
+        self.assertEqual(check["status"], "pass")
+        self.assertEqual(check["metrics"]["indicator_warmup"], 1)
+        self.assertEqual(check["metrics"]["tracked_actionable_samples"], 0)
+        self.assertIn("新股指标预热 1", check["message"])
+
     def test_persistent_gap_trace_is_kept_in_check_metrics_and_samples(self):
         snapshot = healthy_snapshot()
         sample = {

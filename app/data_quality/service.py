@@ -581,12 +581,14 @@ def evaluate_data_quality(snapshot: dict[str, Any]) -> dict[str, Any]:
             (
                 f"换手率、量比或市值字段缺失 {_count(market_gaps, 'missing_total')} 只："
                 f"合法非交易 {_count(market_gaps, 'expected_non_trading')}，"
+                f"新股指标预热 {_count(market_gaps, 'indicator_warmup')}，"
                 f"待处理 {market_actionable}。"
                 f"{_gap_tracking_message(market_tracking)}"
                 "PE 不参与本检查，避免把亏损股误判为故障。"
             ),
             {key: _count(market_gaps, key) for key in (
-                "missing_total", "expected_non_trading", "new_listing_pending", "actionable_missing"
+                "missing_total", "expected_non_trading", "new_listing_pending",
+                "indicator_warmup", "actionable_missing"
             )}
             | market_tracking
             | {"upstream_attempt": upstream_attempts.get("factor_input_daily") or {}},

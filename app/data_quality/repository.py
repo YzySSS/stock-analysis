@@ -1344,7 +1344,36 @@ class DataQualityRepository:
                 ) AS new_listing_pending,
                 SUM(
                     COALESCE(ss.status_label, '') NOT IN ('paused_listing', 'suspended')
+                    AND sb.listing_date IS NOT NULL
+                    AND sb.listing_date<%s
+                    AND f.turnover_rate IS NOT NULL
+                    AND f.volume_ratio IS NULL
+                    AND f.total_mv IS NOT NULL
+                    AND f.circ_mv IS NOT NULL
+                    AND (
+                        SELECT COUNT(DISTINCT history.trade_date)
+                        FROM factor_input_daily history
+                        WHERE history.code=f.code
+                          AND history.trade_date BETWEEN sb.listing_date AND %s
+                    ) < 5
+                ) AS indicator_warmup,
+                SUM(
+                    COALESCE(ss.status_label, '') NOT IN ('paused_listing', 'suspended')
                     AND NOT (sb.listing_date IS NOT NULL AND sb.listing_date=%s)
+                    AND NOT (
+                        sb.listing_date IS NOT NULL
+                        AND sb.listing_date<%s
+                        AND f.turnover_rate IS NOT NULL
+                        AND f.volume_ratio IS NULL
+                        AND f.total_mv IS NOT NULL
+                        AND f.circ_mv IS NOT NULL
+                        AND (
+                            SELECT COUNT(DISTINCT history.trade_date)
+                            FROM factor_input_daily history
+                            WHERE history.code=f.code
+                              AND history.trade_date BETWEEN sb.listing_date AND %s
+                        ) < 5
+                    )
                 ) AS actionable_missing
             FROM factor_input_daily f
             INNER JOIN stock_basic sb ON sb.code=f.code
@@ -1357,7 +1386,16 @@ class DataQualityRepository:
                   OR f.total_mv IS NULL OR f.circ_mv IS NULL
               )
             """,
-            (trade_date, trade_date, status_date, trade_date),
+            (
+                trade_date,
+                trade_date,
+                trade_date,
+                trade_date,
+                trade_date,
+                trade_date,
+                status_date,
+                trade_date,
+            ),
         )
         market_field_gaps = _normalize_row(cursor.fetchone())
 
@@ -1374,6 +1412,19 @@ class DataQualityRepository:
                     WHEN COALESCE(ss.status_label, '') IN ('paused_listing', 'suspended')
                         THEN 'expected_non_trading'
                     WHEN sb.listing_date=%s THEN 'new_listing_pending'
+                    WHEN sb.listing_date IS NOT NULL
+                         AND sb.listing_date<%s
+                         AND f.turnover_rate IS NOT NULL
+                         AND f.volume_ratio IS NULL
+                         AND f.total_mv IS NOT NULL
+                         AND f.circ_mv IS NOT NULL
+                         AND (
+                             SELECT COUNT(DISTINCT history.trade_date)
+                             FROM factor_input_daily history
+                             WHERE history.code=f.code
+                               AND history.trade_date BETWEEN sb.listing_date AND %s
+                         ) < 5
+                        THEN 'indicator_warmup'
                     ELSE 'actionable_missing'
                 END AS classification
             FROM factor_input_daily f
@@ -1386,10 +1437,14 @@ class DataQualityRepository:
                   f.turnover_rate IS NULL OR f.volume_ratio IS NULL
                   OR f.total_mv IS NULL OR f.circ_mv IS NULL
               )
-            ORDER BY FIELD(classification, 'actionable_missing', 'new_listing_pending', 'expected_non_trading'), f.code
+            ORDER BY FIELD(
+                classification,
+                'actionable_missing', 'indicator_warmup',
+                'new_listing_pending', 'expected_non_trading'
+            ), f.code
             LIMIT %s
             """,
-            (trade_date, status_date, trade_date, self.SAMPLE_LIMIT),
+            (trade_date, trade_date, trade_date, status_date, trade_date, self.SAMPLE_LIMIT),
         )
         samples = _normalize_rows(cursor.fetchall())
         return {
