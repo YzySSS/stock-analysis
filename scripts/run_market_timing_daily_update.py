@@ -4,7 +4,10 @@ import argparse
 import json
 import math
 import os
+import signal
 import sys
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from statistics import mean, pstdev
@@ -19,9 +22,11 @@ import pandas as pd
 import tushare as ts
 
 from app.shared.db import mysql_conn
+from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 from app.shared.task_log import TaskRunLogger
 
 TASK_NAME = "market_timing_daily_update"
+LOCK_NAME = "market_timing_daily_update_lock"
 MODEL_ID = "huatai_multidim_v18"
 MODEL_NAME = "华泰四维择时 V1.8"
 
@@ -30,6 +35,52 @@ INDEX_OPTION_UNDERLYINGS = {
     "OP000016.SH": {"code": "000016.SH", "name": "上证50"},
     "OP000852.SH": {"code": "000852.SH", "name": "中证1000"},
 }
+
+
+class MarketTimingSourceTimeout(TimeoutError):
+    pass
+
+
+class MarketTimingTotalTimeout(TimeoutError):
+    pass
+
+
+@contextmanager
+def _hard_deadline(label: str, timeout_seconds: float):
+    timeout = max(float(timeout_seconds), 0.0)
+    if timeout <= 0:
+        yield
+        return
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def handle_timeout(_signum, _frame):
+        raise MarketTimingSourceTimeout(f"{label} exceeded {timeout:g}s hard timeout")
+
+    signal.signal(signal.SIGALRM, handle_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
+def _remaining_source_timeout(source_timeout_seconds: float, total_deadline: float | None) -> float:
+    source_timeout = max(float(source_timeout_seconds), 0.0)
+    if total_deadline is None:
+        return source_timeout
+    remaining = total_deadline - time.monotonic()
+    if remaining <= 0:
+        raise MarketTimingTotalTimeout("market timing run exceeded total hard timeout")
+    if source_timeout <= 0:
+        return remaining
+    return min(source_timeout, remaining)
+
+
+def _ensure_total_deadline(total_deadline: float | None) -> None:
+    if total_deadline is not None and time.monotonic() >= total_deadline:
+        raise MarketTimingTotalTimeout("market timing run exceeded total hard timeout")
 
 
 def _parse_date(value: str | None) -> str:
@@ -141,9 +192,21 @@ def _percentile(values: list[float], value: float | None) -> float | None:
     return sum(1 for item in clean if item <= value) / len(clean)
 
 
-def _safe_call(label: str, func) -> tuple[Any | None, str | None]:
+def _safe_call(
+    label: str,
+    func,
+    *,
+    source_timeout_seconds: float,
+    total_deadline: float | None,
+) -> tuple[Any | None, str | None]:
+    timeout = _remaining_source_timeout(source_timeout_seconds, total_deadline)
     try:
-        return func(), None
+        with _hard_deadline(label, timeout):
+            return func(), None
+    except MarketTimingSourceTimeout as exc:
+        if total_deadline is not None and time.monotonic() >= total_deadline:
+            raise MarketTimingTotalTimeout("market timing run exceeded total hard timeout") from exc
+        return None, f"{label}: {str(exc)[:220]}"
     except Exception as exc:
         return None, f"{label}: {str(exc)[:220]}"
 
@@ -168,6 +231,8 @@ def _fetch_index_closes(pro, index_codes: list[str], trade_date: str) -> dict[st
     for code in index_codes:
         try:
             df = pro.index_daily(ts_code=code, start_date=start, end_date=end, fields="ts_code,trade_date,close")
+        except MarketTimingSourceTimeout:
+            raise
         except Exception:
             continue
         if df is None or df.empty:
@@ -220,6 +285,8 @@ def _fetch_option_basic(pro) -> dict[str, str]:
     for exchange in ("SSE", "SZSE", "CFFEX"):
         try:
             df = pro.opt_basic(exchange=exchange, fields="ts_code,call_put")
+        except MarketTimingSourceTimeout:
+            raise
         except Exception:
             continue
         if df is None or df.empty:
@@ -276,6 +343,8 @@ def _fetch_qvix_rows(trade_date: str) -> list[dict[str, Any]]:
     for code, name, fetcher in qvix_sources:
         try:
             df = fetcher()
+        except MarketTimingSourceTimeout:
+            raise
         except Exception:
             continue
         if df is None or df.empty:
@@ -317,6 +386,8 @@ def _fetch_bond_yield(pro, trade_date: str) -> tuple[float | None, dict[str, Any
     for kwargs in attempts:
         try:
             df = pro.yc_cb(**kwargs)
+        except MarketTimingSourceTimeout:
+            raise
         except Exception as exc:
             last_error = str(exc)[:220]
             continue
@@ -365,6 +436,8 @@ def _fetch_bond_yield(pro, trade_date: str) -> tuple[float | None, dict[str, Any
                         "source": "akshare.bond_china_yield",
                         "tushare_error": last_error,
                     }
+    except MarketTimingSourceTimeout:
+        raise
     except Exception as exc:
         last_error = f"{last_error or ''}; akshare.bond_china_yield: {str(exc)[:180]}".strip("; ")
 
@@ -1323,58 +1396,92 @@ def main() -> None:
     parser.add_argument("--trade-date", help="YYYY-MM-DD; default latest daily_kline trade_date")
     parser.add_argument("--index-code", default="000300.SH")
     parser.add_argument("--lookback-days", type=int, default=420)
+    parser.add_argument("--source-timeout-seconds", type=float, default=45.0)
+    parser.add_argument("--total-timeout-seconds", type=float, default=300.0)
     args = parser.parse_args()
 
-    trade_date = _parse_date(args.trade_date)
-    start_date = (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=args.lookback_days)).strftime("%Y-%m-%d")
-    token = os.getenv("TUSHARE_TOKEN")
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN 未配置")
-    pro = ts.pro_api(token)
-    run_id = f"market_timing_{trade_date.replace('-', '')}_{args.index_code.replace('.', '')}"
+    if args.source_timeout_seconds <= 0:
+        parser.error("--source-timeout-seconds must be greater than 0")
+    if args.total_timeout_seconds <= 0:
+        parser.error("--total-timeout-seconds must be greater than 0")
+
+    lock_handle = acquire_mysql_advisory_lock(LOCK_NAME, timeout_seconds=0)
+    if lock_handle is None:
+        print(json.dumps({"status": "skipped", "reason": "lock_unavailable", "lock_name": LOCK_NAME}, ensure_ascii=False))
+        return
+
     logger = TaskRunLogger()
-    logger.start(TASK_NAME, run_id, {"trade_date": trade_date, "index_code": args.index_code, "lookback_days": args.lookback_days})
-    fetch_errors: list[str] = []
+    logger_started = False
+    trade_date: str | None = None
+    run_id: str | None = None
+    total_deadline = time.monotonic() + args.total_timeout_seconds
     try:
-        index_rows, error = _safe_call("index_daily", lambda: _fetch_index_daily(pro, args.index_code, start_date, trade_date))
+        trade_date = _parse_date(args.trade_date)
+        start_date = (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=args.lookback_days)).strftime("%Y-%m-%d")
+        token = os.getenv("TUSHARE_TOKEN")
+        if not token:
+            raise RuntimeError("TUSHARE_TOKEN 未配置")
+        pro = ts.pro_api(token)
+        run_id = f"market_timing_{trade_date.replace('-', '')}_{args.index_code.replace('.', '')}"
+        run_metadata = {
+            "trade_date": trade_date,
+            "index_code": args.index_code,
+            "lookback_days": args.lookback_days,
+            "source_timeout_seconds": args.source_timeout_seconds,
+            "total_timeout_seconds": args.total_timeout_seconds,
+        }
+        logger.start(TASK_NAME, run_id, run_metadata)
+        logger_started = True
+        fetch_errors: list[str] = []
+
+        def safe_call(label: str, func):
+            return _safe_call(
+                label,
+                func,
+                source_timeout_seconds=args.source_timeout_seconds,
+                total_deadline=total_deadline,
+            )
+
+        index_rows, error = safe_call("index_daily", lambda: _fetch_index_daily(pro, args.index_code, start_date, trade_date))
         if error:
             fetch_errors.append(error)
             index_rows = []
-        valuation_rows, error = _safe_call("index_dailybasic", lambda: _fetch_index_valuation(pro, args.index_code, start_date, trade_date))
+        valuation_rows, error = safe_call("index_dailybasic", lambda: _fetch_index_valuation(pro, args.index_code, start_date, trade_date))
         if error:
             fetch_errors.append(error)
             valuation_rows = []
-        margin_source_rows, error = _safe_call("margin", lambda: _fetch_margin(pro, start_date, trade_date))
+        margin_source_rows, error = safe_call("margin", lambda: _fetch_margin(pro, start_date, trade_date))
         if error:
             fetch_errors.append(error)
             margin_source_rows = []
-        option_rows, error = _safe_call("opt_daily", lambda: _fetch_option_daily(pro, trade_date))
+        option_rows, error = safe_call("opt_daily", lambda: _fetch_option_daily(pro, trade_date))
         if error:
             fetch_errors.append(error)
             option_rows = []
-        option_basic, error = _safe_call("opt_basic", lambda: _fetch_option_basic(pro))
+        option_basic, error = safe_call("opt_basic", lambda: _fetch_option_basic(pro))
         if error:
             fetch_errors.append(error)
             option_basic = {}
-        cffex_option_basic_rows, error = _safe_call("opt_basic_cffex", lambda: _fetch_cffex_option_basic_rows(pro))
+        cffex_option_basic_rows, error = safe_call("opt_basic_cffex", lambda: _fetch_cffex_option_basic_rows(pro))
         if error:
             fetch_errors.append(error)
             cffex_option_basic_rows = []
-        futures_source_rows, error = _safe_call("fut_holding", lambda: _fetch_futures_holding(pro, trade_date))
+        futures_source_rows, error = safe_call("fut_holding", lambda: _fetch_futures_holding(pro, trade_date))
         if error:
             fetch_errors.append(error)
             futures_source_rows = []
-        qvix_source_rows, error = _safe_call("qvix", lambda: _fetch_qvix_rows(trade_date))
+        qvix_source_rows, error = safe_call("qvix", lambda: _fetch_qvix_rows(trade_date))
         if error:
             fetch_errors.append(error)
             qvix_source_rows = []
-        bond_result, error = _safe_call("yc_cb", lambda: _fetch_bond_yield(pro, trade_date))
+        bond_result, error = safe_call("yc_cb", lambda: _fetch_bond_yield(pro, trade_date))
         if error:
             fetch_errors.append(error)
             bond_yield, bond_meta = None, {"error": error}
         else:
             bond_yield, bond_meta = bond_result or (None, {})
 
+        _ensure_total_deadline(total_deadline)
         _save_index_daily(index_rows)
         _save_index_valuation(valuation_rows)
         margin_rows = _save_margin(margin_source_rows)
@@ -1382,7 +1489,13 @@ def main() -> None:
         futures_holding_rows = _save_futures_holding(trade_date, futures_source_rows)
         qvix_rows = _save_qvix(qvix_source_rows)
         _save_bond_yield(trade_date, bond_yield, bond_meta)
-        underlying_prices = _fetch_index_closes(pro, [item["code"] for item in INDEX_OPTION_UNDERLYINGS.values()], trade_date)
+        underlying_prices, error = safe_call(
+            "index_closes",
+            lambda: _fetch_index_closes(pro, [item["code"] for item in INDEX_OPTION_UNDERLYINGS.values()], trade_date),
+        )
+        if error:
+            fetch_errors.append(error)
+            underlying_prices = {}
         iv_skew_rows = _save_iv_skew(
             _build_iv_skew_rows(trade_date, option_rows, cffex_option_basic_rows, underlying_prices, bond_yield)
         )
@@ -1392,6 +1505,7 @@ def main() -> None:
             futures_holding_rows = _load_recent_futures_holding_rows(trade_date)
         if not iv_skew_rows:
             iv_skew_rows = _load_recent_iv_skew_rows(trade_date)
+        _ensure_total_deadline(total_deadline)
         indicators, coverage = _build_indicators(
             trade_date,
             args.index_code,
@@ -1410,11 +1524,31 @@ def main() -> None:
         payload = _save_signal(trade_date, args.index_code, indicators, coverage)
         payload["indicator_count"] = len(indicators)
         payload["fetch_errors"] = fetch_errors
+        payload["source_timeout_seconds"] = args.source_timeout_seconds
+        payload["total_timeout_seconds"] = args.total_timeout_seconds
         logger.finish(TASK_NAME, run_id, "success", f"market timing updated, score={payload['timing_score']}", payload)
         print(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception as exc:
-        logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], {"trade_date": trade_date, "index_code": args.index_code})
+        if logger_started and run_id:
+            error_code = "upstream_timeout" if isinstance(exc, (MarketTimingSourceTimeout, MarketTimingTotalTimeout)) else None
+            logger.finish(
+                TASK_NAME,
+                run_id,
+                "failed",
+                str(exc)[:500],
+                {
+                    "trade_date": trade_date,
+                    "index_code": args.index_code,
+                    "source_timeout_seconds": args.source_timeout_seconds,
+                    "total_timeout_seconds": args.total_timeout_seconds,
+                },
+                error_code=error_code,
+            )
         raise
+    finally:
+        release_error = release_mysql_advisory_lock(lock_handle)
+        if release_error:
+            print(f"warning: failed to release {LOCK_NAME}: {release_error}", file=sys.stderr)
 
 
 if __name__ == "__main__":
