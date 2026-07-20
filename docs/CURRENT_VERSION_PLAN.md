@@ -102,7 +102,7 @@ Research Baseline 2026.07
 - 历史诊断只能排雷，不能把策略升级为“已验证”。
 - 即使真正前瞻协议通过，也只进入人工评审候选，不自动成为默认策略或普通选股策略。
 
-完整的区间、执行、成本、五个 offset、数据和晋级合同见 [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)。下一步不是写策略，而是先补齐开发区间的调整因子和 point-in-time 总回报核算；该前置条件通过前，实施锁保持 blocked。
+完整的区间、执行、成本、五个 offset、数据和晋级合同见 [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)。历史调整因子与总回报核算前置条件已于 2026-07-21 通过并形成独立证据锁；下一步是单独完成 implementation lock，不能跳过实现冻结直接跑历史诊断。
 
 ### Validation Candidate：交易有效性候选（无固定日期）
 
@@ -123,11 +123,13 @@ Research Baseline 2026.07
 
 1. **FWD-OBS 前瞻样本积累**：从 2026-07-21 起自动运行；窗口内只采集和展示，不调参数、不提前宣布验证通过。
 2. **DQ-ONGOING 已知缺口观察**：可行动缺口已归零；保留 `sh.689009` 历史名称未知、`bj.920305` 上游分类矛盾和指数月度快照近似等事实警告，不猜值。
-3. **STR-3 调整收益前置条件**：开发区间 1,835,321 条日线的 `adj_factor` 覆盖为 0。先设计和补齐历史调整因子，再审计总回报口径；通过前不写下一策略实现。
+3. **STR-4 下一策略 implementation lock**：按已冻结 factor spec 实现独立策略、PIT 输入、原始开盘成交和复权总回报，冻结源码/配置/方法论指纹；锁定前不跑历史诊断。
 
 `PERF-2` 已从开放队列移出：Tracking、Dashboard、Portfolio、Selection、Backtest 全部验收完成。若以后某页真实冷/热请求越过预算，再按独立切片重开，不做无基线的泛化优化。
 
 `STR-2 factor spec lock` 已完成并加 SHA-256 锁。任何公式、权重、阈值或候选日志变化必须创建新 spec ID，不能原地修改 v1。
+
+`STR-3 调整收益前置条件` 已完成：冻结开发区间股票 K 线 1,819,694/1,819,694 全匹配；全历史 3,137,224/3,137,232，唯一 8 条缺口均为有真实停牌证据且上游无同日因子的记录，候选路径 fail-closed。证据见 [`adjustment_factor_history_readiness_2026-07-21.md`](./adjustment_factor_history_readiness_2026-07-21.md)。
 
 以下项目保持可选，不进入当前承诺：
 
@@ -157,6 +159,7 @@ Research Baseline 2026.07
 - [`strategy_failure_attribution_2026-07-18.md`](./strategy_failure_attribution_2026-07-18.md)：失败原因与下一策略研究边界。
 - [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)：下一策略不可变研究章程、时间分区、执行成本与人工晋级合同。
 - [`a_share_sentiment_forward_observation_2026-07-21.md`](./a_share_sentiment_forward_observation_2026-07-21.md)：A 股舆情 0.3.1 的固定前瞻观察、收益口径和用户动作复盘合同。
+- [`adjustment_factor_history_readiness_2026-07-21.md`](./adjustment_factor_history_readiness_2026-07-21.md)：历史复权因子补齐、股票口径覆盖率、停牌缺口与不可变数据证据锁。
 - [`page_response_performance_2026-07-19.md`](./page_response_performance_2026-07-19.md)：四个主要页面的统一预算、实测基线和逐页整改证据。
 
 如果历史文档中的“下一步”与本文冲突，以本文为准。
