@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from app.orchestration.adj_factor_schema import ensure_adj_factor_manifest_schema
 from app.jobs.schema import ensure_job_ops_schema
 from app.orchestration.backtest_validation_schema import ensure_backtest_validation_schema
 from app.orchestration.feature_cache_schema import ensure_feature_cache_schema
@@ -100,6 +101,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0019", "point-in-time index constituent schema", ensure_index_constituent_pit_schema),
     Migration("0020", "frozen out-of-sample validation protocol schema", ensure_backtest_validation_schema),
     Migration("0021", "prospective strategy observation and action schema", ensure_forward_observation_schema),
+    Migration("0022", "adjustment factor history manifest schema", ensure_adj_factor_manifest_schema),
 )
 
 

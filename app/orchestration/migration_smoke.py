@@ -13,6 +13,7 @@ REQUIRED_TABLES = {
     "stock_basic",
     "daily_kline",
     "factor_input_daily",
+    "adj_factor_sync_manifest",
     "selection_result",
     "selection_run",
     "backtest_run",

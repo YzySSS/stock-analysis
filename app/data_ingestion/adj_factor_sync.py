@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
 from dataclasses import dataclass
@@ -70,19 +71,31 @@ class AdjFactorSync:
         )
         if df is None or df.empty:
             return []
-        records: list[AdjFactorRecord] = []
+        records: dict[tuple[str, str], AdjFactorRecord] = {}
+        expected_trade_date = self.normalize_trade_date(trade_date)
         for row in df.to_dict("records"):
             factor = row.get("adj_factor")
-            if factor != factor or factor is None:
+            ts_code = str(row.get("ts_code") or "").strip()
+            source_trade_date = self.normalize_trade_date(row.get("trade_date"))
+            try:
+                parsed_factor = float(factor)
+            except (TypeError, ValueError):
                 continue
-            records.append(
-                AdjFactorRecord(
-                    code=self.from_ts_code(str(row.get("ts_code"))),
-                    trade_date=self.normalize_trade_date(row.get("trade_date")),
-                    adj_factor=float(factor),
-                )
+            if (
+                not ts_code
+                or "." not in ts_code
+                or not math.isfinite(parsed_factor)
+                or parsed_factor <= 0
+                or source_trade_date != expected_trade_date
+            ):
+                continue
+            record = AdjFactorRecord(
+                code=self.from_ts_code(ts_code),
+                trade_date=source_trade_date,
+                adj_factor=parsed_factor,
             )
-        return records
+            records[(record.code, record.trade_date)] = record
+        return list(records.values())
 
     def save_records(self, records: Iterable[AdjFactorRecord]) -> int:
         rows = list(records)

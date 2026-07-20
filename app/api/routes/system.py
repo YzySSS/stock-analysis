@@ -20,6 +20,7 @@ TASK_SCHEDULES = [
     {"task_name": "stock_basic_sync", "task_label": "股票基础信息同步", "schedule": "每天 01:30"},
     {"task_name": "daily_kline_increment", "task_label": "日线增量更新", "schedule": "每天 02:00"},
     {"task_name": "adj_factor_daily_update", "task_label": "复权因子日更", "schedule": "每天 02:10"},
+    {"task_name": "adj_factor_history_backfill", "task_label": "历史复权因子补齐", "schedule": "按需 / 后台批次"},
     {"task_name": "daily_kline_backfill", "task_label": "历史日线补齐", "schedule": "每天 02:15"},
     {"task_name": "moneyflow_daily_update", "task_label": "资金流日更", "schedule": "每天 02:20"},
     {"task_name": "chip_daily_update", "task_label": "筹码数据日更", "schedule": "每天 02:30"},

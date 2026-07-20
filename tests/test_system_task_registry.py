@@ -31,6 +31,7 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "index_constituent_pit_backfill",
                 "strategy_forward_observation_submit",
                 "strategy_forward_outcome_update",
+                "adj_factor_history_backfill",
             }.issubset(TRACKED_TASKS)
         )
 
