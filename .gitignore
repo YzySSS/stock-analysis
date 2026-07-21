@@ -45,7 +45,6 @@ logs/
 docs/
 !docs/
 docs/*
-!docs/a_share_sentiment_v0_5_optimization_plan_2026-07-21.md
 !docs/cloud_deployment_task_plan.md
 !docs/sentiment_data_consistency_and_realtime_probe.md
 !docs/sentiment_remediation_v2_implementation.md

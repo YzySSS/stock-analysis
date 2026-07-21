@@ -119,6 +119,18 @@ def _selection_sse_is_ready(diagnostics: dict[str, Any]) -> bool:
     )
 
 
+def _selection_sse_cache_read(cache_backend: Any, key: str) -> tuple[Any, dict[str, Any]]:
+    """Read Redis-backed state outside the async event loop.
+
+    The shared cache API is intentionally synchronous because normal FastAPI
+    routes run it in the thread pool.  SSE is an async route, so both the Redis
+    read (including its connectivity probe) and the resulting diagnostics must
+    be collected in a worker thread.
+    """
+
+    return cache_backend.get(key), cache_backend.diagnostics()
+
+
 def _sse_event(event: str, payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
     return f"event: {event}\ndata: {encoded}\n\n"
@@ -174,7 +186,11 @@ async def _selection_run_event_stream(
             return
 
         try:
-            cached_status = cache_backend.get(SelectionRunService.status_cache_key(run_id))
+            cached_status, cache_diagnostics = await asyncio.to_thread(
+                _selection_sse_cache_read,
+                cache_backend,
+                SelectionRunService.status_cache_key(run_id),
+            )
         except Exception as exc:
             logger.warning("selection SSE cache read failed run_id=%s error=%s", run_id, exc)
             yield _sse_event(
@@ -186,7 +202,7 @@ async def _selection_run_event_stream(
                 },
             )
             return
-        if not _selection_sse_is_ready(cache_backend.diagnostics()):
+        if not _selection_sse_is_ready(cache_diagnostics):
             yield _sse_event(
                 "error",
                 {
@@ -267,7 +283,7 @@ def get_selection_run(run_id: str) -> dict:
 
 @router.get("/selection/runs/{run_id}/events")
 async def get_selection_run_events(run_id: str, request: Request) -> StreamingResponse:
-    diagnostics = _selection_sse_cache_diagnostics()
+    diagnostics = await asyncio.to_thread(_selection_sse_cache_diagnostics)
     if not _selection_sse_is_ready(diagnostics):
         raise HTTPException(
             status_code=503,

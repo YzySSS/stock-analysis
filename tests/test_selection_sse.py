@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -26,8 +27,10 @@ class FakeRequest:
 class FakeRedisCache:
     def __init__(self, values=None) -> None:
         self.values = list(values or [])
+        self.get_thread_ids: list[int] = []
 
     def get(self, _key):
+        self.get_thread_ids.append(threading.get_ident())
         return self.values.pop(0) if self.values else None
 
     @staticmethod
@@ -69,6 +72,24 @@ class SelectionSseTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 503)
         self.assertEqual(raised.exception.detail["code"], "SSE_UNAVAILABLE")
         self.assertEqual(raised.exception.detail["fallback"], "polling")
+
+    def test_endpoint_offloads_lazy_redis_probe_from_event_loop(self):
+        caller_thread_id = threading.get_ident()
+        probe_thread_ids: list[int] = []
+
+        def diagnostics_probe():
+            probe_thread_ids.append(threading.get_ident())
+            return {"backend": "memory", "status": "ready"}
+
+        with patch(
+            "app.api.routes.selection._selection_sse_cache_diagnostics",
+            side_effect=diagnostics_probe,
+        ):
+            with self.assertRaises(HTTPException):
+                asyncio.run(get_selection_run_events("run-1", FakeRequest()))
+
+        self.assertEqual(len(probe_thread_ids), 1)
+        self.assertNotEqual(probe_thread_ids[0], caller_thread_id)
 
     def test_endpoint_streams_terminal_status_when_redis_is_ready(self):
         service = Mock()
@@ -123,6 +144,10 @@ class SelectionSseTests(unittest.TestCase):
         self.assertIn('"status":"queued"', body)
         self.assertIn('"status":"success"', body)
         service.get_run.assert_not_called()
+        self.assertTrue(cache.get_thread_ids)
+        self.assertTrue(
+            all(thread_id != threading.get_ident() for thread_id in cache.get_thread_ids)
+        )
 
     def test_stream_reconciles_mysql_when_redis_has_no_status(self):
         service = Mock()
