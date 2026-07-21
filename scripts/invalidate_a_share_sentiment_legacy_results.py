@@ -20,8 +20,8 @@ from app.shared.task_log import TaskRunLogger  # noqa: E402
 TASK_NAME = "invalidate_a_share_sentiment_legacy_results"
 LOCK_NAME = "invalidate_a_share_sentiment_legacy_results"
 STRATEGY_ID = "a_share_sentiment"
-CURRENT_STRATEGY_VERSION = "0.4.0"
-INVALIDATION_REASON = "pre_v0.4.0_market_opinion_semantics_invalidated"
+CURRENT_STRATEGY_VERSION = "0.4.1"
+INVALIDATION_REASON = "pre_v0.4.1_market_opinion_semantics_invalidated"
 
 
 LEGACY_WHERE_SQL = """
@@ -126,7 +126,7 @@ def invalidate_legacy_results(conn: Any, invalidated_at: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Preserve legacy A-share sentiment selections but remove pre-v0.4.0 "
+            "Preserve legacy A-share sentiment selections but remove pre-v0.4.1 "
             "rows from effective statistics. Dry-run is the default."
         )
     )

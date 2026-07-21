@@ -26,10 +26,10 @@ from app.stock_selection.run_tasks import SelectionRunService
 
 TASK_NAME = "strategy_forward_observation_submit"
 LOCK_NAME = "strategy_forward_observation_submit_lock"
-PROTOCOL_ID = "a_share_sentiment_v0_4_0_after_close_v1"
+PROTOCOL_ID = "a_share_sentiment_v0_4_1_after_close_v1"
 STRATEGY_ID = "a_share_sentiment"
-STRATEGY_VERSION = "0.4.0"
-IMMUTABLE_TAG = "a-share-sentiment-v0.4.0"
+STRATEGY_VERSION = "0.4.1"
+IMMUTABLE_TAG = "a-share-sentiment-v0.4.1"
 EXECUTION_TIME = "16:20:00"
 STARTED_ON = "2026-07-21"
 BASE_REQUEST = {
@@ -167,7 +167,7 @@ def submit_observation(
             "protocol_id": protocol_spec.protocol_id,
         }
 
-    observation_id = f"asent_fwd_{today.strftime('%Y%m%d')}_v040"
+    observation_id = f"asent_fwd_{today.strftime('%Y%m%d')}_v041"
     observation = repository.reserve_observation(
         observation_id=observation_id,
         protocol_id=protocol_spec.protocol_id,

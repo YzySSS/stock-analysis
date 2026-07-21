@@ -68,6 +68,7 @@ NEGATIVE_DIRECTION_KEYWORDS: tuple[str, ...] = (
 
 CLAUSE_SPLIT_RE = re.compile(r"[。！？!?；;，,\n\r]+")
 RELATION_FORWARD_TERMS = ("带动", "受益", "所属", "业务", "布局")
+SECTOR_LEAD_IN_TERMS = ("板块", "概念", "产业链", "赛道", "题材", "方向", "个股", "概念股")
 
 
 def normalize_opinion_text(value: str | None) -> str:
@@ -202,7 +203,12 @@ def stock_sector_relation(
         clause = clauses[index]
         if _contains_any(clause, terms):
             return StockSectorRelation(True, 100.0, "股票与板块关键词同一子句", clause)
-        if index > 0 and _contains_any(clauses[index - 1], terms):
+        if (
+            index > 0
+            and _contains_any(clauses[index - 1], terms)
+            and _contains_any(clauses[index - 1], SECTOR_LEAD_IN_TERMS)
+            and classify_opinion_direction(clauses[index - 1], None) != "neutral"
+        ):
             context = f"{clauses[index - 1]}，{clause}"
             return StockSectorRelation(True, 90.0, "前置板块子句直接引出股票", context)
         if index + 1 < len(clauses) and _contains_any(clauses[index + 1], terms):

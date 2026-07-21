@@ -9,7 +9,7 @@ from app.data_ingestion.market_opinion_semantics import (
     stock_sector_relation,
 )
 from app.stock_selection.selector import StockSelector
-from scripts.run_market_opinion_update import sector_opinion_score
+from scripts.run_market_opinion_update import has_stock_entity_evidence, sector_opinion_score
 
 
 class MarketOpinionDirectionTests(unittest.TestCase):
@@ -119,6 +119,57 @@ class StockSectorRelationTests(unittest.TestCase):
 
         self.assertTrue(relation.supported)
         self.assertEqual(relation.reason, "股票静态行业一致")
+
+    def test_unrelated_stock_list_after_commodity_move_is_not_linked(self):
+        relation = stock_sector_relation(
+            title="油价上行、黄金微跌；三环集团、三花智控、东山精密计划回购股份",
+            summary=None,
+            stock_name="三花智控",
+            stock_code="sz.002050",
+            stock_industry="家用电器",
+            sector_type="theme",
+            sector_name="油气",
+        )
+
+        self.assertFalse(relation.supported)
+
+
+class StockEntityEvidenceTests(unittest.TestCase):
+    def test_common_word_is_not_treated_as_stock(self):
+        self.assertFalse(
+            has_stock_entity_evidence(
+                "韩国央行行长称AI是增长的主要驱动力",
+                "驱动力",
+                "bj.920275",
+            )
+        )
+
+    def test_stock_name_cannot_match_inside_longer_phrase(self):
+        self.assertFalse(
+            has_stock_entity_evidence(
+                "我国新能源汽车市场保持稳定增长",
+                "国新能源",
+                "sh.600617",
+            )
+        )
+
+    def test_market_action_confirms_stock_entity(self):
+        self.assertTrue(
+            has_stock_entity_evidence(
+                "机器人概念活跃，首开股份竞价涨停",
+                "首开股份",
+                "sh.600376",
+            )
+        )
+
+    def test_company_subject_confirms_stock_entity(self):
+        self.assertTrue(
+            has_stock_entity_evidence(
+                "阳光电源：数据中心配储订单有望落地",
+                "阳光电源",
+                "sz.300274",
+            )
+        )
 
 
 class ThemeFundFlowMappingTests(unittest.TestCase):

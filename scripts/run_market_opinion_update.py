@@ -98,6 +98,17 @@ DATA_PROVIDER_SPEAKERS = {
     "上海钢联",
 }
 
+STOCK_MARKET_CONTEXT_PATTERN = re.compile(
+    r"A股|股票|股价|个股|上市公司|公告|涨停|跌停|大涨|大跌|涨超|跌超|"
+    r"拉升|走强|回落|收涨|收跌|创新高|跟涨|异动|停牌|复牌|回购|增持|减持|龙虎榜|20CM|10CM",
+    re.I,
+)
+STOCK_BUSINESS_CONTEXT_PATTERN = re.compile(
+    r"公司|业务|产品|研发|订单|中标|签约|获批|项目|客户|合作|投资|业绩|营收|净利润|数据中心|投产|量产",
+    re.I,
+)
+STOCK_NAME_BOUNDARY_RE = re.compile(r"[^\u4e00-\u9fffA-Za-z0-9]")
+
 
 @dataclass(frozen=True)
 class StockRef:
@@ -202,6 +213,36 @@ def is_data_provider_speaker(text: str, alias: str | None = None) -> bool:
         escaped = re.escape(normalize_text(alias))
         return bool(re.search(rf"(?:^|[丨｜]){escaped}(?:[:：]|发布数据|发布显示|数据显示|监测显示)", compact))
     return False
+
+
+def has_stock_entity_evidence(text: str, alias: str, stock_code: str | None = None) -> bool:
+    """Reject common-word/phrase substrings unless the text treats them as an equity entity."""
+
+    compact = normalize_text(text)
+    normalized_alias = normalize_text(alias)
+    code_digits = str(stock_code or "").split(".")[-1]
+    if not normalized_alias or normalized_alias not in compact:
+        return False
+    if normalized_alias.isdigit() or (code_digits and code_digits in compact):
+        return True
+
+    start = 0
+    while True:
+        index = compact.find(normalized_alias, start)
+        if index < 0:
+            return False
+        end = index + len(normalized_alias)
+        left_boundary = index == 0 or bool(STOCK_NAME_BOUNDARY_RE.match(compact[index - 1]))
+        right_boundary = end == len(compact) or bool(STOCK_NAME_BOUNDARY_RE.match(compact[end]))
+        window = compact[max(0, index - 18) : min(len(compact), end + 18)]
+        colon_subject = end < len(compact) and compact[end] in ":："
+        market_context = bool(STOCK_MARKET_CONTEXT_PATTERN.search(window))
+        business_context = bool(STOCK_BUSINESS_CONTEXT_PATTERN.search(window))
+        if colon_subject or ((left_boundary or right_boundary) and market_context):
+            return True
+        if left_boundary and (right_boundary or len(normalized_alias) >= 4) and business_context:
+            return True
+        start = index + 1
 
 
 def load_stock_refs() -> tuple[list[StockRef], list[str]]:
@@ -364,6 +405,8 @@ def match_stocks(item: NewsNowItem, refs: list[StockRef]) -> list[dict[str, Any]
     for ref in refs:
         hit_alias = next((alias for alias in ref.aliases if normalize_text(alias) in text), None)
         if not hit_alias:
+            continue
+        if not has_stock_entity_evidence(text, hit_alias, ref.code):
             continue
         if is_research_house_speaker(item.title, ref.name):
             continue
