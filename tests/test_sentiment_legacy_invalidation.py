@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import unittest
+import json
+from datetime import date
+from decimal import Decimal
 
 from scripts.invalidate_a_share_sentiment_legacy_results import (
     CURRENT_STRATEGY_VERSION,
@@ -47,17 +50,19 @@ class SentimentLegacyInvalidationTests(unittest.TestCase):
         cursor._fetchone = [
             {
                 "result_count": 136,
-                "included_count": 24,
-                "first_trade_date": "2026-05-15",
-                "last_trade_date": "2026-07-18",
+                "included_count": Decimal("24"),
+                "first_trade_date": date(2026, 5, 15),
+                "last_trade_date": date(2026, 7, 18),
             }
         ]
-        cursor._fetchall = [[{"strategy_version": "0.3.1", "result_count": 136, "included_count": 24}]]
+        cursor._fetchall = [[{"strategy_version": "0.3.1", "result_count": 136, "included_count": Decimal("24")}]]
 
         result = audit_legacy_results(FakeConnection(cursor))
 
         self.assertEqual(result["result_count"], 136)
         self.assertEqual(result["included_count"], 24)
+        self.assertEqual(result["first_trade_date"], "2026-05-15")
+        json.dumps(result)
         self.assertEqual(result["current_strategy_version"], CURRENT_STRATEGY_VERSION)
         self.assertEqual(len(cursor.executed), 2)
         for _, params in cursor.executed:

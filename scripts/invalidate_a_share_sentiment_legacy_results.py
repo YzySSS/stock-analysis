@@ -64,14 +64,24 @@ def audit_legacy_results(conn: Any) -> dict[str, Any]:
             """,
             (STRATEGY_ID, CURRENT_STRATEGY_VERSION),
         )
-        versions = cursor.fetchall() or []
+        version_rows = cursor.fetchall() or []
+    versions = [
+        {
+            "strategy_version": str(row.get("strategy_version") or "legacy_unknown"),
+            "result_count": int(row.get("result_count") or 0),
+            "included_count": int(row.get("included_count") or 0),
+        }
+        for row in version_rows
+    ]
+    first_trade_date = summary.get("first_trade_date")
+    last_trade_date = summary.get("last_trade_date")
     return {
         "strategy_id": STRATEGY_ID,
         "current_strategy_version": CURRENT_STRATEGY_VERSION,
         "result_count": int(summary.get("result_count") or 0),
         "included_count": int(summary.get("included_count") or 0),
-        "first_trade_date": summary.get("first_trade_date"),
-        "last_trade_date": summary.get("last_trade_date"),
+        "first_trade_date": str(first_trade_date) if first_trade_date else None,
+        "last_trade_date": str(last_trade_date) if last_trade_date else None,
         "versions": versions,
     }
 
