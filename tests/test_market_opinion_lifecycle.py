@@ -11,7 +11,10 @@ from app.data_ingestion.market_opinion_lifecycle import (
     normalize_retained_snapshots,
     retention_snapshot_ids,
 )
-from app.data_ingestion.market_opinion_repository import normalized_payload_values
+from app.data_ingestion.market_opinion_repository import (
+    normalized_payload_values,
+    resolve_snapshot_news_direction,
+)
 
 
 class MarketOpinionRetentionTests(unittest.TestCase):
@@ -125,6 +128,27 @@ class MarketOpinionNormalizationTests(unittest.TestCase):
         stock_extra = json.loads(stocks[0][-1])
         self.assertEqual(stock_extra, {"custom_factor": 12.3})
         self.assertNotIn("matched_news", stock_extra)
+
+    def test_local_direction_is_persisted_in_normalized_fallback(self):
+        news = {
+            "raw_id": 88,
+            "title": "指数冲高回落，但示例股涨停",
+            "direction": "positive",
+            "article_direction": "negative",
+            "signed_score": 60,
+        }
+        summary = {"top_stocks": [{"code": "sh.600000", "matched_news": [news]}]}
+
+        _, news_refs, _ = normalized_payload_values(7, summary)
+
+        fallback = json.loads(news_refs[0][-1])
+        self.assertEqual(fallback["direction"], "positive")
+        self.assertEqual(fallback["article_direction"], "negative")
+
+    def test_old_snapshot_direction_is_recovered_from_signed_score(self):
+        self.assertEqual(resolve_snapshot_news_direction({}, "negative", 53.0), "positive")
+        self.assertEqual(resolve_snapshot_news_direction({}, "positive", -53.0), "negative")
+        self.assertEqual(resolve_snapshot_news_direction({}, "positive", 0.0), "positive")
 
 
 if __name__ == "__main__":

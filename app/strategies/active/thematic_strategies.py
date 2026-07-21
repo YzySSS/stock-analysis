@@ -50,13 +50,15 @@ def _has_strong_stock_news(item: Dict[str, Any], min_impact: float = 75.0, min_t
     return False
 
 
-def _has_actionable_stock_news(item: Dict[str, Any]) -> bool:
+def _has_actionable_stock_news(item: Dict[str, Any], min_timeliness: float = 70.0) -> bool:
     negative_terms = ("跌停", "跌超", "下挫", "跳水", "杀跌", "大跌", "冲高回落", "风险", "减持", "处罚")
     for news in item.get("opinion_stock_news") or []:
         title = str(news.get("title") or "")
         if news.get("direction") != "positive" or any(term in title for term in negative_terms):
             continue
-        if (_to_float(news.get("impact_score"), 0) or 0) > 0:
+        timeliness = _to_float(news.get("timeliness_score"), 0) or 0
+        signed_score = _to_float(news.get("signed_score"), 0) or 0
+        if (_to_float(news.get("impact_score"), 0) or 0) > 0 and signed_score > 0 and timeliness >= min_timeliness:
             return True
     return False
 
@@ -1263,6 +1265,7 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
         strong_news_min_impact = _to_float(filters.get("strong_news_min_impact"), 75.0) or 75.0
         min_stock_recognition = _to_float(filters.get("min_stock_recognition"), None)
         min_direct_stock_signed_score = _to_float(filters.get("min_direct_stock_signed_score"), 1.0) or 1.0
+        min_actionable_news_timeliness = _to_float(filters.get("min_actionable_news_timeliness"), 70.0) or 70.0
         min_roe = _to_float(filters.get("min_roe"), None)
         use_market_opinion = any(item.get("opinion_sector_score") is not None for item in data_bundle.get("candidates", []))
         filtered = []
@@ -1305,7 +1308,10 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     and recognition_score < min_stock_recognition
                 ):
                     continue
-                if item.get("opinion_match_type") == "direct_news_match" and not _has_actionable_stock_news(item):
+                if item.get("opinion_match_type") == "direct_news_match" and not _has_actionable_stock_news(
+                    item,
+                    min_timeliness=min_actionable_news_timeliness,
+                ):
                     continue
                 if (
                     item.get("opinion_match_type") == "direct_news_match"
@@ -1317,7 +1323,10 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     or not item.get("opinion_stock_news")
                 ):
                     continue
-                if require_direct_stock_news and not _has_actionable_stock_news(item):
+                if require_direct_stock_news and not _has_actionable_stock_news(
+                    item,
+                    min_timeliness=min_actionable_news_timeliness,
+                ):
                     continue
             else:
                 news_count = int(item.get("news_count") or 0)
@@ -1341,6 +1350,7 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                 "strong_news_min_impact": strong_news_min_impact,
                 "min_stock_recognition": min_stock_recognition if use_market_opinion else None,
                 "min_direct_stock_signed_score": min_direct_stock_signed_score if use_market_opinion else None,
+                "min_actionable_news_timeliness": min_actionable_news_timeliness if use_market_opinion else None,
                 "min_roe": min_roe,
             },
         }

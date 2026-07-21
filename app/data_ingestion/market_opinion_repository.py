@@ -195,6 +195,10 @@ def _news_ref_values(
     extra = {key: value for key, value in news.items() if key not in NEWS_SNAPSHOT_COLUMNS}
     raw_id = news.get("raw_id")
     fallback = dict(extra)
+    if news.get("direction"):
+        # `market_opinion_raw.direction` is article-wide.  Snapshot direction is
+        # sector/stock-clause local and must survive normalized hydration.
+        fallback["direction"] = news.get("direction")
     if not raw_id:
         fallback.update(news)
     return (
@@ -212,6 +216,25 @@ def _news_ref_values(
         news.get("published_at"),
         _json_object(fallback),
     )
+
+
+def resolve_snapshot_news_direction(
+    fallback: dict[str, Any],
+    raw_direction: str | None,
+    signed_score: Any,
+) -> str:
+    local_direction = str(fallback.get("direction") or "").strip()
+    if local_direction in {"positive", "negative", "neutral"}:
+        return local_direction
+    try:
+        score = float(signed_score)
+    except (TypeError, ValueError):
+        score = 0.0
+    if score > 0:
+        return "positive"
+    if score < 0:
+        return "negative"
+    return str(raw_direction or "neutral") if str(raw_direction or "neutral") in {"positive", "negative", "neutral"} else "neutral"
 
 
 def save_sector_summaries_normalized(
@@ -351,6 +374,9 @@ def hydrate_sector_opinion_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
     for row in news_rows:
         snapshot_id = int(row["snapshot_id"])
         news = _decode_json(row.get("fallback_json"), {})
+        raw_direction = row.get("direction")
+        local_direction = resolve_snapshot_news_direction(news, raw_direction, row.get("signed_score"))
+        news.setdefault("article_direction", raw_direction)
         materialized = {
             "raw_id": int(row["raw_id"]) if row.get("raw_id") is not None else None,
             "title": row.get("title"),
@@ -358,7 +384,7 @@ def hydrate_sector_opinion_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             "source_name": row.get("source_name"),
             "impact_score": _json_value(row.get("impact_score")),
             "signed_score": _json_value(row.get("signed_score")),
-            "direction": row.get("direction"),
+            "direction": local_direction,
             "event_type": row.get("event_type"),
             "published_at": _json_value(row.get("published_at")),
             "timeliness_score": _json_value(row.get("timeliness_score")),

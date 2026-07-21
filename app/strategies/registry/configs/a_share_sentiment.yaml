@@ -23,6 +23,8 @@ hard_filters:
   min_stock_recognition: 58
   # 个股相关新闻按正负方向净计分；负面占优或仅中性提及不能作为直接新闻候选。
   min_direct_stock_signed_score: 1
+  # 热点/市场异动类旧新闻不能冒充今日催化；长周期政策和产业事件由各自时效曲线自然保留。
+  min_actionable_news_timeliness: 70
   # 事件驱动也不放明显亏损/ROE为负的票进入散户短线池。
   min_roe:
 

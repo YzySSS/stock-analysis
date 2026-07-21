@@ -197,6 +197,7 @@ class AShareSentimentTechnicalScoringTests(unittest.TestCase):
                         "title": "公司发布业务进展公告",
                         "direction": "neutral",
                         "impact_score": 90,
+                        "signed_score": 0,
                         "timeliness_score": 95,
                     }
                 ],
@@ -212,6 +213,7 @@ class AShareSentimentTechnicalScoringTests(unittest.TestCase):
                         "title": "公司获大额订单",
                         "direction": "positive",
                         "impact_score": 90,
+                        "signed_score": 90,
                         "timeliness_score": 95,
                     }
                 ],
@@ -221,6 +223,28 @@ class AShareSentimentTechnicalScoringTests(unittest.TestCase):
         context = self.strategy.prepare_context({"candidates": [neutral, positive]})
 
         self.assertEqual([item["code"] for item in context["candidates"]], ["positive-news"])
+
+    def test_stale_positive_direct_news_is_not_a_current_actionable_catalyst(self):
+        stale = _candidate("stale-positive", strong_structure=True)
+        stale.update(
+            {
+                "opinion_match_type": "direct_news_match",
+                "opinion_stock_score": 80,
+                "opinion_stock_news": [
+                    {
+                        "title": "六日前公司涨停",
+                        "direction": "positive",
+                        "impact_score": 90,
+                        "signed_score": 90,
+                        "timeliness_score": 56,
+                    }
+                ],
+            }
+        )
+
+        context = self.strategy.prepare_context({"candidates": [stale]})
+
+        self.assertEqual(context["candidates"], [])
 
     def test_sentiment_candidate_uses_pit_fundamentals_not_legacy_snapshot(self):
         selector = StockSelector(strategy_id="a_share_sentiment")
