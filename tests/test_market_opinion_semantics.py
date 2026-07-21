@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 
 from app.data_ingestion.market_opinion_semantics import (
     classify_opinion_direction,
@@ -9,7 +10,11 @@ from app.data_ingestion.market_opinion_semantics import (
     stock_sector_relation,
 )
 from app.stock_selection.selector import StockSelector
-from scripts.run_market_opinion_update import has_stock_entity_evidence, sector_opinion_score
+from scripts.run_market_opinion_update import (
+    has_stock_entity_evidence,
+    localized_stock_news_evidence,
+    sector_opinion_score,
+)
 
 
 class MarketOpinionDirectionTests(unittest.TestCase):
@@ -71,6 +76,19 @@ class MarketOpinionDirectionTests(unittest.TestCase):
         self.assertIn("医疗服务", pharma.context)
         self.assertEqual(consumer.direction, "negative")
         self.assertIn("白酒", consumer.context)
+
+    def test_peer_stock_does_not_inherit_article_earnings_decay(self):
+        evidence = localized_stock_news_evidence(
+            relation_context="药康生物、睿智医药20CM涨停",
+            fallback_title="昭衍新药业绩点燃CRO板块",
+            source_score_value=80,
+            amplification_score_value=70,
+            usable_at=datetime(2026, 7, 15, 13, 45),
+            as_of=datetime(2026, 7, 21, 15, 45),
+        )
+
+        self.assertEqual(evidence["event_type"], "market_attention")
+        self.assertLess(evidence["timeliness_score"], 70)
 
 
 class StockSectorRelationTests(unittest.TestCase):

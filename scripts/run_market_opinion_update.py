@@ -371,6 +371,37 @@ def impact_score(src: float, importance: float, amplification: float, timeliness
     return clamp(base * (0.35 + 0.65 * max(timeliness, 0) / 100))
 
 
+def localized_stock_news_evidence(
+    *,
+    relation_context: str | None,
+    fallback_title: str | None,
+    source_score_value: float,
+    amplification_score_value: float,
+    usable_at: datetime,
+    as_of: datetime,
+) -> dict[str, Any]:
+    """Score event type and decay from the stock-local clause."""
+
+    context = relation_context or fallback_title or ""
+    local_importance, local_direction, local_event_type = importance_score(context, None)
+    local_time = timeliness_score(local_event_type, usable_at, as_of)
+    return {
+        "importance_score": local_importance,
+        "direction": local_direction,
+        "event_type": local_event_type,
+        "impact_score": impact_score(
+            source_score_value,
+            local_importance,
+            amplification_score_value,
+            float(local_time["score"] or 0),
+        ),
+        "timeliness_score": local_time["score"],
+        "timeliness_level": local_time["level"],
+        "age_days": local_time["age_days"],
+        "effective_until": local_time["effective_until"],
+    }
+
+
 def sector_opinion_score(
     *,
     weighted_signed_impact: float,
@@ -663,12 +694,32 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
             )
             if not relation.supported:
                 continue
-            relation_direction = classify_opinion_direction(relation.context or row.get("title"), None)
-            stock_signed_score = float(news["impact_score"] or 0) * opinion_direction_multiplier(relation_direction)
+            usable_at = row.get("usable_at")
+            usable_at_dt = datetime.fromisoformat(usable_at) if isinstance(usable_at, str) else usable_at
+            stock_evidence = localized_stock_news_evidence(
+                relation_context=relation.context,
+                fallback_title=row.get("title"),
+                source_score_value=float(row.get("source_score") or 0),
+                amplification_score_value=float(row.get("amplification_score") or 0),
+                usable_at=usable_at_dt,
+                as_of=as_of,
+            )
+            if float(stock_evidence["timeliness_score"] or 0) <= 0:
+                continue
+            relation_direction = str(stock_evidence["direction"] or "neutral")
+            stock_impact_score = float(stock_evidence["impact_score"] or 0)
+            stock_signed_score = stock_impact_score * opinion_direction_multiplier(relation_direction)
             stock_news = {
                 **news,
+                "impact_score": stock_impact_score,
                 "direction": relation_direction,
                 "signed_score": stock_signed_score,
+                "article_event_type": row.get("event_type"),
+                "event_type": stock_evidence["event_type"],
+                "timeliness_score": stock_evidence["timeliness_score"],
+                "timeliness_level": stock_evidence["timeliness_level"],
+                "age_days": stock_evidence["age_days"],
+                "effective_until": stock_evidence["effective_until"].strftime("%Y-%m-%d %H:%M:%S"),
                 "relation_score": relation.score,
                 "relation_reason": relation.reason,
                 "relation_context": relation.context,

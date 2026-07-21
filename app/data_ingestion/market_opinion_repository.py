@@ -199,6 +199,10 @@ def _news_ref_values(
         # `market_opinion_raw.direction` is article-wide.  Snapshot direction is
         # sector/stock-clause local and must survive normalized hydration.
         fallback["direction"] = news.get("direction")
+    if news.get("event_type"):
+        # The raw event type is also article-wide.  A peer stock mentioned in
+        # an earnings article must keep its own local market-attention decay.
+        fallback["event_type"] = news.get("event_type")
     if not raw_id:
         fallback.update(news)
     return (
@@ -235,6 +239,13 @@ def resolve_snapshot_news_direction(
     if score < 0:
         return "negative"
     return str(raw_direction or "neutral") if str(raw_direction or "neutral") in {"positive", "negative", "neutral"} else "neutral"
+
+
+def resolve_snapshot_news_event_type(
+    fallback: dict[str, Any],
+    raw_event_type: str | None,
+) -> str:
+    return str(fallback.get("event_type") or raw_event_type or "general")
 
 
 def save_sector_summaries_normalized(
@@ -376,7 +387,10 @@ def hydrate_sector_opinion_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
         news = _decode_json(row.get("fallback_json"), {})
         raw_direction = row.get("direction")
         local_direction = resolve_snapshot_news_direction(news, raw_direction, row.get("signed_score"))
+        raw_event_type = row.get("event_type")
+        local_event_type = resolve_snapshot_news_event_type(news, raw_event_type)
         news.setdefault("article_direction", raw_direction)
+        news.setdefault("article_event_type", raw_event_type)
         materialized = {
             "raw_id": int(row["raw_id"]) if row.get("raw_id") is not None else None,
             "title": row.get("title"),
@@ -385,7 +399,7 @@ def hydrate_sector_opinion_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             "impact_score": _json_value(row.get("impact_score")),
             "signed_score": _json_value(row.get("signed_score")),
             "direction": local_direction,
-            "event_type": row.get("event_type"),
+            "event_type": local_event_type,
             "published_at": _json_value(row.get("published_at")),
             "timeliness_score": _json_value(row.get("timeliness_score")),
             "timeliness_level": row.get("timeliness_level"),

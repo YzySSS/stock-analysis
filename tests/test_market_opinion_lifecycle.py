@@ -14,6 +14,7 @@ from app.data_ingestion.market_opinion_lifecycle import (
 from app.data_ingestion.market_opinion_repository import (
     normalized_payload_values,
     resolve_snapshot_news_direction,
+    resolve_snapshot_news_event_type,
 )
 
 
@@ -135,6 +136,8 @@ class MarketOpinionNormalizationTests(unittest.TestCase):
             "title": "指数冲高回落，但示例股涨停",
             "direction": "positive",
             "article_direction": "negative",
+            "event_type": "market_attention",
+            "article_event_type": "earnings",
             "signed_score": 60,
         }
         summary = {"top_stocks": [{"code": "sh.600000", "matched_news": [news]}]}
@@ -144,11 +147,20 @@ class MarketOpinionNormalizationTests(unittest.TestCase):
         fallback = json.loads(news_refs[0][-1])
         self.assertEqual(fallback["direction"], "positive")
         self.assertEqual(fallback["article_direction"], "negative")
+        self.assertEqual(fallback["event_type"], "market_attention")
+        self.assertEqual(fallback["article_event_type"], "earnings")
 
     def test_old_snapshot_direction_is_recovered_from_signed_score(self):
         self.assertEqual(resolve_snapshot_news_direction({}, "negative", 53.0), "positive")
         self.assertEqual(resolve_snapshot_news_direction({}, "positive", -53.0), "negative")
         self.assertEqual(resolve_snapshot_news_direction({}, "positive", 0.0), "positive")
+
+    def test_snapshot_event_type_prefers_local_value(self):
+        self.assertEqual(
+            resolve_snapshot_news_event_type({"event_type": "market_attention"}, "earnings"),
+            "market_attention",
+        )
+        self.assertEqual(resolve_snapshot_news_event_type({}, "earnings"), "earnings")
 
 
 if __name__ == "__main__":
