@@ -29,6 +29,12 @@ SELECTION_CONTRACT_FIELDS = (
 )
 
 
+def _local_now_naive() -> datetime:
+    """Return the application/database wall clock used by MySQL DATETIME rows."""
+
+    return datetime.now().replace(tzinfo=None)
+
+
 class SnapshotNotPublishableError(RuntimeError):
     """Raised when an immutable snapshot is not in a publishable state."""
 
@@ -349,7 +355,7 @@ class SentimentCandidateSnapshotRepository:
         candidate_rows = [dict(candidate) for candidate in candidates]
         decision_time = _as_datetime(decision_as_of, field_name="decision_as_of")
         generated_time = _as_datetime(
-            generated_at or datetime.now(timezone.utc),
+            generated_at or decision_time,
             field_name="generated_at",
         )
         trade_day = _as_date(trade_date, field_name="trade_date")
@@ -575,7 +581,7 @@ class SentimentCandidateSnapshotRepository:
                     (manifest.get("strategy_id"), snapshot_id),
                 )
                 previous = cursor.fetchone() or {}
-                published_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                published_at = _local_now_naive()
                 cursor.execute(
                     """
                     UPDATE sentiment_candidate_snapshot_manifest

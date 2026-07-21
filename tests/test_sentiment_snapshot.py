@@ -5,6 +5,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
+from unittest.mock import patch
 
 from app.stock_selection.sentiment_snapshot import (
     PublishedSentimentSnapshot,
@@ -294,7 +295,12 @@ class SentimentSnapshotRepositoryTests(unittest.TestCase):
         cache = RecordingCache()
         repository = SentimentCandidateSnapshotRepository(factory, cache)
 
-        result = repository.publish_snapshot("sentiment-snapshot-2")
+        published_at = datetime(2026, 7, 21, 9, 32, 0)
+        with patch(
+            "app.stock_selection.sentiment_snapshot._local_now_naive",
+            return_value=published_at,
+        ):
+            result = repository.publish_snapshot("sentiment-snapshot-2")
 
         self.assertEqual((result.status, result.quality_status), ("ready", "passed"))
         self.assertEqual(factory.entries, 1)
@@ -304,12 +310,13 @@ class SentimentSnapshotRepositoryTests(unittest.TestCase):
             if "SET status='ready'" in sql
         ]
         self.assertEqual(len(publish_calls), 1)
+        self.assertEqual(publish_calls[0][1][1], published_at)
         self.assertEqual(publish_calls[0][1][-2:], ("sentiment-snapshot-1", "sentiment-snapshot-2"))
         self.assertEqual(len(cache.set_calls), 1)
         cache_key, cache_value, cache_ttl = cache.set_calls[0]
         self.assertEqual(cache_key, "sentiment:snapshot:latest:a_share_sentiment_v05")
         self.assertEqual(cache_value["snapshot_id"], "sentiment-snapshot-2")
-        self.assertIn("published_at", cache_value)
+        self.assertEqual(cache_value["published_at"], published_at)
         self.assertEqual(cache_ttl, 86_400)
         self.assertEqual(
             repository.latest_snapshot_pointer("a_share_sentiment_v05")["snapshot_id"],
