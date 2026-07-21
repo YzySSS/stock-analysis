@@ -8,6 +8,7 @@ from typing import Any
 
 from app.stock_selection.sentiment_snapshot import SnapshotStageResult, SnapshotValidation
 from app.stock_selection.sentiment_snapshot_materializer import (
+    MATERIALIZER_VERSION,
     MaterializationInputAudit,
     MySQLSentimentSnapshotInputRepository,
     OPTIONAL_SCORING_DATASETS,
@@ -21,6 +22,11 @@ from app.strategies.service import StrategyService
 
 
 DECISION = datetime(2026, 7, 21, 16, 0, 0)
+
+
+class MaterializerVersionContractTests(unittest.TestCase):
+    def test_materializer_version_fits_source_manifest_schema_version_column(self):
+        self.assertLessEqual(len(MATERIALIZER_VERSION), 32)
 
 
 def source_batch(

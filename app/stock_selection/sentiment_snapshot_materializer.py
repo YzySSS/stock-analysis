@@ -23,7 +23,10 @@ from app.strategies.service import StrategyService
 ConnectionFactory = Callable[..., AbstractContextManager]
 SelectorFactory = Callable[[str, Mapping[str, Any], SelectionRepository], StockSelector]
 
-MATERIALIZER_VERSION = "sentiment-snapshot-materializer-v1"
+# Persisted in source_batch_manifest.schema_version (VARCHAR(32)). Keep this
+# identifier compact and stable so a metadata-only version string cannot abort
+# an otherwise valid candidate snapshot transaction.
+MATERIALIZER_VERSION = "sentiment-snapshot-mat-v1"
 MATERIALIZATION_LOCK_PREFIX = "sentiment_snapshot_materialize"
 SUPPORTED_STOCK_DATASETS = {
     "daily_kline",
