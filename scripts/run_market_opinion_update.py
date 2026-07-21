@@ -650,6 +650,8 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
             code_digits = str(row.get("code") or "").split(".")[-1]
             if stock_name and normalize_text(stock_name) not in raw_text and code_digits not in raw_text:
                 continue
+            if not has_stock_entity_evidence(raw_text, stock_name or code_digits, row.get("code")):
+                continue
             relation = stock_sector_relation(
                 title=row.get("title"),
                 summary=row.get("summary"),
