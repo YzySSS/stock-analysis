@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 from pathlib import Path
+
+from app.api.routes import stocks
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +54,14 @@ class ExistingPageRetentionTests(unittest.TestCase):
         self.assertIn("/intraday-bars/refresh?trade_date=", source)
         self.assertIn("{ method: 'POST' }", source)
         self.assertIn("refreshAndLoadIntradayBars(", source)
+
+    def test_stock_detail_forces_code_time_index_for_intraday_history(self):
+        source = inspect.getsource(stocks.stock_detail)
+
+        self.assertIn(
+            "stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)",
+            source,
+        )
 
 
 if __name__ == "__main__":

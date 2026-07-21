@@ -7,6 +7,10 @@ from typing import Any, Dict, Iterable, Optional
 
 from app.shared.db import mysql_conn
 from app.shared.strategy_loader import StrategyLoader
+from app.stock_selection.dataset_scope import (
+    required_dataset_code_prefixes,
+    sql_code_prefix_filter,
+)
 
 
 class StrategyCapabilityService:
@@ -70,6 +74,26 @@ class StrategyCapabilityService:
                     "chip_codes": ("stock_chip_daily", row.get("chip_date")),
                 }
                 for key, (table_name, latest_date) in dated_tables.items():
+                    eligible_code_prefixes = required_dataset_code_prefixes((table_name,))
+                    universe_filter_sql = sql_code_prefix_filter(
+                        "sb.code", eligible_code_prefixes
+                    )
+                    expected_key = f"{key}_expected"
+                    if eligible_code_prefixes:
+                        cursor.execute(
+                            f"""
+                            SELECT COUNT(*) AS count
+                            FROM stock_basic sb
+                            WHERE sb.instrument_type='stock'
+                              AND COALESCE(sb.is_delisted, 0)=0
+                              {universe_filter_sql}
+                            """
+                        )
+                        counts[expected_key] = int(
+                            (cursor.fetchone() or {}).get("count") or 0
+                        )
+                    else:
+                        counts[expected_key] = int(row.get("stock_count") or 0)
                     if not latest_date:
                         counts[key] = 0
                         continue
@@ -81,6 +105,7 @@ class StrategyCapabilityService:
                         WHERE source.trade_date = %s
                           AND sb.instrument_type = 'stock'
                           AND COALESCE(sb.is_delisted, 0) = 0
+                          {universe_filter_sql}
                         """,
                         (latest_date,),
                     )
@@ -102,18 +127,25 @@ class StrategyCapabilityService:
                 "daily_kline": {
                     "latest_at": reference_trade_date,
                     "covered_codes": counts["daily_kline_codes"],
+                    "expected_codes": counts["daily_kline_codes_expected"],
                 },
                 "factor_input_daily": {
                     "latest_at": row.get("factor_input_date"),
                     "covered_codes": counts["factor_input_codes"],
+                    "expected_codes": counts["factor_input_codes_expected"],
                 },
                 "stock_moneyflow_daily": {
                     "latest_at": row.get("moneyflow_date"),
                     "covered_codes": counts["moneyflow_codes"],
+                    "expected_codes": counts["moneyflow_codes_expected"],
+                    "eligible_code_prefixes": list(
+                        required_dataset_code_prefixes(("stock_moneyflow_daily",))
+                    ),
                 },
                 "stock_chip_daily": {
                     "latest_at": row.get("chip_date"),
                     "covered_codes": counts["chip_codes"],
+                    "expected_codes": counts["chip_codes_expected"],
                 },
                 "sector_opinion_daily": {
                     "latest_at": row.get("sector_opinion_at"),
@@ -168,14 +200,19 @@ class StrategyCapabilityService:
     ) -> Dict[str, Any]:
         raw = (snapshot.get("datasets") or {}).get(dataset_name) or {}
         stock_count = int(snapshot.get("stock_count") or 0)
+        expected_codes = (
+            int(raw.get("expected_codes") or 0)
+            if raw.get("expected_codes") is not None
+            else stock_count
+        )
         latest_at = raw.get("latest_at")
         reference_date = self._as_date(snapshot.get("reference_trade_date"))
         latest_date = self._as_date(latest_at)
         age_days = (reference_date - latest_date).days if reference_date and latest_date else None
         covered_codes = raw.get("covered_codes")
         coverage = None
-        if covered_codes is not None and stock_count > 0:
-            coverage = round(int(covered_codes or 0) / stock_count, 6)
+        if covered_codes is not None and expected_codes > 0:
+            coverage = round(int(covered_codes or 0) / expected_codes, 6)
 
         reasons = []
         if not latest_date:
@@ -195,6 +232,8 @@ class StrategyCapabilityService:
             "name": dataset_name,
             "latest_at": str(latest_at) if latest_at else None,
             "covered_codes": int(covered_codes or 0) if covered_codes is not None else None,
+            "expected_codes": expected_codes,
+            "eligible_code_prefixes": list(raw.get("eligible_code_prefixes") or []),
             "row_count": int(raw.get("row_count") or 0) if raw.get("row_count") is not None else None,
             "coverage": coverage,
             "minimum_coverage": None if dataset_name in self.EVENT_DATASETS else minimum_coverage,

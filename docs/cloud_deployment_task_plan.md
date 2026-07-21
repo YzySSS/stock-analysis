@@ -94,7 +94,7 @@ git checkout <release_sha>
 
 ```env
 DB_POOL_ENABLED=true
-DB_POOL_SIZE=4
+DB_POOL_SIZE=8
 DB_POOL_MAX_OVERFLOW=0
 DB_POOL_TIMEOUT_SECONDS=3
 DB_CONNECT_TIMEOUT_SECONDS=3
@@ -221,10 +221,10 @@ USE_SENTIMENT_READ_MODEL=true
 
 重启 API 和 Selection Worker 后验证：
 
-- [ ] 提交任务固定 `input_snapshot_id`。
-- [ ] Worker 只读取同一个完整快照，不混用批次。
-- [ ] 缓存指针缺失时从 MySQL 读取最新完整 Manifest。
-- [ ] 没有完整快照时明确失败，不同步调用外部数据源。
+- [x] 提交任务固定 `input_snapshot_id`。
+- [x] Worker 只读取同一个完整快照，不混用批次。
+- [x] 缓存指针缺失时从 MySQL 读取最新完整 Manifest。
+- [x] 没有完整快照时明确失败，不同步调用外部数据源。
 
 回滚：设置 `USE_SENTIMENT_READ_MODEL=false` 并重启 API/Selection Worker。
 
@@ -247,11 +247,11 @@ REDIS_CACHE_ENABLED=true
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
-- [ ] 健康检查显示 `cache_mode=redis`、`redis_status=ready`。
-- [ ] 热点接口出现缓存命中。
-- [ ] Selection SSE 可用。
-- [ ] 主动停止 Redis 后，API 自动回落内存缓存，SSE 前端退回轮询。
-- [ ] Redis 故障不影响选股提交、任务执行、保存和 Tracking。
+- [x] 健康检查显示 `cache_mode=redis`、`redis_status=ready`。
+- [x] 热点接口出现缓存命中。
+- [x] Selection SSE 可用。
+- [x] 主动停止 Redis 后，API 自动回落内存缓存，SSE 前端退回轮询。
+- [x] Redis 故障不影响选股提交、任务执行、保存和 Tracking。
 
 回滚：设置 `REDIS_CACHE_ENABLED=false`，重启 API；无需恢复 Redis 数据。
 
@@ -274,11 +274,12 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 资源门：CPU P95 `<75%`、总内存 `<3.2GB`、无持续 Swap、Redis `<=192MB`、数据库连接使用率 `<70%`。
 
-- [ ] 分别记录 Redis 关闭和开启时的 P50/P95/P99。
-- [ ] Redis 没有明确改善则关闭。
-- [ ] 单 Worker 达标时保持单 Worker。
-- [ ] 只有内存和数据库连接余量充足时，才试运行两个 API Worker。
-- [ ] 两 Worker 导致内存不足或数据库连接超过 70% 时立即回退一个。
+- [x] 分别记录 Redis 关闭和开启时的 P50/P95/P99。
+- [x] Redis 已有明确改善并保留启用：个股 Overview/详情 P95 分别改善约 22%/13%，额外内存约 29 MiB。
+- [x] 单 Worker 达标，保持单 Worker。
+- [x] 单 Worker 已满足全部 SLO，双 Worker 试跑条件未触发；继续保留内存和数据库连接资源门作为未来启用前置条件。
+
+2026-07-22 正式对照结果：Redis 开启 68,665 请求、关闭 68,473 请求，均持续 30 分钟、20 并发、0 错误；CPU P95 约 20%，总内存峰值小于 1.53 GiB，Swap 无增长，数据库连接使用率小于 2.5%。两 Worker 不再试跑，因为单 Worker 已全部达标，增加进程只会扩大内存和连接池预算。
 
 ## 12. Phase 10：v0.5 影子观察
 
@@ -288,13 +289,16 @@ v0.5 不通过 API 开放，不自动晋级。使用同一输入执行双版本�
 .venv/bin/python scripts/materialize_sentiment_candidate_snapshot.py --dual-run
 ```
 
-- [ ] 只比较相同 `dual_input_hash` 的完整配对。
-- [ ] 任一版本失败时重跑，不拼接新旧快照。
-- [ ] 比较候选、排名、硬门、证据、数据新鲜度和执行耗时。
+- [x] 只比较相同 `dual_input_hash` 的完整配对。
+- [x] 任一版本失败时重跑，不拼接新旧快照。
+- [x] 输入 manifest 必须明确记录可审计股票范围；当前日频资金流硬门只支持沪深，北交所保持 fail-closed，禁止填充虚假零值。
+- [x] 比较候选、排名、硬门、证据、数据新鲜度和执行耗时。
 - [ ] 前 20 个交易日只验收工程稳定性。
 - [ ] 120 个交易日生成中期策略报告。
 - [ ] 252 个交易日完成策略验证后，才允许人工讨论晋级。
-- [ ] AI 建议与正式分数、排名、交易等级分开保存。
+- [x] AI 建议与正式分数、排名、交易等级分开保存。
+
+2026-07-22 首个完整影子配对：`dual_input_hash=172e73f4f959fcefcf947a784a86b93c16d509d1d14fabea9d845d1c60cd4911`；稳定版快照 `sentiment-a_share_sentiment-20260722T043227759134-e3153520336e`，v0.5 影子快照 `sentiment-a_share_sentiment_v05-20260722T043227759134-6a17b9497062`。输入交集覆盖 `5196/5201=99.90%`，关键完整率 `100%`；该配对仅计入工程观察，不构成策略有效性证据。
 
 ## 13. 最终交付与回滚表
 

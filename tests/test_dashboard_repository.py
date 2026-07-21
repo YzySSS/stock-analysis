@@ -135,6 +135,15 @@ class StubDashboardRepository:
 
 
 class DashboardRepositoryTests(unittest.TestCase):
+    def test_compact_dashboard_uses_stale_while_refresh_cache(self):
+        self.assertGreater(
+            dashboard._DASHBOARD_CACHE_STORAGE_SECONDS,
+            dashboard._DASHBOARD_CACHE_FRESH_SECONDS,
+        )
+        source = inspect.getsource(dashboard.dashboard_summary)
+        self.assertIn("_start_dashboard_refresh", source)
+        self.assertIn("with lock", source)
+
     def test_emotion_inputs_use_fixed_seven_queries_with_batch_history(self):
         factory = ScriptedConnectionFactory()
         repository = DashboardRepository(connection_factory=factory)

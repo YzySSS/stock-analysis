@@ -65,27 +65,19 @@ TASK_RUNNING_STALE_SECONDS = 60 * 60
 LATEST_DATES_SQL = f"""
 SELECT
     (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='{STOCK_INSTRUMENT_TYPE}') AS total_stock_codes,
-    (SELECT MAX(trade_date) FROM daily_kline) AS daily_kline_latest_available_trade_date,
-    (
-      SELECT grouped.trade_date
-      FROM (
-        SELECT trade_date, COUNT(*) AS row_count
-        FROM daily_kline
-        GROUP BY trade_date
-      ) grouped
-      WHERE grouped.row_count >= (
-        SELECT COUNT(*) * {STOCK_DAILY_COMPLETENESS_RATIO}
-        FROM stock_basic
-        WHERE instrument_type='{STOCK_INSTRUMENT_TYPE}'
-      )
-      ORDER BY grouped.trade_date DESC
-      LIMIT 1
-    ) AS daily_kline_latest_complete_trade_date,
     (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at,
     (SELECT MAX(fundamental_updated_at) FROM stock_basic) AS fundamental_latest_updated_at,
     (SELECT MAX(valuation_updated_at) FROM stock_basic) AS valuation_latest_updated_at,
     (SELECT MAX(created_at) FROM selection_result) AS selection_result_latest_created_at,
     (SELECT MAX(trade_date) FROM selection_result) AS selection_result_latest_trade_date
+"""
+
+LATEST_KLINE_COUNTS_SQL = f"""
+SELECT trade_date, COUNT(*) AS row_count
+FROM daily_kline FORCE INDEX (idx_trade_date)
+GROUP BY trade_date
+ORDER BY trade_date DESC
+LIMIT {KLINE_LATEST_SAMPLE_LIMIT}
 """
 
 
@@ -393,16 +385,22 @@ def _latest_dates() -> dict:
             cursor.execute(LATEST_DATES_SQL)
             row = cursor.fetchone() or {}
             total_stock_codes = int(row.get("total_stock_codes") or 0)
-            latest_available = row.get("daily_kline_latest_available_trade_date")
-            latest_complete = row.get("daily_kline_latest_complete_trade_date")
-            latest_available_count = 0
-            latest_complete_count = 0
-            if latest_available:
-                cursor.execute("SELECT COUNT(*) AS count FROM daily_kline WHERE trade_date = %s", (latest_available,))
-                latest_available_count = int((cursor.fetchone() or {}).get("count") or 0)
-            if latest_complete:
-                cursor.execute("SELECT COUNT(*) AS count FROM daily_kline WHERE trade_date = %s", (latest_complete,))
-                latest_complete_count = int((cursor.fetchone() or {}).get("count") or 0)
+            cursor.execute(LATEST_KLINE_COUNTS_SQL)
+            recent_kline_counts = cursor.fetchall() or []
+            latest_available_row = recent_kline_counts[0] if recent_kline_counts else {}
+            latest_available = latest_available_row.get("trade_date")
+            latest_available_count = int(latest_available_row.get("row_count") or 0)
+            completeness_floor = total_stock_codes * STOCK_DAILY_COMPLETENESS_RATIO
+            latest_complete_row = next(
+                (
+                    item
+                    for item in recent_kline_counts
+                    if int(item.get("row_count") or 0) >= completeness_floor
+                ),
+                {},
+            )
+            latest_complete = latest_complete_row.get("trade_date")
+            latest_complete_count = int(latest_complete_row.get("row_count") or 0)
 
             result = {
                 key: str(value) if value is not None else None
@@ -423,12 +421,16 @@ def _latest_dates() -> dict:
             return result
 
 
-def _data_baseline_summary() -> dict:
+def _data_baseline_summary(
+    *,
+    latest: dict | None = None,
+    sentiment: dict | None = None,
+) -> dict:
     """Lightweight coverage cards for /system.
 
     Keep this bounded to simple aggregate queries and cache the whole endpoint.
     """
-    latest = _latest_dates()
+    latest = latest or _latest_dates()
     latest_kline_date = latest.get("daily_kline_latest_complete_trade_date") or latest.get("daily_kline_latest_trade_date")
     with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
@@ -523,7 +525,7 @@ def _data_baseline_summary() -> dict:
             cursor.execute("SELECT COUNT(*) AS count FROM stock_chip_daily WHERE trade_date = %s", (chip_date,))
             chip_count = int((cursor.fetchone() or {}).get("count") or 0) if chip_date else 0
 
-    sentiment = _sentiment_quality_stats()
+    sentiment = sentiment or _sentiment_quality_stats()
     sentiment_effective = int(sentiment.get("effective_news_count") or 0)
     sentiment_raw = int(sentiment.get("raw_news_count") or 0)
 
@@ -953,8 +955,7 @@ def _realtime_lifecycle_summary() -> dict:
             }
             cursor.execute(
                 """
-                SELECT COUNT(DISTINCT trade_date) AS trade_days,
-                       MIN(trade_date) AS min_trade_date,
+                SELECT MIN(trade_date) AS min_trade_date,
                        MAX(trade_date) AS max_trade_date
                 FROM stock_realtime_intraday
                 """
@@ -993,7 +994,7 @@ def _realtime_lifecycle_summary() -> dict:
         },
         "raw": {
             **table_rows.get("stock_realtime_intraday", {}),
-            "trade_days": int(raw_range.get("trade_days") or 0),
+            "trade_days": partition_count,
             "min_trade_date": str(raw_range.get("min_trade_date")) if raw_range.get("min_trade_date") else None,
             "max_trade_date": str(raw_range.get("max_trade_date")) if raw_range.get("max_trade_date") else None,
             "daily_partitions": partition_count,
@@ -1088,6 +1089,8 @@ def system_status() -> dict:
     mysql_info = ping_mysql()
     task_runs = _latest_task_runs()
     readiness = build_operational_readiness()
+    latest = _latest_dates()
+    sentiment_quality = _sentiment_quality_stats()
     payload = {
         "status": "ok",
         "health": {
@@ -1095,9 +1098,12 @@ def system_status() -> dict:
             "database": mysql_info.get("db"),
             "version": mysql_info.get("version"),
         },
-        "latest": _latest_dates(),
-        "sentiment_quality": _sentiment_quality_stats(),
-        "data_baseline": _data_baseline_summary(),
+        "latest": latest,
+        "sentiment_quality": sentiment_quality,
+        "data_baseline": _data_baseline_summary(
+            latest=latest,
+            sentiment=sentiment_quality,
+        ),
         "data_quality": _data_quality_status(task_runs),
         "scheduled_tasks": _scheduled_tasks(),
         "task_runs": task_runs,

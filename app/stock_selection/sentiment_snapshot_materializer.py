@@ -10,6 +10,11 @@ from decimal import Decimal
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from app.shared.db import mysql_conn
+from app.stock_selection.dataset_scope import (
+    filter_rows_to_code_prefixes,
+    required_dataset_code_prefixes,
+    sql_code_prefix_filter,
+)
 from app.stock_selection.repository import SelectionRepository
 from app.stock_selection.selector import SENTIMENT_STRATEGY_IDS, StockSelector
 from app.stock_selection.sentiment_snapshot import (
@@ -399,6 +404,8 @@ class MySQLSentimentSnapshotInputRepository:
         clock_mode = StockSelector._selection_clock_mode(decision_as_of)
         if clock_mode == "intraday":
             required_datasets.append("stock_realtime_snapshot")
+        eligible_code_prefixes = required_dataset_code_prefixes(required_datasets)
+        universe_filter_sql = sql_code_prefix_filter("sb.code", eligible_code_prefixes)
 
         unknown = set(required_datasets) - SUPPORTED_STOCK_DATASETS - {"sector_opinion_daily"}
         if unknown:
@@ -423,8 +430,21 @@ class MySQLSentimentSnapshotInputRepository:
             WHERE instrument_type='stock' AND COALESCE(is_delisted, 0)=0
             """
         )
-        universe = cursor.fetchone() or {}
+        all_active_universe = cursor.fetchone() or {}
+        if eligible_code_prefixes:
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS expected_entities, MAX(updated_at) AS received_at
+                FROM stock_basic sb
+                WHERE sb.instrument_type='stock' AND COALESCE(sb.is_delisted, 0)=0
+                  {universe_filter_sql}
+                """
+            )
+            universe = cursor.fetchone() or {}
+        else:
+            universe = all_active_universe
         expected = int(universe.get("expected_entities") or 0)
+        all_active_expected = int(all_active_universe.get("expected_entities") or 0)
         stock_basic_received = universe.get("received_at")
         datasets: list[SourceDatasetBatch] = [
             self._batch(
@@ -436,7 +456,22 @@ class MySQLSentimentSnapshotInputRepository:
                 expected_entities=expected,
                 actual_entities=expected,
                 required=True,
-                metadata={"universe": "active_stock", "is_delisted": 0},
+                metadata={
+                    "universe": (
+                        "required_dataset_supported_active_stock"
+                        if eligible_code_prefixes
+                        else "active_stock"
+                    ),
+                    "is_delisted": 0,
+                    "eligible_code_prefixes": list(eligible_code_prefixes),
+                    "all_active_entity_count": all_active_expected,
+                    "excluded_entity_count": max(0, all_active_expected - expected),
+                    "scope_reason": (
+                        "hard-required dataset provider support"
+                        if eligible_code_prefixes
+                        else None
+                    ),
+                },
             )
         ]
 
@@ -455,6 +490,7 @@ class MySQLSentimentSnapshotInputRepository:
                         cursor,
                         decision_as_of=decision_as_of,
                         expected_entities=expected,
+                        universe_filter_sql=universe_filter_sql,
                     )
                 )
             else:
@@ -465,6 +501,7 @@ class MySQLSentimentSnapshotInputRepository:
                         decision_as_of=decision_as_of,
                         reference_trade_date=reference_trade_date,
                         expected_entities=expected,
+                        universe_filter_sql=universe_filter_sql,
                     )
                 )
 
@@ -476,7 +513,7 @@ class MySQLSentimentSnapshotInputRepository:
                 cursor,
                 decision_as_of=decision_as_of,
                 reference_trade_date=reference_trade_date,
-                expected_entities=expected,
+                expected_entities=all_active_expected,
             )
         )
 
@@ -486,6 +523,7 @@ class MySQLSentimentSnapshotInputRepository:
             required_datasets=required_datasets,
             reference_trade_date=reference_trade_date,
             decision_as_of=decision_as_of,
+            universe_filter_sql=universe_filter_sql,
         )
         errors: list[str] = []
         if expected <= 0:
@@ -550,6 +588,7 @@ class MySQLSentimentSnapshotInputRepository:
         decision_as_of: datetime,
         reference_trade_date: date | None,
         expected_entities: int,
+        universe_filter_sql: str = "",
     ) -> SourceDatasetBatch:
         received_column, source_column = self._DATED_DATASETS[dataset_name]
         if reference_trade_date is None:
@@ -588,6 +627,7 @@ class MySQLSentimentSnapshotInputRepository:
               {extra_filter}
               AND sb.instrument_type='stock'
               AND COALESCE(sb.is_delisted, 0)=0
+              {universe_filter_sql}
             """,
             params,
         )
@@ -657,9 +697,10 @@ class MySQLSentimentSnapshotInputRepository:
         *,
         decision_as_of: datetime,
         expected_entities: int,
+        universe_filter_sql: str = "",
     ) -> SourceDatasetBatch:
         cursor.execute(
-            """
+            f"""
             SELECT COUNT(*) AS actual_rows,
                    COUNT(DISTINCT realtime.code) AS actual_entities,
                    MAX(realtime.quote_time) AS source_time,
@@ -673,6 +714,7 @@ class MySQLSentimentSnapshotInputRepository:
               AND COALESCE(realtime.is_stale, 0)=0
               AND sb.instrument_type='stock'
               AND COALESCE(sb.is_delisted, 0)=0
+              {universe_filter_sql}
             """,
             (decision_as_of.date(), decision_as_of),
         )
@@ -1015,6 +1057,7 @@ class MySQLSentimentSnapshotInputRepository:
         required_datasets: Sequence[str],
         reference_trade_date: date | None,
         decision_as_of: datetime,
+        universe_filter_sql: str = "",
     ) -> int:
         if expected_entities <= 0 or reference_trade_date is None:
             return 0
@@ -1065,6 +1108,7 @@ class MySQLSentimentSnapshotInputRepository:
             FROM stock_basic sb
             {' '.join(joins)}
             WHERE sb.instrument_type='stock' AND COALESCE(sb.is_delisted, 0)=0
+              {universe_filter_sql}
             """,
             params,
         )
@@ -1399,6 +1443,29 @@ class SentimentSnapshotMaterializationService:
             values.update(str(item).strip() for item in items if str(item).strip())
         return sorted(values)
 
+    @staticmethod
+    def _audit_eligible_code_prefixes(
+        audit: MaterializationInputAudit,
+    ) -> tuple[str, ...]:
+        stock_basic = next(
+            (item for item in audit.datasets if item.dataset_name == "stock_basic"),
+            None,
+        )
+        raw = stock_basic.metadata.get("eligible_code_prefixes") if stock_basic else []
+        values = raw if isinstance(raw, (list, tuple, set)) else []
+        return tuple(str(value).strip().lower() for value in values if str(value).strip())
+
+    @classmethod
+    def _filter_candidates_to_audit_universe(
+        cls,
+        candidates: Sequence[Mapping[str, Any]],
+        audit: MaterializationInputAudit,
+    ) -> list[dict[str, Any]]:
+        return filter_rows_to_code_prefixes(
+            candidates,
+            cls._audit_eligible_code_prefixes(audit),
+        )
+
     def materialize(
         self,
         *,
@@ -1464,8 +1531,12 @@ class SentimentSnapshotMaterializationService:
                 market_board="all",
                 decision_as_of=audit.decision_as_of,
             )
-            input_candidates, input_metadata = self._inject_input_audit_metadata(
+            scoped_candidates = self._filter_candidates_to_audit_universe(
                 list(bundle.get("candidates") or []),
+                audit,
+            )
+            input_candidates, input_metadata = self._inject_input_audit_metadata(
+                scoped_candidates,
                 audit=audit,
                 strategy_meta=strategy_meta,
                 datasets=base_batches,
@@ -1708,8 +1779,12 @@ class SentimentSnapshotMaterializationService:
             market_board="all",
             decision_as_of=audit.decision_as_of,
         )
-        input_candidates, input_metadata = self._inject_input_audit_metadata(
+        scoped_candidates = self._filter_candidates_to_audit_universe(
             list(bundle.get("candidates") or []),
+            audit,
+        )
+        input_candidates, input_metadata = self._inject_input_audit_metadata(
+            scoped_candidates,
             audit=audit,
             strategy_meta=strategy_meta,
             datasets=base_batches,

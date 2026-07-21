@@ -697,7 +697,7 @@ def stock_detail(
                 cursor.execute(
                     """
                     SELECT quote_minute, latest_price, pct_chg, volume, amount
-                    FROM stock_realtime_intraday
+                    FROM stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)
                     WHERE code = %s AND trade_date = %s
                     ORDER BY quote_minute DESC
                     LIMIT %s

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
@@ -16,7 +18,9 @@ router = APIRouter(tags=["dashboard"])
 _DASHBOARD_REPOSITORY = DashboardRepository()
 
 
-_DASHBOARD_CACHE_TTL_SECONDS = 30.0
+_DASHBOARD_CACHE_FRESH_SECONDS = 30.0
+_DASHBOARD_CACHE_STORAGE_SECONDS = 300.0
+_DASHBOARD_CACHE_LOCKS = {limit: threading.Lock() for limit in range(1, 21)}
 
 
 def _to_float(value) -> float | None:
@@ -240,16 +244,23 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _get_cached_dashboard(limit: int) -> dict[str, Any] | None:
-    cached = get_cache_backend().get(f"dashboard:summary:v2:compact:{limit}")
-    return cached if isinstance(cached, dict) else None
+def _dashboard_cache_key(limit: int) -> str:
+    return f"dashboard:summary:v3:compact:{limit}"
+
+
+def _get_cached_dashboard(limit: int) -> tuple[dict[str, Any], float] | None:
+    cached = get_cache_backend().get(_dashboard_cache_key(limit))
+    if not isinstance(cached, dict) or not isinstance(cached.get("payload"), dict):
+        return None
+    cached_at = float(cached.get("cached_at") or time.time())
+    return dict(cached["payload"]), max(0.0, time.time() - cached_at)
 
 
 def _cache_dashboard(limit: int, payload: dict[str, Any]) -> None:
     get_cache_backend().set(
-        f"dashboard:summary:v2:compact:{limit}",
-        payload,
-        ttl_seconds=_DASHBOARD_CACHE_TTL_SECONDS,
+        _dashboard_cache_key(limit),
+        {"payload": payload, "cached_at": time.time()},
+        ttl_seconds=_DASHBOARD_CACHE_STORAGE_SECONDS,
     )
 
 
@@ -1082,16 +1093,7 @@ def _dashboard_hot_themes(limit: int = 8) -> dict:
     }
 
 
-@router.get("/dashboard/summary")
-def dashboard_summary(
-    limit: Annotated[int, Query(ge=1, le=20)] = 5,
-    compact: Annotated[bool, Query()] = False,
-) -> dict:
-    if compact:
-        cached = _get_cached_dashboard(limit)
-        if cached is not None:
-            return cached
-
+def _build_dashboard_summary(limit: int, *, compact: bool) -> dict:
     tracker = SelectionResultTracker()
 
     preview_records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type="stock")
@@ -1135,5 +1137,54 @@ def dashboard_summary(
     }
     if compact:
         payload = _compact_dashboard_payload(payload)
-        _cache_dashboard(limit, payload)
     return payload
+
+
+def _refresh_dashboard_cache(limit: int) -> None:
+    lock = _DASHBOARD_CACHE_LOCKS[limit]
+    try:
+        _cache_dashboard(limit, _build_dashboard_summary(limit, compact=True))
+    finally:
+        lock.release()
+
+
+def _start_dashboard_refresh(limit: int) -> bool:
+    lock = _DASHBOARD_CACHE_LOCKS[limit]
+    if not lock.acquire(blocking=False):
+        return False
+    try:
+        threading.Thread(
+            target=_refresh_dashboard_cache,
+            args=(limit,),
+            name=f"dashboard-cache-{limit}",
+            daemon=True,
+        ).start()
+    except Exception:
+        lock.release()
+        raise
+    return True
+
+
+@router.get("/dashboard/summary")
+def dashboard_summary(
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    compact: Annotated[bool, Query()] = False,
+) -> dict:
+    if not compact:
+        return _build_dashboard_summary(limit, compact=False)
+
+    cached = _get_cached_dashboard(limit)
+    if cached is not None:
+        payload, age_seconds = cached
+        if age_seconds >= _DASHBOARD_CACHE_FRESH_SECONDS:
+            _start_dashboard_refresh(limit)
+        return payload
+
+    lock = _DASHBOARD_CACHE_LOCKS[limit]
+    with lock:
+        cached = _get_cached_dashboard(limit)
+        if cached is not None:
+            return cached[0]
+        payload = _build_dashboard_summary(limit, compact=True)
+        _cache_dashboard(limit, payload)
+        return payload

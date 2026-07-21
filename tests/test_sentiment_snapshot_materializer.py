@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from app.stock_selection.sentiment_snapshot import SnapshotStageResult, SnapshotValidation
+from app.stock_selection.dataset_scope import (
+    filter_rows_to_code_prefixes,
+    required_dataset_code_prefixes,
+    sql_code_prefix_filter,
+)
 from app.stock_selection.sentiment_snapshot_materializer import (
     MATERIALIZER_VERSION,
     MaterializationInputAudit,
@@ -27,6 +32,31 @@ DECISION = datetime(2026, 7, 21, 16, 0, 0)
 class MaterializerVersionContractTests(unittest.TestCase):
     def test_materializer_version_fits_source_manifest_schema_version_column(self):
         self.assertLessEqual(len(MATERIALIZER_VERSION), 32)
+
+
+class DatasetScopeContractTests(unittest.TestCase):
+    def test_daily_moneyflow_scope_is_explicitly_shanghai_and_shenzhen(self):
+        prefixes = required_dataset_code_prefixes(
+            ("daily_kline", "stock_moneyflow_daily")
+        )
+
+        self.assertEqual(prefixes, ("sh.", "sz."))
+        self.assertEqual(
+            sql_code_prefix_filter("sb.code", prefixes),
+            " AND LEFT(sb.code, 3) IN ('sh.', 'sz.')",
+        )
+
+    def test_scope_filter_keeps_supported_rows_and_fails_closed_for_bse(self):
+        rows = [
+            {"code": "sh.600000"},
+            {"code": "sz.000001"},
+            {"code": "bj.920001"},
+        ]
+
+        self.assertEqual(
+            [item["code"] for item in filter_rows_to_code_prefixes(rows, ("sh.", "sz."))],
+            ["sh.600000", "sz.000001"],
+        )
 
 
 def source_batch(
@@ -807,6 +837,26 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         )
         self.assertIn("source_trade_date=%s", intersection_sql)
         self.assertIn("SUM(CASE WHEN", intersection_sql)
+
+    def test_mysql_audit_applies_required_dataset_provider_scope(self):
+        cursor = IntersectionCursor(99)
+        repository = MySQLSentimentSnapshotInputRepository()
+        prefixes = required_dataset_code_prefixes(("stock_moneyflow_daily",))
+
+        covered = repository._covered_entity_intersection(
+            cursor,
+            expected_entities=100,
+            required_datasets=("daily_kline", "stock_moneyflow_daily"),
+            reference_trade_date=date(2026, 7, 21),
+            decision_as_of=DECISION,
+            universe_filter_sql=sql_code_prefix_filter("sb.code", prefixes),
+        )
+
+        self.assertEqual(covered, 99)
+        self.assertIn(
+            "LEFT(sb.code, 3) IN ('sh.', 'sz.')",
+            cursor.execute_calls[-1][0],
+        )
 
     def test_release_lock_failure_invalidates_pooled_connection(self):
         connection = ReleaseFailingConnection(pooled=True)

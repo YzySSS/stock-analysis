@@ -9,14 +9,22 @@ from app.strategies.service import StrategyService
 from scripts.run_strategy_factor_ci_daily_update import runtime_strategy_ids
 
 
-def ready_snapshot(*, factor_codes: int = 100, moneyflow_codes: int = 100) -> dict:
+def ready_snapshot(
+    *,
+    factor_codes: int = 100,
+    moneyflow_codes: int = 100,
+    moneyflow_expected_codes: int | None = None,
+) -> dict:
+    moneyflow = {"latest_at": "2026-07-14", "covered_codes": moneyflow_codes}
+    if moneyflow_expected_codes is not None:
+        moneyflow["expected_codes"] = moneyflow_expected_codes
     return {
         "stock_count": 100,
         "reference_trade_date": "2026-07-15",
         "datasets": {
             "daily_kline": {"latest_at": "2026-07-15", "covered_codes": 100},
             "factor_input_daily": {"latest_at": "2026-07-14", "covered_codes": factor_codes},
-            "stock_moneyflow_daily": {"latest_at": "2026-07-14", "covered_codes": moneyflow_codes},
+            "stock_moneyflow_daily": moneyflow,
             "stock_chip_daily": {"latest_at": "2026-07-14", "covered_codes": 100},
             "sector_opinion_daily": {"latest_at": "2026-07-15 15:30:00", "row_count": 10},
         },
@@ -65,6 +73,28 @@ class StrategyCapabilityContractTests(unittest.TestCase):
 
         self.assertFalse(item["data_ready"])
         self.assertTrue(any("stock_moneyflow_daily" in reason for reason in item["runtime_reasons"]))
+
+    def test_v05_moneyflow_uses_provider_supported_universe_denominator(self):
+        snapshot = ready_snapshot(
+            moneyflow_codes=5198,
+            moneyflow_expected_codes=5201,
+        )
+        snapshot["stock_count"] = 5529
+        for dataset_name in ("daily_kline", "factor_input_daily", "stock_chip_daily"):
+            snapshot["datasets"][dataset_name]["expected_codes"] = 100
+
+        item = StrategyService(dataset_snapshot=snapshot).get_strategy_capability(
+            "a_share_sentiment_v05"
+        )
+        moneyflow = next(
+            value
+            for value in item["dataset_statuses"]
+            if value["name"] == "stock_moneyflow_daily"
+        )
+
+        self.assertTrue(item["data_ready"])
+        self.assertEqual(moneyflow["expected_codes"], 5201)
+        self.assertAlmostEqual(moneyflow["coverage"], 5198 / 5201, places=6)
 
     def test_required_dataset_gap_blocks_runtime(self):
         item = StrategyService(

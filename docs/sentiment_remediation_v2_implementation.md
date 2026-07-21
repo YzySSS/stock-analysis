@@ -44,7 +44,7 @@ DB_CONNECT_TIMEOUT_SECONDS=3
 DB_READ_TIMEOUT_SECONDS=10
 DB_WRITE_TIMEOUT_SECONDS=10
 DB_POOL_ENABLED=true
-DB_POOL_SIZE=4
+DB_POOL_SIZE=8
 DB_POOL_MAX_OVERFLOW=0
 DB_POOL_TIMEOUT_SECONDS=3
 
@@ -56,7 +56,7 @@ CACHE_REDIS_FALLBACK_TO_MEMORY=true
 USE_SENTIMENT_READ_MODEL=false
 ```
 
-- 每个 API 进程最多使用 4 个常驻 MySQL 连接，不允许无限溢出。
+- 每个 API 进程最多使用 8 个按需 MySQL 连接，不允许无限溢出；Phase 9 的 20 并发压测中数据库连接使用率仍低于 3%。
 - 高频纯读链路使用只读连接上下文，结束时 rollback，不产生无意义 commit。
 - Redis 包延迟导入；禁用、连接失败或运行时异常均可回落内存缓存。
 - `/api/health` 不主动创建首个 Redis 连接，避免存活检查被故障缓存拖慢。
@@ -101,6 +101,8 @@ Migration `0025` 新增通用 `durable_task` 队列。股票分钟线刷新、�
 ```
 
 物化器用 MySQL 命名锁避免同策略并发生产，在单个 `REPEATABLE READ` 事务中实算活跃股票全集、必需数据集交集覆盖率并运行 `StockSelector` 本地确定性核心。所有日线、舆情、板块资金、实时行情、实时资金和人气查询都绑定同一 `decision_as_of`；实际评分读取的可选表也生成独立 source manifest 和 lineage，但部分覆盖不会冒充核心 98% 覆盖。它不调用外部 Provider、不运行会改变正式排名的 progressive/DeepSeek 包装、不写普通选股结果；完整 selector 输入视图、配置、实现和输出均带内容哈希。低于 98%、必需来源缺时间戳、候选级必需数据不完整、出现时间穿越、混合交易时钟或时区不一致时，不会让对应股票进入 v0.5 交易级，也不会替换上一个完整快照。v0.5 影子物化必须显式增加 `--strategy-id a_share_sentiment_v05 --allow-shadow`，不会改变注册表状态。
+
+必需数据的覆盖分母按上游明确支持范围计算，不把结构性不支持伪装成同步缺口。当前 Tushare `moneyflow` 不发布北交所记录，因此只要策略把 `stock_moneyflow_daily` 列为硬必需数据，审计输入与 selector 输入便统一限定为沪深活跃股票；北交所股票保持 fail-closed，不生成虚假零资金流。0.4.4 单独物化时仍覆盖全部活跃 A 股；0.4.4 与 v0.5 双跑时两者共同使用沪深范围，保证比较口径一致。该范围必须写入 `stock_basic` source manifest 的 `eligible_code_prefixes/all_active_entity_count/excluded_entity_count`。
 
 同批对照使用 `.venv/bin/python scripts/materialize_sentiment_candidate_snapshot.py --dual-run`。该入口把 0.4.4 与 v0.5 的必需数据集取并集，只打开一次 MySQL 一致性快照，两个策略分别保存自己的 read-view hash 和候选快照，并共享 `dual_input_hash`；不写正式 `selection_result`，也不改变 v0.5 的 `shadow_only/prototype` 状态。两个版本各自原子发布；对照分析只接受同一 `dual_input_hash` 的完整配对，任一侧失败时必须重跑，不能拿新旧快照拼接比较。
 

@@ -4,7 +4,7 @@ import json
 import unittest
 from datetime import date, datetime
 
-from app.api.routes.system import LATEST_DATES_SQL
+from app.api.routes.system import LATEST_DATES_SQL, LATEST_KLINE_COUNTS_SQL, _latest_dates
 from app.jobs.errors import error_fingerprint, infer_error_code, sanitize_error_message
 from app.jobs.readiness import (
     DATA_SNAPSHOT_SQL,
@@ -111,8 +111,11 @@ class WorkerReadinessTests(unittest.TestCase):
 
     def test_system_latest_dates_sql_has_rendered_completeness_policy(self):
         self.assertNotIn("{STOCK_", LATEST_DATES_SQL)
-        self.assertIn("COUNT(*) * 0.95", LATEST_DATES_SQL)
         self.assertIn("WHERE instrument_type='stock'", LATEST_DATES_SQL)
+        self.assertIn("FORCE INDEX (idx_trade_date)", LATEST_KLINE_COUNTS_SQL)
+        self.assertIn("ORDER BY trade_date DESC", LATEST_KLINE_COUNTS_SQL)
+        self.assertIn("LIMIT 20", LATEST_KLINE_COUNTS_SQL)
+        self.assertIn("STOCK_DAILY_COMPLETENESS_RATIO", __import__("inspect").getsource(_latest_dates))
 
 
 class StructuredErrorTests(unittest.TestCase):
