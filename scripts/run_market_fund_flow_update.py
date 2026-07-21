@@ -137,7 +137,9 @@ def fetch_rows(now: datetime, include_concept: bool = True) -> list[FundFlowRow]
 
 def save_rows(rows: list[FundFlowRow], retention_days: int) -> dict:
     if not rows:
-        return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_old_rows": 0}
+        return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_stale_snapshot_rows": 0, "deleted_old_rows": 0}
+
+    current_trade_date = max(row.trade_date for row in rows)
 
     values = [
         (
@@ -214,11 +216,18 @@ def save_rows(rows: list[FundFlowRow], retention_days: int) -> dict:
         with conn.cursor() as cursor:
             cursor.executemany(snapshot_sql, values)
             snapshot_rows = cursor.rowcount
+            cursor.execute("DELETE FROM market_sector_fund_flow_snapshot WHERE trade_date < %s", (current_trade_date,))
+            deleted_stale_snapshot_rows = cursor.rowcount
             cursor.executemany(intraday_sql, intraday_values)
             intraday_rows = cursor.rowcount
             cursor.execute("DELETE FROM market_sector_fund_flow_intraday WHERE trade_date < %s", (cutoff,))
             deleted_old_rows = cursor.rowcount
-    return {"snapshot_rows": snapshot_rows, "intraday_rows": intraday_rows, "deleted_old_rows": deleted_old_rows}
+    return {
+        "snapshot_rows": snapshot_rows,
+        "intraday_rows": intraday_rows,
+        "deleted_stale_snapshot_rows": deleted_stale_snapshot_rows,
+        "deleted_old_rows": deleted_old_rows,
+    }
 
 
 def main() -> None:

@@ -275,7 +275,7 @@ function renderBaseline(baseline = {}, container, overallEl) {
 }
 
 function baselineIcon(key) {
-  const map = { kline: '↕', fundamental: '▥', valuation: '◔', factor: 'Σ', realtime: 'ϟ', adjfactor: '⇄', moneyflow: '⇢', chip: '◍', fundflow: '≈', sentiment: '☻' };
+  const map = { kline: '↕', fundamental: '▥', valuation: '◔', factor: 'Σ', realtime: 'ϟ', adjfactor: '⇄', moneyflow: '⇢', moneyflow_realtime: '↯', chip: '◍', fundflow: '≈', sentiment: '☻' };
   return map[key] || '•';
 }
 

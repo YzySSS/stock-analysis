@@ -85,21 +85,41 @@ function renderChipPanel(chip) {
   `;
 }
 
-function renderMoneyflowPanel(moneyflow) {
+function renderMoneyflowPanel(moneyflow, realtimeMoneyflow) {
   const container = qs('#stock-detail-moneyflow');
   if (!container) return;
-  if (!moneyflow) {
+  if (!moneyflow && !realtimeMoneyflow) {
     container.innerHTML = '<div class="muted">暂无资金流数据</div>';
     return;
   }
-  const net = Number(moneyflow.net_mf_amount);
-  const labelClass = !Number.isNaN(net) && net > 0 ? 'up' : !Number.isNaN(net) && net < 0 ? 'down' : '';
-  container.innerHTML = `
-    <div><strong>资金状态</strong></div>
-    <div class="${labelClass}">${escapeHtml(moneyflow.label || '-')}</div>
-    <div><strong>净流入金额</strong></div>
-    <div class="${labelClass}">${formatMoneyWan(moneyflow.net_mf_amount)}</div>
-    <div><strong>净流入强度</strong></div>
+  const realtimeNet = Number(realtimeMoneyflow?.net_amount);
+  const realtimeClass = !Number.isNaN(realtimeNet) && realtimeNet > 0 ? 'up' : !Number.isNaN(realtimeNet) && realtimeNet < 0 ? 'down' : '';
+  const realtimeHtml = realtimeMoneyflow ? `
+    <div><strong>今日实时状态</strong></div>
+    <div class="${realtimeClass}">${escapeHtml(realtimeMoneyflow.label || '-')}</div>
+    <div><strong>实时净额</strong></div>
+    <div class="${realtimeClass}">${formatMoneyCN(realtimeMoneyflow.net_amount)}</div>
+    <div><strong>实时流入 / 流出</strong></div>
+    <div>${formatMoneyCN(realtimeMoneyflow.inflow_amount)} / ${formatMoneyCN(realtimeMoneyflow.outflow_amount)}</div>
+    <div><strong>净额占成交额</strong></div>
+    <div>${formatPercent(realtimeMoneyflow.net_flow_intensity_pct)}</div>
+    <div><strong>实时换手率</strong></div>
+    <div>${formatPercent(realtimeMoneyflow.turnover_rate)}</div>
+    <div><strong>实时报价时间</strong></div>
+    <div>${escapeHtml(formatChartTime(realtimeMoneyflow.quote_time))}</div>
+  ` : `
+    <div><strong>今日实时资金流</strong></div>
+    <div class="muted">当前股票暂无新鲜实时记录</div>
+  `;
+
+  const dailyNet = Number(moneyflow?.net_mf_amount);
+  const dailyClass = !Number.isNaN(dailyNet) && dailyNet > 0 ? 'up' : !Number.isNaN(dailyNet) && dailyNet < 0 ? 'down' : '';
+  const dailyHtml = moneyflow ? `
+    <div><strong>完整日资金状态</strong></div>
+    <div class="${dailyClass}">${escapeHtml(moneyflow.label || '-')}</div>
+    <div><strong>完整日净流入</strong></div>
+    <div class="${dailyClass}">${formatMoneyWan(moneyflow.net_mf_amount)}</div>
+    <div><strong>完整日净流入强度</strong></div>
     <div>${formatPercent(moneyflow.net_flow_intensity_pct)}</div>
     <div><strong>大/特大单净额</strong></div>
     <div>${formatMoneyWan(moneyflow.large_net_amount)}</div>
@@ -109,9 +129,14 @@ function renderMoneyflowPanel(moneyflow) {
     <div>${formatMoneyWan(moneyflow.buy_elg_amount)} / ${formatMoneyWan(moneyflow.sell_elg_amount)}</div>
     <div><strong>大单买 / 卖</strong></div>
     <div>${formatMoneyWan(moneyflow.buy_lg_amount)} / ${formatMoneyWan(moneyflow.sell_lg_amount)}</div>
-    <div><strong>数据日期</strong></div>
+    <div><strong>最近完整交易日</strong></div>
     <div>${escapeHtml(moneyflow.trade_date || '-')}</div>
+  ` : `
+    <div><strong>完整日资金拆单</strong></div>
+    <div class="muted">暂无日频资金流数据</div>
   `;
+
+  container.innerHTML = `${realtimeHtml}${dailyHtml}`;
 }
 
 function factorLabel(key) {
@@ -912,7 +937,7 @@ async function loadStockDetail() {
     renderOverviewConsole(overview);
     renderFactorScorePills(factorScores, latestSelection);
     renderChipPanel(data.chip);
-    renderMoneyflowPanel(data.moneyflow);
+    renderMoneyflowPanel(data.moneyflow, data.realtime_moneyflow);
 
     qs('#stock-detail-basic').innerHTML = `
       <div><strong>股票代码</strong></div>

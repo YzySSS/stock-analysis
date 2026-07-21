@@ -120,6 +120,11 @@ class DashboardRepository:
                     LEFT JOIN factor_input_daily fid ON fid.code = r.code
                       AND fid.trade_date = (SELECT MAX(trade_date) FROM factor_input_daily)
                     LEFT JOIN stock_realtime_moneyflow_snapshot mf ON mf.code = r.code
+                      AND mf.trade_date = r.trade_date
+                      AND mf.quote_time >= DATE_SUB(
+                          (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+                          INTERVAL 20 MINUTE
+                      )
                     LEFT JOIN stock_popularity_snapshot pop ON pop.code = r.code
                     WHERE sb.instrument_type = 'stock'
                       AND r.code NOT LIKE 'bj.%%'
@@ -362,6 +367,11 @@ class DashboardRepository:
                     SELECT {sector_columns}
                     FROM market_sector_fund_flow_snapshot
                     WHERE net_amount IS NOT NULL
+                      AND trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
+                      AND quote_time >= DATE_SUB(
+                          (SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot),
+                          INTERVAL 20 MINUTE
+                      )
                     ORDER BY net_amount DESC, pct_chg DESC
                     LIMIT 8
                     """
@@ -372,6 +382,11 @@ class DashboardRepository:
                     SELECT {sector_columns}
                     FROM market_sector_fund_flow_snapshot
                     WHERE net_amount IS NOT NULL
+                      AND trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
+                      AND quote_time >= DATE_SUB(
+                          (SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot),
+                          INTERVAL 20 MINUTE
+                      )
                     ORDER BY net_amount ASC, pct_chg ASC
                     LIMIT 8
                     """
@@ -381,6 +396,11 @@ class DashboardRepository:
                     """
                     SELECT MAX(quote_time) AS latest_fund_flow_time, COUNT(*) AS fund_flow_rows
                     FROM market_sector_fund_flow_snapshot
+                    WHERE trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
+                      AND quote_time >= DATE_SUB(
+                          (SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot),
+                          INTERVAL 20 MINUTE
+                      )
                     """
                 )
                 fund_flow_meta = cursor.fetchone() or {}
@@ -484,6 +504,7 @@ class DashboardRepository:
                     FROM market_sector_fund_flow_snapshot
                     WHERE sector_type = 'concept'
                       AND net_amount IS NOT NULL
+                      AND trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
                       AND quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
                     ORDER BY net_amount DESC, pct_chg DESC
                     LIMIT 40

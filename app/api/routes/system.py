@@ -464,10 +464,46 @@ def _data_baseline_summary() -> dict:
             realtime_total = int(realtime_row.get("total") or 0)
             realtime_valid = int(realtime_row.get("valid") or 0)
 
-            cursor.execute("SELECT COUNT(*) AS total, SUM(CASE WHEN net_amount IS NOT NULL THEN 1 ELSE 0 END) AS valid FROM market_sector_fund_flow_snapshot")
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN net_amount IS NOT NULL THEN 1 ELSE 0 END) AS valid,
+                    MAX(trade_date) AS latest_trade_date,
+                    MAX(quote_time) AS latest_quote_time
+                FROM market_sector_fund_flow_snapshot
+                WHERE trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
+                  AND quote_time >= DATE_SUB(
+                      (SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot),
+                      INTERVAL 20 MINUTE
+                  )
+                """
+            )
             fund_flow_row = cursor.fetchone() or {}
             fund_flow_total = int(fund_flow_row.get("total") or 0)
             fund_flow_valid = int(fund_flow_row.get("valid") or 0)
+            fund_flow_date = fund_flow_row.get("latest_trade_date")
+            fund_flow_time = fund_flow_row.get("latest_quote_time")
+
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN net_amount IS NOT NULL THEN 1 ELSE 0 END) AS valid,
+                    MAX(trade_date) AS latest_trade_date,
+                    MAX(quote_time) AS latest_quote_time
+                FROM stock_realtime_moneyflow_snapshot
+                WHERE trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
+                  AND quote_time >= DATE_SUB(
+                      (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+                      INTERVAL 20 MINUTE
+                  )
+                """
+            )
+            realtime_moneyflow_row = cursor.fetchone() or {}
+            realtime_moneyflow_valid = int(realtime_moneyflow_row.get("valid") or 0)
+            realtime_moneyflow_date = realtime_moneyflow_row.get("latest_trade_date")
+            realtime_moneyflow_time = realtime_moneyflow_row.get("latest_quote_time")
 
             cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM adj_factor_daily")
             adj_date = (cursor.fetchone() or {}).get("latest_trade_date")
@@ -499,9 +535,10 @@ def _data_baseline_summary() -> dict:
             {"key": "factor", "label": "因子输入", "value": pct(factor_count, total_stock), "done": factor_count, "total": total_stock, "unit": "记录数"},
             {"key": "realtime", "label": "实时快照", "value": pct(realtime_valid, realtime_total), "done": realtime_valid, "total": realtime_total, "unit": "记录数"},
             {"key": "adjfactor", "label": "复权因子", "value": pct(adj_count, total_stock), "done": adj_count, "total": total_stock, "unit": f"{adj_date or '-'} 记录数"},
-            {"key": "moneyflow", "label": "个股资金流", "value": pct(moneyflow_count, total_stock), "done": moneyflow_count, "total": total_stock, "unit": f"{moneyflow_date or '-'} 记录数"},
+            {"key": "moneyflow", "label": "个股资金流（日频）", "value": pct(moneyflow_count, total_stock), "done": moneyflow_count, "total": total_stock, "unit": f"{moneyflow_date or '-'} 完整交易日"},
+            {"key": "moneyflow_realtime", "label": "个股资金流（实时）", "value": pct(realtime_moneyflow_valid, total_stock), "done": realtime_moneyflow_valid, "total": total_stock, "unit": f"{realtime_moneyflow_time or realtime_moneyflow_date or '-'} 报价"},
             {"key": "chip", "label": "筹码数据", "value": pct(chip_count, total_stock), "done": chip_count, "total": total_stock, "unit": f"{chip_date or '-'} 记录数"},
-            {"key": "fundflow", "label": "板块资金流", "value": pct(fund_flow_valid, fund_flow_total), "done": fund_flow_valid, "total": fund_flow_total, "unit": "记录数"},
+            {"key": "fundflow", "label": "板块资金流（实时）", "value": pct(fund_flow_valid, fund_flow_total), "done": fund_flow_valid, "total": fund_flow_total, "unit": f"{fund_flow_time or fund_flow_date or '-'} 报价"},
             {"key": "sentiment", "label": "情绪质量", "value": sentiment.get("avg_quality"), "done": sentiment_effective, "total": sentiment_raw, "unit": "有效新闻 / 总新闻"},
         ]
     }

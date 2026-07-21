@@ -315,7 +315,8 @@ class SelectionRepository:
                     """
                     SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
                     FROM market_sector_fund_flow_snapshot
-                    WHERE quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
+                    WHERE trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
+                      AND quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
                     """
                 )
                 fund_rows = cursor.fetchall() or []
@@ -489,7 +490,13 @@ class SelectionRepository:
         LEFT JOIN factor_input_daily fid ON fid.code = sb.code AND fid.trade_date = dk.trade_date
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = sb.code AND mf.trade_date = dk.trade_date
         LEFT JOIN stock_realtime_snapshot realtime ON %s = 1 AND realtime.code = sb.code
-        LEFT JOIN stock_realtime_moneyflow_snapshot realtime_mf ON %s = 1 AND realtime_mf.code = sb.code
+        LEFT JOIN stock_realtime_moneyflow_snapshot realtime_mf ON %s = 1
+          AND realtime_mf.code = sb.code
+          AND realtime_mf.trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
+          AND realtime_mf.quote_time >= DATE_SUB(
+              (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+              INTERVAL 20 MINUTE
+          )
         LEFT JOIN stock_popularity_snapshot pop ON %s = 1 AND pop.code = sb.code
         LEFT JOIN stock_chip_daily chip ON chip.code = sb.code AND chip.trade_date = dk.trade_date
         LEFT JOIN stock_sentiment_daily ssd ON sb.code = ssd.code

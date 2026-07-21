@@ -106,19 +106,9 @@ def fetch_rows(now: datetime) -> list[RealtimeMoneyflowRow]:
     try:
         df = ak.stock_fund_flow_individual(symbol="即时")
     except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "source_unavailable",
-                    "source": SOURCE,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:300],
-                },
-                ensure_ascii=False,
-            ),
-            file=sys.stderr,
-        )
-        return []
+        raise RuntimeError(f"realtime moneyflow source unavailable: {type(exc).__name__}: {str(exc)[:300]}") from exc
+    if df is None or getattr(df, "empty", False):
+        raise RuntimeError("realtime moneyflow source returned an empty response")
     quote_time = now.strftime("%Y-%m-%d %H:%M:%S")
     quote_minute = minute_floor(now).strftime("%Y-%m-%d %H:%M:%S")
     trade_date = now.date().isoformat()
@@ -150,7 +140,9 @@ def fetch_rows(now: datetime) -> list[RealtimeMoneyflowRow]:
 
 def save_rows(rows: list[RealtimeMoneyflowRow], retention_days: int) -> dict:
     if not rows:
-        return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_old_rows": 0}
+        return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_stale_snapshot_rows": 0, "deleted_old_rows": 0}
+
+    current_trade_date = max(row.trade_date for row in rows)
 
     values = [
         (
@@ -218,11 +210,18 @@ def save_rows(rows: list[RealtimeMoneyflowRow], retention_days: int) -> dict:
         with conn.cursor() as cursor:
             cursor.executemany(snapshot_sql, values)
             snapshot_rows = cursor.rowcount
+            cursor.execute("DELETE FROM stock_realtime_moneyflow_snapshot WHERE trade_date < %s", (current_trade_date,))
+            deleted_stale_snapshot_rows = cursor.rowcount
             cursor.executemany(intraday_sql, intraday_values)
             intraday_rows = cursor.rowcount
             cursor.execute("DELETE FROM stock_realtime_moneyflow_intraday WHERE trade_date < %s", (cutoff,))
             deleted_old_rows = cursor.rowcount
-    return {"snapshot_rows": snapshot_rows, "intraday_rows": intraday_rows, "deleted_old_rows": deleted_old_rows}
+    return {
+        "snapshot_rows": snapshot_rows,
+        "intraday_rows": intraday_rows,
+        "deleted_stale_snapshot_rows": deleted_stale_snapshot_rows,
+        "deleted_old_rows": deleted_old_rows,
+    }
 
 
 def main() -> None:

@@ -216,6 +216,11 @@ class PortfolioRepository:
                            pct_chg, turnover_rate
                     FROM stock_realtime_moneyflow_snapshot
                     WHERE code IN ({placeholders})
+                      AND trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
+                      AND quote_time >= DATE_SUB(
+                          (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+                          INTERVAL 20 MINUTE
+                      )
                     """,
                     final_codes,
                 )

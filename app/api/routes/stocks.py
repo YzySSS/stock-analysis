@@ -29,6 +29,38 @@ def _round(value: float | None, digits: int = 2) -> float | None:
     return round(value, digits) if value is not None else None
 
 
+def _realtime_moneyflow_payload(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    net_amount = _to_float(row.get("net_amount"))
+    amount = _to_float(row.get("amount"))
+    if net_amount is None:
+        label = "实时资金待确认"
+    elif net_amount > 0:
+        label = "实时净流入"
+    elif net_amount < 0:
+        label = "实时净流出"
+    else:
+        label = "实时资金持平"
+    return {
+        "data_scope": "intraday_realtime",
+        "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+        "quote_time": str(row.get("quote_time")) if row.get("quote_time") else None,
+        "latest_price": _to_float(row.get("latest_price")),
+        "pct_chg": _to_float(row.get("pct_chg")),
+        "turnover_rate": _to_float(row.get("turnover_rate")),
+        "inflow_amount": _to_float(row.get("inflow_amount")),
+        "outflow_amount": _to_float(row.get("outflow_amount")),
+        "net_amount": net_amount,
+        "amount": amount,
+        "net_flow_intensity_pct": _round(net_amount / amount * 100, 2) if net_amount is not None and amount else None,
+        "label": label,
+        "source": row.get("source"),
+        "source_unit": row.get("source_unit") or "元",
+        "updated_at": str(row.get("updated_at")) if row.get("updated_at") else None,
+    }
+
+
 def _rank_percentile(rank: int | None, total: int | None) -> float | None:
     if not rank or not total or total <= 1:
         return None
@@ -567,6 +599,7 @@ def stock_detail(
                     sell_elg_amount,
                     net_mf_amount,
                     net_mf_vol,
+                    source,
                     updated_at
                 FROM stock_moneyflow_daily
                 WHERE code = %s
@@ -576,6 +609,34 @@ def stock_detail(
                 (code,),
             )
             moneyflow_row = cursor.fetchone()
+
+            cursor.execute(
+                """
+                SELECT
+                    trade_date,
+                    quote_time,
+                    latest_price,
+                    pct_chg,
+                    turnover_rate,
+                    inflow_amount,
+                    outflow_amount,
+                    net_amount,
+                    amount,
+                    source,
+                    source_unit,
+                    updated_at
+                FROM stock_realtime_moneyflow_snapshot
+                WHERE code = %s
+                  AND trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
+                  AND quote_time >= DATE_SUB(
+                      (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+                      INTERVAL 20 MINUTE
+                  )
+                LIMIT 1
+                """,
+                (code,),
+            )
+            realtime_moneyflow_row = cursor.fetchone()
 
             intraday_rows = []
             if intraday_limit > 0:
@@ -837,7 +898,13 @@ def stock_detail(
             if any(v is not None for v in (buy_sm_amount, buy_md_amount, sell_sm_amount, sell_md_amount))
             else None
         )
-        amount_base_yuan = (_to_float((realtime or {}).get("amount")) or (_to_float(latest_kline.get("amount")) if latest_kline else None))
+        moneyflow_trade_date = str(moneyflow_row.get("trade_date")) if moneyflow_row.get("trade_date") else None
+        latest_kline_trade_date = str(latest_kline.get("trade_date")) if latest_kline and latest_kline.get("trade_date") else None
+        amount_base_yuan = (
+            _to_float(latest_kline.get("amount"))
+            if latest_kline and moneyflow_trade_date == latest_kline_trade_date
+            else None
+        )
         amount_base_wan = amount_base_yuan / 10000 if amount_base_yuan else None
         net_flow_intensity_pct = (net_mf_amount / amount_base_wan * 100 if net_mf_amount is not None and amount_base_wan else None)
         large_flow_ratio_pct = (large_net_amount / amount_base_wan * 100 if large_net_amount is not None and amount_base_wan else None)
@@ -852,6 +919,7 @@ def stock_detail(
             elif net_mf_amount < 0:
                 moneyflow_label = "整体净流出"
         moneyflow = {
+            "data_scope": "completed_trade_day",
             "trade_date": str(moneyflow_row.get("trade_date")) if moneyflow_row.get("trade_date") else None,
             "net_mf_amount": net_mf_amount,
             "net_mf_vol": _to_float(moneyflow_row.get("net_mf_vol")),
@@ -864,8 +932,12 @@ def stock_detail(
             "net_flow_intensity_pct": _round(net_flow_intensity_pct, 2),
             "large_flow_ratio_pct": _round(large_flow_ratio_pct, 2),
             "label": moneyflow_label,
+            "source": moneyflow_row.get("source"),
+            "source_unit": "万元",
             "updated_at": str(moneyflow_row.get("updated_at")) if moneyflow_row.get("updated_at") else None,
         }
+
+    realtime_moneyflow = _realtime_moneyflow_payload(realtime_moneyflow_row)
 
     intraday = [
         {
@@ -936,6 +1008,7 @@ def stock_detail(
         },
         "chip": chip,
         "moneyflow": moneyflow,
+        "realtime_moneyflow": realtime_moneyflow,
         "latest_selection": latest_selection,
         "selection_history": selection_history,
         "recent_news": recent_news,
