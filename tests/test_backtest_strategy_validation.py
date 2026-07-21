@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from app.backtest.service import BacktestRequest, BacktestService
 from app.backtest.strategy_validation import (
@@ -285,8 +286,9 @@ class StrategyValidationPlanningTests(unittest.TestCase):
             validation_implementation_hash="1" * 64,
         )
 
-        with self.assertRaisesRegex(ValueError, "已分组的系统验证任务"):
-            BacktestService()._validate_request(request)
+        with patch("app.backtest.service.StrategyService.require_backtest_ready", return_value={"runtime_ready": True}):
+            with self.assertRaisesRegex(ValueError, "已分组的系统验证任务"):
+                BacktestService()._validate_request(request)
 
 
 if __name__ == "__main__":

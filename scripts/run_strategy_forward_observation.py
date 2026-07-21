@@ -26,10 +26,10 @@ from app.stock_selection.run_tasks import SelectionRunService
 
 TASK_NAME = "strategy_forward_observation_submit"
 LOCK_NAME = "strategy_forward_observation_submit_lock"
-PROTOCOL_ID = "a_share_sentiment_v0_3_1_after_close_v1"
+PROTOCOL_ID = "a_share_sentiment_v0_4_0_after_close_v1"
 STRATEGY_ID = "a_share_sentiment"
-STRATEGY_VERSION = "0.3.1"
-IMMUTABLE_TAG = "a-share-sentiment-v0.3.1"
+STRATEGY_VERSION = "0.4.0"
+IMMUTABLE_TAG = "a-share-sentiment-v0.4.0"
 EXECUTION_TIME = "16:20:00"
 STARTED_ON = "2026-07-21"
 BASE_REQUEST = {
@@ -54,9 +54,12 @@ FROZEN_SOURCE_PATHS = (
     "app/stock_selection/sentiment_refresh.py",
     "app/shared/strategy_loader.py",
     "app/shared/sentiment_scoring.py",
+    "app/shared/market_opinion_taxonomy.py",
     "app/data_ingestion/market_opinion_repository.py",
+    "app/data_ingestion/market_opinion_semantics.py",
     "app/data_ingestion/news_provider.py",
     "app/data_ingestion/intraday_bar_sync.py",
+    "scripts/run_market_opinion_update.py",
 )
 
 
@@ -164,7 +167,7 @@ def submit_observation(
             "protocol_id": protocol_spec.protocol_id,
         }
 
-    observation_id = f"asent_fwd_{today.strftime('%Y%m%d')}_v031"
+    observation_id = f"asent_fwd_{today.strftime('%Y%m%d')}_v040"
     observation = repository.reserve_observation(
         observation_id=observation_id,
         protocol_id=protocol_spec.protocol_id,

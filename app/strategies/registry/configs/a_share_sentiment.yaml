@@ -15,9 +15,14 @@ hard_filters:
   # 盘中深跌不接飞刀；-3%~-5% 只有强个股新闻还能保留观察资格。
   hard_realtime_loss_pct: -5
   soft_realtime_loss_pct: -3
+  # 即使当前已拉回，盘中曾深跌或振幅过大也只能进入观察级。
+  deep_v_low_pct: -8
+  max_tradable_intraday_amplitude_pct: 10
   strong_news_min_impact: 75
   # 板块候选池必须至少具备一定主题内辨识度；个股新闻直接命中不受该硬过滤限制。
   min_stock_recognition: 58
+  # 个股相关新闻按正负方向净计分；负面占优或仅中性提及不能作为直接新闻候选。
+  min_direct_stock_signed_score: 1
   # 事件驱动也不放明显亏损/ROE为负的票进入散户短线池。
   min_roe:
 

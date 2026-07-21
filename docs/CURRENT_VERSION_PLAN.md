@@ -26,7 +26,7 @@ Research Baseline 2026.07
 | TLS | Let’s Encrypt，当前有效期至 2026-10-16；Certbot 每日两轮自动续期，续期成功后校验并 reload Nginx |
 | 数据真相 | DQ1～DQ5 已完成：行情、历史股票状态、公告日基本面、历史指数成分均按 point-in-time 使用 |
 | 回测口径 | `close_signal_next_open_pit_index_universe_v5`；所有结果仍为 research-only |
-| 策略状态 | 11 条可加载、7 条数据就绪、2 条普通选股可执行、2 条仅研究回测、0 条通过交易有效性验证；A 股舆情为 `0.3.1` |
+| 策略状态 | 11 条可加载、7 条数据就绪、2 条普通选股可执行、2 条仅研究回测、0 条通过交易有效性验证；A 股舆情为 `0.4.0` |
 | 默认策略 | 无；普通选股必须由用户显式选择 `strategy_id` |
 | 页面性能 | Tracking、Dashboard、Portfolio、Selection、Backtest 均有统一冷/热预算证据；唯一超预算项 Dashboard 已从约 3.39s 降至 0.40s |
 
@@ -34,7 +34,7 @@ Research Baseline 2026.07
 
 - `lowvol_reversal`、`v13_three_factor`：2025-07-01～2026-06-30 冻结历史诊断均未通过，退出普通选股，只保留研究回测。
 - `v12_legacy`、`a_share_sentiment`：工程上可执行，但都未通过交易有效性验证；系统不会自动选中它们。
-- `a_share_sentiment 0.3.1`：从 2026-07-21 起按固定 60 分底线、最多 3 只和收盘后 16:20 时点前瞻观察；20 天或 50 个候选只进入 `preliminary_ready`，仍保持 `unvalidated`。
+- `a_share_sentiment 0.4.0`：已修复股票—板块关系、新闻方向、主题资金映射、候选截断、深 V 分级和公告日基本面口径；旧版结果保留但退出有效统计，0.4.0 从新协议重新积累前瞻样本，仍保持 `unvalidated`。
 - 其余策略：原型或仅展示，不进入普通运行入口。
 - 两份 2026-07-20～2027-01-31 的真正前瞻协议保持冻结；实现指纹仍为 `MATCH`，窗口闭合前不执行、不调参。
 
@@ -54,7 +54,7 @@ Research Baseline 2026.07
 | 核心数据质量 | 已完成首轮 | DQ1～DQ5 离线审计、快照展示、已知缺口 fail-closed |
 | 策略历史诊断 | 已完成 | 两条冻结诊断均失败，失败归因已完成，不创建执行修补型 V14 |
 | 下一策略研究章程 | 已完成协议层 | `next_strategy_research_v1` 已冻结并加 SHA-256 锁；未写新策略、未创建验证协议、未运行回测 |
-| A 股舆情前瞻观察 | 已完成工程闭环 | 固定协议、零候选日、AI/fallback 分段、1/3/5/20 日收益、三宽基超额、MFE/MAE 与不可变源码标签 |
+| A 股舆情前瞻观察 | 已完成语义整改 | 0.4.0 重新冻结关系、方向、资金、深 V 与 PIT 基本面口径；旧结果可追溯但不混入新统计 |
 | 建议与执行复盘 | 已完成第一版 | 策略页分开呈现建议质量与用户纪律；支持看过/保存/买入/跳过/卖出动作流水，不冒充券商成交 |
 | 下一策略 factor spec | 已冻结 | `pit_quality_trend_liquidity_factor_spec_v1` 已锁公式、阈值、候选日志和哈希；历史调整因子覆盖为 0，实施锁 fail-closed |
 | 跟踪复盘性能 | 已完成第一阶段 | 冷请求从约 3.60s 降至 0.244s，热请求约 0.035s；真实交易日边界同时修正 |
@@ -121,7 +121,7 @@ Research Baseline 2026.07
 
 按实际执行顺序：
 
-1. **FWD-OBS 前瞻样本积累**：从 2026-07-21 起自动运行；窗口内只采集和展示，不调参数、不提前宣布验证通过。
+1. **FWD-OBS 前瞻样本积累**：从 `a_share_sentiment 0.4.0` 部署日起按新协议重新采集；窗口内只采集和展示，不调参数、不提前宣布验证通过。
 2. **DQ-ONGOING 已知缺口观察**：可行动缺口已归零；保留 `sh.689009` 历史名称未知、`bj.920305` 上游分类矛盾和指数月度快照近似等事实警告，不猜值。
 3. **STR-4 下一策略 implementation lock**：按已冻结 factor spec 实现独立策略、PIT 输入、原始开盘成交和复权总回报，冻结源码/配置/方法论指纹；锁定前不跑历史诊断。
 
@@ -158,7 +158,8 @@ Research Baseline 2026.07
 - [`strategy_oos_validation_2026-07-17.md`](./strategy_oos_validation_2026-07-17.md)：冻结历史诊断与真正前瞻协议。
 - [`strategy_failure_attribution_2026-07-18.md`](./strategy_failure_attribution_2026-07-18.md)：失败原因与下一策略研究边界。
 - [`next_strategy_research_protocol_2026-07-18.md`](./next_strategy_research_protocol_2026-07-18.md)：下一策略不可变研究章程、时间分区、执行成本与人工晋级合同。
-- [`a_share_sentiment_forward_observation_2026-07-21.md`](./a_share_sentiment_forward_observation_2026-07-21.md)：A 股舆情 0.3.1 的固定前瞻观察、收益口径和用户动作复盘合同。
+- [`a_share_sentiment_forward_observation_v0_4_0_2026-07-21.md`](./a_share_sentiment_forward_observation_v0_4_0_2026-07-21.md)：A 股舆情 0.4.0 的语义修正、证据重置与固定前瞻观察合同。
+- [`a_share_sentiment_forward_observation_2026-07-21.md`](./a_share_sentiment_forward_observation_2026-07-21.md)：A 股舆情 0.3.1 的历史合同，仅作追溯，不代表当前口径。
 - [`adjustment_factor_history_readiness_2026-07-21.md`](./adjustment_factor_history_readiness_2026-07-21.md)：历史复权因子补齐、股票口径覆盖率、停牌缺口与不可变数据证据锁。
 - [`page_response_performance_2026-07-19.md`](./page_response_performance_2026-07-19.md)：四个主要页面的统一预算、实测基线和逐页整改证据。
 

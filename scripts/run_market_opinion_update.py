@@ -6,7 +6,6 @@ import json
 import re
 import sys
 import time
-import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time, timedelta
@@ -24,38 +23,19 @@ from app.data_ingestion.newsnow_client import (  # noqa: E402
     NewsNowItem,
 )
 from app.data_ingestion.market_opinion_repository import save_sector_summaries_normalized  # noqa: E402
+from app.data_ingestion.market_opinion_semantics import (  # noqa: E402
+    classify_opinion_direction,
+    classify_sector_direction,
+    normalize_opinion_text,
+    opinion_direction_multiplier,
+    stock_sector_relation,
+)
 from app.shared.db import mysql_conn  # noqa: E402
+from app.shared.market_opinion_taxonomy import THEME_INDUSTRY_HINTS, THEME_KEYWORDS  # noqa: E402
 from app.shared.task_log import TaskRunLogger  # noqa: E402
 
 TASK_NAME = "market_opinion_update"
 LOCK_NAME = "market_opinion_update_lock"
-
-NEGATIVE_KEYWORDS = [
-    "减持",
-    "处罚",
-    "问询",
-    "立案",
-    "退市",
-    "亏损",
-    "暴雷",
-    "事故",
-    "召回",
-    "停产",
-    "裁员",
-    "制裁",
-    "禁令",
-    "造假",
-    "下滑",
-    "大跌",
-    "跌停",
-    "跌超",
-    "下挫",
-    "跳水",
-    "杀跌",
-    "调整",
-    "冲高回落",
-    "风险提示",
-]
 
 EVENT_KEYWORDS: list[tuple[str, str, int]] = [
     ("policy", r"政策|国常会|发改委|工信部|财政部|商务部|央行|证监会|国务院|印发|支持|试点|补贴", 30),
@@ -84,48 +64,6 @@ TIME_DECAY_PROFILES: dict[str, dict[str, Any]] = {
     "negative_risk": {"fresh": 1, "active": 3, "cooling": 7, "expires": 30, "long_lived": False},
     "short_lived_risk": {"fresh": 1, "active": 3, "cooling": 7, "expires": 14, "long_lived": False},
     "general": {"fresh": 1, "active": 3, "cooling": 7, "expires": 30, "long_lived": False},
-}
-
-THEME_KEYWORDS: dict[str, list[str]] = {
-    "AI算力": ["人工智能", "AI", "大模型", "算力", "数据中心", "GPU", "云计算", "智能体"],
-    "机器人": ["机器人", "人形机器人", "具身智能", "减速器", "伺服", "机器视觉"],
-    "半导体": ["半导体", "芯片", "国产芯片", "晶圆", "光刻", "光刻胶", "封测", "存储", "先进封装", "PCB", "EDA"],
-    "新能源车": ["新能源车", "汽车", "智能驾驶", "自动驾驶", "车路云", "无人驾驶", "车企"],
-    "锂电池": ["锂电", "电池", "固态电池", "钠电池", "储能", "正极", "负极", "电解液"],
-    "绿电": ["绿电", "绿色电力", "绿电直连", "新型电力系统", "虚拟电厂", "特高压", "风电", "光伏", "水电", "核电"],
-    "低空经济": ["低空经济", "无人机", "eVTOL", "飞行汽车", "通航"],
-    "军工航天": ["军工", "航天", "卫星", "商业航天", "火箭", "北斗"],
-    "医药": ["医药", "创新药", "减肥药", "疫苗", "医疗器械", "CXO", "药企"],
-    "有色金属": ["有色", "铜", "铝", "黄金", "稀土", "锂矿", "钴", "镍"],
-    "化工农业": ["化肥", "农药", "粮食", "种业", "农产品", "尿素"],
-    "油气": ["石油", "原油", "燃油", "油价", "天然气", "LNG"],
-    # Keep the financial theme narrow. Plain "证券" often appears as a research
-    # house speaker (e.g. "中信证券：看好AI") or in overseas/SEC headlines, while
-    # generic central-bank/rate-cut news is macro liquidity rather than a direct
-    # A-share brokerage/financial-stock catalyst.
-    "金融": ["证券公司", "证券板块", "证券股", "券商", "券商ETF", "中证协", "保险", "银行股", "银行指数", "银行板块", "并购重组"],
-    "房地产": ["房地产", "地产", "楼市", "房贷", "城中村"],
-    "消费": ["消费", "白酒", "食品", "旅游", "免税", "零售", "餐饮"],
-    "传媒游戏": ["游戏", "短剧", "影视", "传媒", "版权", "广告"],
-}
-
-THEME_INDUSTRY_HINTS: dict[str, list[str]] = {
-    "AI算力": ["软件服务", "通信设备", "IT设备", "半导体", "元器件", "互联网"],
-    "机器人": ["专用机械", "机械基件", "电器仪表", "元器件", "软件服务"],
-    "半导体": ["半导体", "元器件", "IT设备", "互联网"],
-    "新能源车": ["汽车整车", "汽车配件", "电气设备", "元器件", "IT设备"],
-    "锂电池": ["电气设备", "化工原料", "小金属", "汽车配件"],
-    "绿电": ["新型电力", "水力发电", "电气设备"],
-    "低空经济": ["航空", "通信设备", "运输设备", "专用机械"],
-    "军工航天": ["航空", "船舶", "通信设备", "专用机械"],
-    "医药": ["化学制药", "生物制药", "医疗保健", "中成药", "医药商业"],
-    "有色金属": ["小金属", "铜", "铝", "铅锌", "黄金"],
-    "化工农业": ["农药化肥", "种植业", "农业综合", "饲料", "化工原料"],
-    "油气": ["石油开采", "石油加工", "供气供热"],
-    "金融": ["证券", "银行", "保险", "多元金融"],
-    "房地产": ["全国地产", "区域地产", "房产服务", "园区开发"],
-    "消费": ["食品", "白酒", "旅游景点", "旅游服务", "家用电器", "百货"],
-    "传媒游戏": ["影视音像", "出版业", "广告包装", "互联网", "文教休闲"],
 }
 
 GENERIC_INDUSTRIES = {"互联网", "综合类", "其他行业"}
@@ -234,7 +172,7 @@ def parse_datetime_arg(value: str | None) -> datetime:
 
 
 def normalize_text(value: str) -> str:
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value or ""))
+    return normalize_opinion_text(value)
 
 
 def is_research_house_speaker(text: str, alias: str | None = None) -> bool:
@@ -308,11 +246,10 @@ def source_score(item: NewsNowItem) -> float:
 
 def importance_score(title: str, summary: str | None = None) -> tuple[float, str, str]:
     text = f"{title} {summary or ''}"
-    direction = "neutral"
+    direction = classify_opinion_direction(title, summary)
     score = 42.0
     event_type = "general"
-    if any(keyword in text for keyword in NEGATIVE_KEYWORDS):
-        direction = "negative"
+    if direction == "negative":
         score += 18
         event_type = "short_lived_risk" if SHORT_LIVED_RISK_PATTERN.search(text) else "negative_risk"
     for kind, pattern, bonus in EVENT_KEYWORDS:
@@ -326,8 +263,6 @@ def importance_score(title: str, summary: str | None = None) -> tuple[float, str
         score += 8
     if re.search(r"传闻|网传|据称|或将|可能", text):
         score -= 10
-    if direction == "neutral" and score >= 65:
-        direction = "positive"
     return clamp(score), direction, event_type
 
 
@@ -393,6 +328,34 @@ def amplification_score(item: NewsNowItem) -> float:
 def impact_score(src: float, importance: float, amplification: float, timeliness: float = 100.0) -> float:
     base = src * 0.25 + importance * 0.38 + amplification * 0.22 + timeliness * 0.15
     return clamp(base * (0.35 + 0.65 * max(timeliness, 0) / 100))
+
+
+def sector_opinion_score(
+    *,
+    weighted_signed_impact: float,
+    positive_news_count: int,
+    positive_source_count: int,
+    positive_stock_count: int,
+    average_positive_timeliness: float,
+    negative_news_count: int,
+) -> float:
+    """Score a sector only from positive directional evidence.
+
+    Neutral headlines remain visible in the snapshot, but their volume,
+    sources and freshness cannot manufacture a hot-sector score.
+    """
+
+    if positive_news_count <= 0:
+        return 0.0
+    negative_penalty = min(max(negative_news_count, 0) * 2.0, 18.0)
+    return clamp(
+        max(weighted_signed_impact, 0.0) * 0.72
+        + min(max(positive_news_count, 0), 20) * 1.5
+        + min(max(positive_source_count, 0), 8) * 3.0
+        + min(max(positive_stock_count, 0), 10) * 1.6
+        + max(average_positive_timeliness, 0.0) * 0.08
+        - negative_penalty
+    )
 
 
 def match_stocks(item: NewsNowItem, refs: list[StockRef]) -> list[dict[str, Any]]:
@@ -556,6 +519,7 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
     sql = """
     SELECT
         sec.sector_type, sec.sector_name, sec.match_score AS sector_match_score,
+        sec.match_reason AS sector_match_reason,
         r.id AS raw_id, r.title, r.summary, r.source_id, r.source_name, r.impact_score, r.direction, r.event_type,
         r.source_score, r.importance_score, r.amplification_score,
         COALESCE(r.published_at, r.first_seen_at, r.crawl_time) AS usable_at,
@@ -582,6 +546,7 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
                 "sector_name": row["sector_name"],
                 "raw": {},
                 "sources": set(),
+                "positive_sources": set(),
                 "stocks": {},
                 "positive_news_count": 0,
                 "negative_news_count": 0,
@@ -603,7 +568,13 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
                 float(row.get("amplification_score") or 0),
                 float(time_info["score"] or 0),
             )
-            signed = -current_impact if row.get("direction") == "negative" else current_impact
+            sector_direction = classify_sector_direction(
+                title=row.get("title"),
+                summary=row.get("summary"),
+                sector_type=row.get("sector_type"),
+                sector_name=row.get("sector_name"),
+            )
+            signed = current_impact * opinion_direction_multiplier(sector_direction.direction)
             bucket["raw"][raw_id] = {
                 "raw_id": raw_id,
                 "title": row["title"],
@@ -611,7 +582,9 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
                 "source_name": row["source_name"],
                 "impact_score": current_impact,
                 "signed_score": signed,
-                "direction": row["direction"],
+                "direction": sector_direction.direction,
+                "article_direction": row["direction"],
+                "direction_context": sector_direction.context,
                 "event_type": row["event_type"],
                 "published_at": str(row["usable_at"]),
                 "timeliness_score": time_info["score"],
@@ -620,10 +593,11 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
                 "effective_until": time_info["effective_until"].strftime("%Y-%m-%d %H:%M:%S"),
             }
             bucket["sources"].add(row["source_id"])
-            if row.get("direction") == "negative":
+            if sector_direction.direction == "negative":
                 bucket["negative_news_count"] += 1
-            elif row.get("direction") == "positive":
+            elif sector_direction.direction == "positive":
                 bucket["positive_news_count"] += 1
+                bucket["positive_sources"].add(row["source_id"])
         if row.get("code"):
             news = bucket["raw"].get(raw_id)
             if not news:
@@ -633,6 +607,27 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
             code_digits = str(row.get("code") or "").split(".")[-1]
             if stock_name and normalize_text(stock_name) not in raw_text and code_digits not in raw_text:
                 continue
+            relation = stock_sector_relation(
+                title=row.get("title"),
+                summary=row.get("summary"),
+                stock_name=stock_name,
+                stock_code=row.get("code"),
+                stock_industry=row.get("industry"),
+                sector_type=row.get("sector_type"),
+                sector_name=row.get("sector_name"),
+            )
+            if not relation.supported:
+                continue
+            relation_direction = classify_opinion_direction(relation.context or row.get("title"), None)
+            stock_signed_score = float(news["impact_score"] or 0) * opinion_direction_multiplier(relation_direction)
+            stock_news = {
+                **news,
+                "direction": relation_direction,
+                "signed_score": stock_signed_score,
+                "relation_score": relation.score,
+                "relation_reason": relation.reason,
+                "relation_context": relation.context,
+            }
             stock = bucket["stocks"].setdefault(
                 row["code"],
                 {
@@ -643,12 +638,18 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
                     "news_count": 0,
                     "matched_news": [],
                     "match_type": "direct_news_match",
-                    "match_reason": row.get("stock_match_reason") or "新闻直接命中股票",
+                    "match_reason": f"新闻直接命中股票；{relation.reason}",
                 },
             )
-            stock["score"] += float(news["impact_score"] or 0) * float(row.get("stock_match_score") or 70) / 100
+            stock["score"] += (
+                stock_signed_score
+                * float(row.get("stock_match_score") or 70)
+                / 100
+                * float(relation.score or 0)
+                / 100
+            )
             stock["news_count"] += 1
-            stock["matched_news"].append(news)
+            stock["matched_news"].append(stock_news)
 
     summaries: list[dict[str, Any]] = []
     for bucket in grouped.values():
@@ -657,17 +658,28 @@ def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any
             continue
         weighted = sum(item["signed_score"] for item in news_items) / len(news_items)
         avg_timeliness = sum(float(item.get("timeliness_score") or 0) for item in news_items) / len(news_items)
+        positive_news_items = [item for item in news_items if item.get("direction") == "positive"]
+        avg_positive_timeliness = (
+            sum(float(item.get("timeliness_score") or 0) for item in positive_news_items) / len(positive_news_items)
+            if positive_news_items
+            else 0.0
+        )
         source_count = len(bucket["sources"])
         stock_count = len(bucket["stocks"])
         news_count = len(news_items)
-        negative_penalty = min(bucket["negative_news_count"] * 2.0, 18.0)
-        sector_score = clamp(
-            max(weighted, 0) * 0.68
-            + min(news_count, 20) * 1.25
-            + min(source_count, 8) * 3.0
-            + min(stock_count, 10) * 1.6
-            + avg_timeliness * 0.10
-            - negative_penalty
+        positive_stock_count = sum(
+            1
+            for stock in bucket["stocks"].values()
+            if float(stock.get("score") or 0) > 0
+            and any(news.get("direction") == "positive" for news in stock.get("matched_news") or [])
+        )
+        sector_score = sector_opinion_score(
+            weighted_signed_impact=weighted,
+            positive_news_count=bucket["positive_news_count"],
+            positive_source_count=len(bucket["positive_sources"]),
+            positive_stock_count=positive_stock_count,
+            average_positive_timeliness=avg_positive_timeliness,
+            negative_news_count=bucket["negative_news_count"],
         )
         top_news = sorted(news_items, key=lambda r: abs(r["signed_score"]), reverse=True)[:5]
         for stock in bucket["stocks"].values():

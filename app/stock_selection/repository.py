@@ -275,9 +275,24 @@ class SelectionRepository:
         *,
         requested_as_of: str | None,
         latest_candidate_trade_date: str | None,
+        allowed_sector_types: Sequence[str] | None = None,
+        excluded_sector_names: Sequence[str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        sector_filters: list[str] = []
+        sector_filter_params: list[Any] = []
+        normalized_types = sorted({str(value).strip() for value in (allowed_sector_types or []) if str(value).strip()})
+        normalized_excluded = sorted({str(value).strip() for value in (excluded_sector_names or []) if str(value).strip()})
+        if normalized_types:
+            placeholders = ",".join(["%s"] * len(normalized_types))
+            sector_filters.append(f"sector_type IN ({placeholders})")
+            sector_filter_params.extend(normalized_types)
+        if normalized_excluded:
+            placeholders = ",".join(["%s"] * len(normalized_excluded))
+            sector_filters.append(f"sector_name NOT IN ({placeholders})")
+            sector_filter_params.extend(normalized_excluded)
+        sector_filter_sql = "" if not sector_filters else "\n              AND " + "\n              AND ".join(sector_filters)
         if requested_as_of:
-            sql = """
+            sql = f"""
             SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
                    news_count, source_count, stock_count, positive_news_count, negative_news_count,
                    top_stocks_json, top_news_json, source_json
@@ -287,12 +302,13 @@ class SelectionRepository:
                 FROM sector_opinion_daily
                 WHERE as_of_datetime <= %s
             )
+            {sector_filter_sql}
             ORDER BY sector_score DESC
             LIMIT 30
             """
-            params: Sequence[Any] = (requested_as_of,)
+            params: Sequence[Any] = (requested_as_of, *sector_filter_params)
         else:
-            sql = """
+            sql = f"""
             SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
                    news_count, source_count, stock_count, positive_news_count, negative_news_count,
                    top_stocks_json, top_news_json, source_json
@@ -302,10 +318,11 @@ class SelectionRepository:
                 FROM sector_opinion_daily
                 WHERE (%s IS NULL OR trade_date >= %s)
             )
+            {sector_filter_sql}
             ORDER BY sector_score DESC
             LIMIT 30
             """
-            params = (latest_candidate_trade_date, latest_candidate_trade_date)
+            params = (latest_candidate_trade_date, latest_candidate_trade_date, *sector_filter_params)
 
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -327,6 +344,9 @@ class SelectionRepository:
         *,
         daily_kline_operator: str | None,
         cutoff_date: str | None,
+        use_pit_fundamental: bool,
+        fundamental_date_operator: str,
+        fundamental_as_of_date: str,
         use_realtime: bool,
         use_current_popularity: bool,
         instrument_type: str,
@@ -344,6 +364,27 @@ class SelectionRepository:
             daily_kline_recent_filter = f"WHERE trade_date {daily_kline_operator} %s"
             daily_kline_window_filter = f"AND trade_date {daily_kline_operator} %s"
             cutoff_params = [cutoff_date, cutoff_date, cutoff_date]
+        if fundamental_date_operator not in {"<", "<="} or not fundamental_as_of_date:
+            raise ValueError("invalid fundamental PIT cutoff")
+        if use_pit_fundamental:
+            fundamental_join_sql = f"""
+            LEFT JOIN stock_fundamental_pit fp ON fp.id = (
+                SELECT fp2.id
+                FROM stock_fundamental_pit fp2
+                WHERE fp2.code = sb.code
+                  AND fp2.announcement_date {fundamental_date_operator} %s
+                  AND fp2.period_end_date <= %s
+                ORDER BY fp2.period_end_date DESC,
+                         fp2.announcement_date DESC,
+                         fp2.update_flag DESC,
+                         fp2.id DESC
+                LIMIT 1
+            )
+            """
+            fundamental_params: list[Any] = [fundamental_as_of_date, fundamental_as_of_date]
+        else:
+            fundamental_join_sql = "LEFT JOIN stock_fundamental_pit fp ON 1 = 0"
+            fundamental_params = []
         market_board_filter = self.market_board_filter_sql(market_board)
         sql = """
         SELECT
@@ -361,6 +402,18 @@ class SelectionRepository:
             sb.revenue_yoy,
             sb.profit_yoy,
             sb.eps,
+            sb.fundamental_period AS legacy_fundamental_period,
+            fp.roe AS pit_roe,
+            fp.roa AS pit_roa,
+            fp.grossprofit_margin AS pit_grossprofit_margin,
+            fp.netprofit_margin AS pit_netprofit_margin,
+            fp.revenue_yoy AS pit_revenue_yoy,
+            fp.profit_yoy AS pit_profit_yoy,
+            fp.eps AS pit_eps,
+            fp.period_end_date AS pit_fundamental_period,
+            fp.announcement_date AS pit_fundamental_publish_date,
+            fp.source AS pit_fundamental_source,
+            (fp.id IS NOT NULL) AS pit_fundamental_available,
             dk.open,
             dk.high,
             dk.low,
@@ -440,6 +493,7 @@ class SelectionRepository:
             mcd.csi500_pct_chg,
             mcd.csi1000_pct_chg
         FROM stock_basic sb
+        {fundamental_join_sql}
         LEFT JOIN (
             SELECT d1.code, d1.trade_date, d1.open, d1.high, d1.low, d1.close, d1.amount
             FROM daily_kline d1
@@ -537,9 +591,11 @@ class SelectionRepository:
             daily_kline_latest_filter=daily_kline_latest_filter,
             daily_kline_recent_filter=daily_kline_recent_filter,
             daily_kline_window_filter=daily_kline_window_filter,
+            fundamental_join_sql=fundamental_join_sql,
             market_board_filter=market_board_filter,
         )
         params = [
+            *fundamental_params,
             *cutoff_params,
             1 if use_realtime else 0,
             1 if use_realtime else 0,

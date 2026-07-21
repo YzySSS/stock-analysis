@@ -7,27 +7,11 @@ from typing import Any, Dict, List, Optional
 
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
 from app.shared.sentiment_scoring import enrich_opinion_news_item
+from app.shared.market_opinion_taxonomy import THEME_FUND_FLOW_ANCHORS, THEME_INDUSTRY_HINTS
 from app.shared.strategy_loader import StrategyLoader
 from app.stock_selection.repository import SelectionRepository
 from app.stock_selection.trade_plan import build_selection_trade_plan
 
-
-THEME_INDUSTRY_HINTS: Dict[str, set[str]] = {
-    "AI算力": {"软件服务", "通信设备", "IT设备", "半导体", "元器件", "互联网"},
-    "机器人": {"专用机械", "机械基件", "电器仪表", "元器件", "软件服务", "运输设备", "汽车配件"},
-    "半导体": {"半导体", "元器件", "IT设备", "互联网"},
-    "绿电": {"新型电力", "水力发电", "电气设备"},
-    "锂电池": {"电气设备", "化工原料", "小金属", "汽车配件"},
-}
-
-THEME_FUND_FLOW_ALIASES: Dict[str, List[str]] = {
-    "AI算力": ["AI算力", "算力", "数据中心", "液冷服务器", "CPO", "东数西算"],
-    "机器人": ["机器人", "人形机器人", "机器人概念", "减速器"],
-    "半导体": ["半导体", "芯片", "第三代半导体", "先进封装"],
-    "低空经济": ["低空经济", "飞行汽车", "无人机", "eVTOL"],
-    "军工航天": ["军工", "航天", "商业航天", "卫星导航"],
-    "锂电池": ["锂电池", "固态电池", "动力电池"],
-}
 
 THEME_TIER_LABELS = {
     "mainline": "主线命中",
@@ -153,28 +137,24 @@ class StockSelector:
         return StockSelector._round_score(50 + max(-80.0, min(net, 80.0)) * 0.5 + max(-5.0, min(pct, 5.0)) * 6)
 
     @staticmethod
-    def _theme_aliases(theme_name: str) -> List[str]:
-        aliases = THEME_FUND_FLOW_ALIASES.get(theme_name, [])
-        return [theme_name, *[alias for alias in aliases if alias != theme_name]]
-
-    @staticmethod
     def _match_theme_fund_flow(theme_name: str, fund_rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        aliases = [alias for alias in StockSelector._theme_aliases(theme_name) if alias]
-        if not aliases:
+        anchor = THEME_FUND_FLOW_ANCHORS.get(theme_name)
+        if not anchor:
             return None
-        best: Optional[Dict[str, Any]] = None
-        best_score = -1.0
+        expected_type, expected_name = anchor
         for row in fund_rows:
+            sector_type = str(row.get("sector_type") or "")
             sector_name = str(row.get("sector_name") or "")
-            if not sector_name:
-                continue
-            if not any(alias in sector_name or sector_name in alias for alias in aliases):
+            if sector_type != expected_type or sector_name != expected_name:
                 continue
             fund_score = StockSelector._fund_flow_score(row.get("net_amount"), row.get("pct_chg"))
-            if fund_score > best_score:
-                best_score = fund_score
-                best = {**row, "fund_flow_score": fund_score}
-        return best
+            return {
+                **row,
+                "fund_flow_score": fund_score,
+                "mapping_mode": "exact_representative_anchor",
+                "mapped_theme": theme_name,
+            }
+        return None
 
     @staticmethod
     def _stock_recognition_context(stock: Dict[str, Any], rank: int, stock_count: int, match_type: str | None) -> Dict[str, Any]:
@@ -394,13 +374,24 @@ class StockSelector:
     def _build_candidate(self, row: Dict[str, Any]) -> Dict[str, Any]:
         pe = float(row["pe_tushare"]) if row.get("pe_tushare") is not None else None
         pb = float(row["pb_tushare"]) if row.get("pb_tushare") is not None else None
-        roe = float(row["roe"]) if row.get("roe") is not None else None
-        roa = float(row["roa"]) if row.get("roa") is not None else None
-        grossprofit_margin = float(row["grossprofit_margin"]) if row.get("grossprofit_margin") is not None else None
-        netprofit_margin = float(row["netprofit_margin"]) if row.get("netprofit_margin") is not None else None
-        revenue_yoy = float(row["revenue_yoy"]) if row.get("revenue_yoy") is not None else None
-        profit_yoy = float(row["profit_yoy"]) if row.get("profit_yoy") is not None else None
-        eps = float(row["eps"]) if row.get("eps") is not None else None
+        use_pit_fundamental = self.strategy_id == "a_share_sentiment"
+        fundamental_prefix = "pit_" if use_pit_fundamental else ""
+
+        def fundamental_value(name: str) -> float | None:
+            value = row.get(f"{fundamental_prefix}{name}")
+            return float(value) if value is not None else None
+
+        roe = fundamental_value("roe")
+        roa = fundamental_value("roa")
+        grossprofit_margin = fundamental_value("grossprofit_margin")
+        netprofit_margin = fundamental_value("netprofit_margin")
+        revenue_yoy = fundamental_value("revenue_yoy")
+        profit_yoy = fundamental_value("profit_yoy")
+        eps = fundamental_value("eps")
+        fundamental_period = row.get("pit_fundamental_period") if use_pit_fundamental else row.get("legacy_fundamental_period")
+        fundamental_publish_date = row.get("pit_fundamental_publish_date") if use_pit_fundamental else None
+        fundamental_source = row.get("pit_fundamental_source") if use_pit_fundamental else "stock_basic_legacy_snapshot"
+        pit_fundamental_available = bool(row.get("pit_fundamental_available")) if use_pit_fundamental else None
         close = float(row["close"]) if row.get("close") is not None else None
         amount = float(row["amount"]) if row.get("amount") is not None else None
         open_price = float(row["open"]) if row.get("open") is not None else None
@@ -437,6 +428,24 @@ class StockSelector:
         intraday_open_drawdown_pct = (
             (realtime_price - realtime_open) / realtime_open * 100
             if realtime_price is not None and realtime_open and realtime_open > 0
+            else None
+        )
+        intraday_low_pct = (
+            (realtime_low - realtime_pre_close) / realtime_pre_close * 100
+            if realtime_low is not None and realtime_pre_close and realtime_pre_close > 0
+            else None
+        )
+        intraday_amplitude_pct = (
+            (realtime_high - realtime_low) / realtime_pre_close * 100
+            if realtime_high is not None
+            and realtime_low is not None
+            and realtime_pre_close
+            and realtime_pre_close > 0
+            else None
+        )
+        intraday_repair_pct = (
+            (realtime_price - realtime_low) / realtime_low * 100
+            if realtime_price is not None and realtime_low and realtime_low > 0
             else None
         )
         realtime_amount_ratio = (
@@ -586,6 +595,10 @@ class StockSelector:
             "revenue_yoy": revenue_yoy,
             "profit_yoy": profit_yoy,
             "eps": eps,
+            "fundamental_period": str(fundamental_period) if fundamental_period else None,
+            "fundamental_publish_date": str(fundamental_publish_date) if fundamental_publish_date else None,
+            "fundamental_source": fundamental_source,
+            "pit_fundamental_available": pit_fundamental_available,
         }
 
         if roa is None:
@@ -647,6 +660,9 @@ class StockSelector:
             "realtime_amount": realtime_amount,
             "intraday_high_drawdown_pct": intraday_high_drawdown_pct,
             "intraday_open_drawdown_pct": intraday_open_drawdown_pct,
+            "intraday_low_pct": intraday_low_pct,
+            "intraday_amplitude_pct": intraday_amplitude_pct,
+            "intraday_repair_pct": intraday_repair_pct,
             "realtime_amount_ratio": realtime_amount_ratio,
             "realtime_quote_time": str(row["realtime_quote_time"]) if row.get("realtime_quote_time") else None,
             "realtime_trade_date": str(row["realtime_trade_date"]) if row.get("realtime_trade_date") else None,
@@ -702,6 +718,10 @@ class StockSelector:
             "revenue_yoy": revenue_yoy,
             "profit_yoy": profit_yoy,
             "eps": eps,
+            "fundamental_period": str(fundamental_period) if fundamental_period else None,
+            "fundamental_publish_date": str(fundamental_publish_date) if fundamental_publish_date else None,
+            "fundamental_source": fundamental_source,
+            "pit_fundamental_available": pit_fundamental_available,
             "sentiment_score": float(row["sentiment_score"]) if row.get("sentiment_score") is not None else None,
             "news_count": int(row.get("news_count") or 0),
             "market_strength": float(row["market_strength"]) if row.get("market_strength") is not None else None,
@@ -777,6 +797,8 @@ class StockSelector:
                 else None
             ),
             latest_candidate_trade_date=latest_candidate_trade_date,
+            allowed_sector_types=sorted(allowed_sector_types),
+            excluded_sector_names=sorted(excluded_sector_names),
         )
         hydrate_sector_opinion_rows(sectors)
 
@@ -968,10 +990,22 @@ class StockSelector:
                 "daily_kline_date_operator": daily_kline_operator,
                 "daily_kline_cutoff_date": cutoff_date,
             }
+        fundamental_as_of_dt = requested_as_of_dt or datetime.now()
+        fundamental_date_operator = "<=" if fundamental_as_of_dt.time() >= time(15, 5) else "<"
+        fundamental_as_of_date = fundamental_as_of_dt.strftime("%Y-%m-%d")
+        candidate_as_of_diagnostics.update(
+            {
+                "fundamental_pit_date_operator": fundamental_date_operator,
+                "fundamental_pit_cutoff_date": fundamental_as_of_date,
+            }
+        )
         _, normalized_market_board, market_board_label = self.market_board_filter_sql(market_board)
         rows = self.repository.load_candidate_rows(
             daily_kline_operator=daily_kline_operator,
             cutoff_date=cutoff_date,
+            use_pit_fundamental=self.strategy_id == "a_share_sentiment",
+            fundamental_date_operator=fundamental_date_operator,
+            fundamental_as_of_date=fundamental_as_of_date,
             use_realtime=use_realtime,
             use_current_popularity=use_current_popularity,
             instrument_type=instrument_type,
@@ -1034,6 +1068,9 @@ class StockSelector:
             "realtime_amount": item.get("realtime_amount"),
             "intraday_high_drawdown_pct": item.get("intraday_high_drawdown_pct"),
             "intraday_open_drawdown_pct": item.get("intraday_open_drawdown_pct"),
+            "intraday_low_pct": item.get("intraday_low_pct"),
+            "intraday_amplitude_pct": item.get("intraday_amplitude_pct"),
+            "intraday_repair_pct": item.get("intraday_repair_pct"),
             "realtime_amount_ratio": item.get("realtime_amount_ratio"),
             "realtime_quote_time": item.get("realtime_quote_time"),
             "realtime_trade_date": item.get("realtime_trade_date"),
@@ -1100,6 +1137,10 @@ class StockSelector:
             "revenue_yoy": item.get("revenue_yoy"),
             "profit_yoy": item.get("profit_yoy"),
             "eps": item.get("eps"),
+            "fundamental_period": item.get("fundamental_period"),
+            "fundamental_publish_date": item.get("fundamental_publish_date"),
+            "fundamental_source": item.get("fundamental_source"),
+            "pit_fundamental_available": item.get("pit_fundamental_available"),
             "sentiment_score": item.get("sentiment_score"),
             "news_count": item.get("news_count"),
             "market_strength": item.get("market_strength"),

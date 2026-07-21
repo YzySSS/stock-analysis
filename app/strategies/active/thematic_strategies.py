@@ -41,7 +41,7 @@ def _has_strong_stock_news(item: Dict[str, Any], min_impact: float = 75.0, min_t
         title = str(news.get("title") or "")
         if any(term in title for term in negative_terms):
             continue
-        if news.get("direction") == "negative":
+        if news.get("direction") != "positive":
             continue
         impact = _to_float(news.get("impact_score"), 0) or 0
         timeliness = _to_float(news.get("timeliness_score"), 0) or 0
@@ -54,7 +54,7 @@ def _has_actionable_stock_news(item: Dict[str, Any]) -> bool:
     negative_terms = ("跌停", "跌超", "下挫", "跳水", "杀跌", "大跌", "冲高回落", "风险", "减持", "处罚")
     for news in item.get("opinion_stock_news") or []:
         title = str(news.get("title") or "")
-        if news.get("direction") == "negative" or any(term in title for term in negative_terms):
+        if news.get("direction") != "positive" or any(term in title for term in negative_terms):
             continue
         if (_to_float(news.get("impact_score"), 0) or 0) > 0:
             return True
@@ -65,9 +65,17 @@ def _trade_signal_state(
     price_signal: float,
     high_drawdown: float | None,
     open_drawdown: float | None,
+    intraday_low_pct: float | None,
+    intraday_amplitude_pct: float | None,
     net_flow_intensity: float,
     match_type: str | None,
+    deep_v_low_pct: float = -8.0,
+    max_tradable_amplitude_pct: float = 10.0,
 ) -> Dict[str, str]:
+    if intraday_low_pct is not None and intraday_low_pct <= deep_v_low_pct:
+        return {"state": "watch", "label": "深V高波动观察", "reason": "盘中曾深跌，反抽不等于风险解除"}
+    if intraday_amplitude_pct is not None and intraday_amplitude_pct >= max_tradable_amplitude_pct:
+        return {"state": "watch", "label": "高振幅观察", "reason": "日内振幅过大，不按普通强势股追价"}
     if price_signal >= 2 and (high_drawdown is None or high_drawdown >= -2.5):
         return {"state": "tradable", "label": "强势可交易", "reason": "盘中价格确认较强"}
     if price_signal >= 0 and net_flow_intensity >= 1:
@@ -1254,6 +1262,7 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
         soft_realtime_loss_pct = _to_float(filters.get("soft_realtime_loss_pct"), -3.0)
         strong_news_min_impact = _to_float(filters.get("strong_news_min_impact"), 75.0) or 75.0
         min_stock_recognition = _to_float(filters.get("min_stock_recognition"), None)
+        min_direct_stock_signed_score = _to_float(filters.get("min_direct_stock_signed_score"), 1.0) or 1.0
         min_roe = _to_float(filters.get("min_roe"), None)
         use_market_opinion = any(item.get("opinion_sector_score") is not None for item in data_bundle.get("candidates", []))
         filtered = []
@@ -1298,6 +1307,11 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     continue
                 if item.get("opinion_match_type") == "direct_news_match" and not _has_actionable_stock_news(item):
                     continue
+                if (
+                    item.get("opinion_match_type") == "direct_news_match"
+                    and (_to_float(item.get("opinion_stock_score"), 0.0) or 0.0) < min_direct_stock_signed_score
+                ):
+                    continue
                 if require_direct_stock_news and (
                     item.get("opinion_match_type") != "direct_news_match"
                     or not item.get("opinion_stock_news")
@@ -1326,11 +1340,19 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                 "soft_realtime_loss_pct": soft_realtime_loss_pct,
                 "strong_news_min_impact": strong_news_min_impact,
                 "min_stock_recognition": min_stock_recognition if use_market_opinion else None,
+                "min_direct_stock_signed_score": min_direct_stock_signed_score if use_market_opinion else None,
                 "min_roe": min_roe,
             },
         }
 
     def compute_factors(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+        filters = self.config.get("hard_filters", {}) or {}
+        deep_v_low_pct = _to_float(filters.get("deep_v_low_pct"), -8.0)
+        max_tradable_amplitude_pct = _to_float(filters.get("max_tradable_intraday_amplitude_pct"), 10.0)
+        if deep_v_low_pct is None:
+            deep_v_low_pct = -8.0
+        if max_tradable_amplitude_pct is None:
+            max_tradable_amplitude_pct = 10.0
         rows = []
         for item in data_bundle.get("candidates", []):
             amount = _to_float(item.get("amount"), 0) or 0
@@ -1343,6 +1365,9 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
             realtime_pct = _to_float(item.get("realtime_pct_chg"), None)
             high_drawdown = _to_float(item.get("intraday_high_drawdown_pct"), None)
             open_drawdown = _to_float(item.get("intraday_open_drawdown_pct"), None)
+            intraday_low_pct = _to_float(item.get("intraday_low_pct"), None)
+            intraday_amplitude_pct = _to_float(item.get("intraday_amplitude_pct"), None)
+            intraday_repair_pct = _to_float(item.get("intraday_repair_pct"), None)
             amount_ratio = _to_float(item.get("realtime_amount_ratio"), None)
             price_signal = realtime_pct if realtime_pct is not None else pct1
             market_structure = _sentiment_market_structure(item, price_signal)
@@ -1403,6 +1428,10 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     price_confirm -= min(abs(high_drawdown) * 4.5, 55)
                 if open_drawdown is not None and open_drawdown < 0:
                     price_confirm -= min(abs(open_drawdown) * 2.5, 25)
+                if intraday_low_pct is not None and intraday_low_pct <= -5:
+                    price_confirm -= min(abs(intraday_low_pct) * 2.5, 30)
+                if intraday_amplitude_pct is not None and intraday_amplitude_pct >= 8:
+                    price_confirm -= min((intraday_amplitude_pct - 8) * 4.0 + 8, 30)
                 intraday_confirm = 72.0
                 if high_drawdown is not None and high_drawdown < 0:
                     intraday_confirm -= min(abs(high_drawdown) * 4.0, 50)
@@ -1410,12 +1439,20 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     intraday_confirm -= min(abs(open_drawdown) * 3.0, 30)
                 if amount_ratio is not None and amount_ratio >= 1.5 and price_signal <= 2:
                     intraday_confirm -= min((amount_ratio - 1.5) * 20 + (2 - price_signal) * 8, 35)
+                if intraday_low_pct is not None and intraday_low_pct <= -5:
+                    intraday_confirm -= min(abs(intraday_low_pct) * 3.0, 35)
+                if intraday_amplitude_pct is not None and intraday_amplitude_pct >= 8:
+                    intraday_confirm -= min((intraday_amplitude_pct - 8) * 5.0 + 10, 35)
                 trade_signal = _trade_signal_state(
                     price_signal=price_signal,
                     high_drawdown=high_drawdown,
                     open_drawdown=open_drawdown,
+                    intraday_low_pct=intraday_low_pct,
+                    intraday_amplitude_pct=intraday_amplitude_pct,
                     net_flow_intensity=net_flow_intensity,
                     match_type=match_type,
+                    deep_v_low_pct=deep_v_low_pct,
+                    max_tradable_amplitude_pct=max_tradable_amplitude_pct,
                 )
                 theme_tier = item.get("market_theme_tier") or "unknown"
                 theme_label = item.get("market_theme_label") or "未分层"
@@ -1503,6 +1540,9 @@ class AShareSentimentStrategy(_ZScoreMixin, BaseSelectionStrategy):
                     "realtime_pct_chg": realtime_pct,
                     "intraday_high_drawdown_pct": high_drawdown,
                     "intraday_open_drawdown_pct": open_drawdown,
+                    "intraday_low_pct": intraday_low_pct,
+                    "intraday_amplitude_pct": intraday_amplitude_pct,
+                    "intraday_repair_pct": intraday_repair_pct,
                     "realtime_amount_ratio": amount_ratio,
                     "price_signal_pct": price_signal,
                     "trade_signal_state": trade_signal["state"],

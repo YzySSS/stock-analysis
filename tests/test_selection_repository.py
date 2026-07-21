@@ -76,6 +76,9 @@ class SelectionRepositoryTests(unittest.TestCase):
         rows = repository.load_candidate_rows(
             daily_kline_operator="<=",
             cutoff_date="2026-07-16",
+            use_pit_fundamental=True,
+            fundamental_date_operator="<=",
+            fundamental_as_of_date="2026-07-16",
             use_realtime=False,
             use_current_popularity=False,
             instrument_type="stock",
@@ -95,11 +98,13 @@ class SelectionRepositoryTests(unittest.TestCase):
         self.assertIn("COUNT(DISTINCT index_code) AS market_index_count", sql)
         self.assertIn("'000300.SH', '000905.SH', '000852.SH'", sql)
         self.assertIn("AS csi1000_pct_chg", sql)
+        self.assertIn("LEFT JOIN stock_fundamental_pit fp", sql)
+        self.assertIn("fp2.announcement_date <= %s", sql)
         self.assertIn("sb.code REGEXP '^sz\\.(000|001|002)'", sql)
         self.assertTrue(sql.rstrip().endswith("LIMIT %s"))
         self.assertEqual(
             params,
-            ["2026-07-16", "2026-07-16", "2026-07-16", 0, 0, 0, "stock", 10],
+            ["2026-07-16", "2026-07-16", "2026-07-16", "2026-07-16", "2026-07-16", 0, 0, 0, "stock", 10],
         )
 
     def test_candidate_query_rejects_dynamic_operator(self):
@@ -109,12 +114,55 @@ class SelectionRepositoryTests(unittest.TestCase):
             repository.load_candidate_rows(
                 daily_kline_operator=">= 0; DROP TABLE daily_kline; --",
                 cutoff_date="2026-07-16",
+                use_pit_fundamental=True,
+                fundamental_date_operator="<=",
+                fundamental_as_of_date="2026-07-16",
                 use_realtime=False,
                 use_current_popularity=False,
                 instrument_type="stock",
                 market_board="all",
                 candidate_limit=None,
             )
+
+    def test_non_sentiment_candidate_query_skips_pit_lookup(self):
+        cursor = FakeCursor(fetchall_values=[[]])
+        repository = SelectionRepository(connection_factory(cursor))
+
+        repository.load_candidate_rows(
+            daily_kline_operator=None,
+            cutoff_date=None,
+            use_pit_fundamental=False,
+            fundamental_date_operator="<=",
+            fundamental_as_of_date="2026-07-21",
+            use_realtime=False,
+            use_current_popularity=False,
+            instrument_type="stock",
+            market_board="all",
+            candidate_limit=None,
+        )
+
+        sql, params = cursor.executed[0]
+        self.assertIn("LEFT JOIN stock_fundamental_pit fp ON 1 = 0", sql)
+        self.assertNotIn("FROM stock_fundamental_pit fp2", sql)
+        self.assertEqual(params, [0, 0, 0, "stock"])
+
+    def test_market_opinion_type_filter_is_applied_before_limit(self):
+        cursor = FakeCursor(fetchall_values=[[{"sector_name": "医药"}], []])
+        repository = SelectionRepository(connection_factory(cursor))
+
+        sectors, _ = repository.load_market_opinion_rows(
+            requested_as_of="2026-07-21 12:30:00",
+            latest_candidate_trade_date="2026-07-20",
+            allowed_sector_types=["theme"],
+            excluded_sector_names=["金融"],
+        )
+
+        self.assertEqual(sectors, [{"sector_name": "医药"}])
+        sql, params = cursor.executed[0]
+        self.assertIn("sector_type IN (%s)", sql)
+        self.assertIn("sector_name NOT IN (%s)", sql)
+        self.assertLess(sql.index("sector_type IN"), sql.index("LIMIT 30"))
+        self.assertEqual(params, ("2026-07-21 12:30:00", "theme", "金融"))
 
     def test_save_result_rows_preserves_both_dedupe_steps(self):
         cursor = FakeCursor()

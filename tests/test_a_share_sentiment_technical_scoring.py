@@ -166,6 +166,92 @@ class AShareSentimentTechnicalScoringTests(unittest.TestCase):
         self.assertEqual(by_code["market-strong"]["strategy_raw_metrics"]["market_index_count"], 3)
         self.assertIn("沪深300", by_code["market-strong"]["strategy_raw_metrics"]["market_context_reason"])
 
+    def test_deep_v_repair_is_kept_as_watch_instead_of_marked_tradable(self):
+        candidate = _candidate("deep-v", strong_structure=True)
+        candidate.update(
+            {
+                "realtime_pct_chg": 4.0,
+                "intraday_high_drawdown_pct": -0.5,
+                "intraday_open_drawdown_pct": 5.0,
+                "intraday_low_pct": -9.5,
+                "intraday_amplitude_pct": 14.0,
+                "intraday_repair_pct": 15.0,
+            }
+        )
+
+        context = self.strategy.prepare_context({"candidates": [candidate]})
+        factor_row = self.strategy.compute_factors(context)[0]
+
+        self.assertEqual(factor_row["strategy_raw_metrics"]["trade_signal_state"], "watch")
+        self.assertEqual(factor_row["strategy_raw_metrics"]["trade_signal_label"], "深V高波动观察")
+        self.assertTrue(any("盘中曾深跌" in risk for risk in factor_row["candidate_risks"]))
+
+    def test_neutral_direct_news_cannot_create_a_direct_news_candidate(self):
+        neutral = _candidate("neutral-news", strong_structure=True)
+        neutral.update(
+            {
+                "opinion_match_type": "direct_news_match",
+                "opinion_stock_score": 80,
+                "opinion_stock_news": [
+                    {
+                        "title": "公司发布业务进展公告",
+                        "direction": "neutral",
+                        "impact_score": 90,
+                        "timeliness_score": 95,
+                    }
+                ],
+            }
+        )
+        positive = _candidate("positive-news", strong_structure=True)
+        positive.update(
+            {
+                "opinion_match_type": "direct_news_match",
+                "opinion_stock_score": 80,
+                "opinion_stock_news": [
+                    {
+                        "title": "公司获大额订单",
+                        "direction": "positive",
+                        "impact_score": 90,
+                        "timeliness_score": 95,
+                    }
+                ],
+            }
+        )
+
+        context = self.strategy.prepare_context({"candidates": [neutral, positive]})
+
+        self.assertEqual([item["code"] for item in context["candidates"]], ["positive-news"])
+
+    def test_sentiment_candidate_uses_pit_fundamentals_not_legacy_snapshot(self):
+        selector = StockSelector(strategy_id="a_share_sentiment")
+        row = {
+            "code": "sh.603127",
+            "name": "昭衍新药",
+            "industry": "医疗保健",
+            "roe": 99,
+            "roa": 88,
+            "eps": 9,
+            "legacy_fundamental_period": "2024-12-31",
+            "pit_roe": 8.5,
+            "pit_roa": 4.2,
+            "pit_eps": 0.31,
+            "pit_revenue_yoy": 6.0,
+            "pit_profit_yoy": -3.0,
+            "pit_fundamental_period": "2026-03-31",
+            "pit_fundamental_publish_date": "2026-04-28",
+            "pit_fundamental_source": "tushare_fina_indicator",
+            "pit_fundamental_available": 1,
+        }
+
+        candidate = selector._build_candidate(row)
+
+        self.assertEqual(candidate["roe"], 8.5)
+        self.assertEqual(candidate["roa"], 4.2)
+        self.assertEqual(candidate["eps"], 0.31)
+        self.assertEqual(candidate["fundamental_period"], "2026-03-31")
+        self.assertEqual(candidate["fundamental_publish_date"], "2026-04-28")
+        self.assertTrue(candidate["pit_fundamental_available"])
+
     def test_only_one_tradable_grade_per_theme_without_removing_candidates(self):
         selector = StockSelector(strategy_id="a_share_sentiment")
 
