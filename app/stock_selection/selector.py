@@ -20,6 +20,7 @@ THEME_TIER_LABELS = {
     "broad_related": "泛相关",
     "unknown": "未分层",
 }
+SENTIMENT_STRATEGY_IDS = frozenset({"a_share_sentiment", "a_share_sentiment_v05"})
 
 
 class StockSelector:
@@ -58,23 +59,49 @@ class StockSelector:
     def build_run_id(prefix: str = "selection") -> str:
         return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
+    @staticmethod
+    def _parse_as_of(value: Any) -> Optional[datetime]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(
+                str(value).replace("T", " ").replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            return None
+
     def _requested_market_opinion_as_of(self) -> Optional[datetime]:
-        generic_as_of = self.strategy.config.get("as_of_datetime")
+        generic_as_of = self.strategy.config.get("decision_as_of") or self.strategy.config.get(
+            "as_of_datetime"
+        )
         if generic_as_of:
-            try:
-                return datetime.fromisoformat(str(generic_as_of).replace("T", " ").replace("Z", "+00:00"))
-            except ValueError:
-                return None
-        if self.strategy_id != "a_share_sentiment":
+            return self._parse_as_of(generic_as_of)
+        if self.strategy_id not in SENTIMENT_STRATEGY_IDS:
             return None
         market_opinion_config = self.strategy.config.get("market_opinion", {}) or {}
         requested_as_of = market_opinion_config.get("as_of_datetime") or self.strategy.config.get("market_opinion_as_of")
-        if not requested_as_of:
-            return None
-        try:
-            return datetime.fromisoformat(str(requested_as_of).replace("T", " ").replace("Z", "+00:00"))
-        except ValueError:
-            return None
+        return self._parse_as_of(requested_as_of)
+
+    def _resolve_decision_as_of(self, explicit: Any = None) -> Optional[datetime]:
+        if explicit is not None:
+            parsed = self._parse_as_of(explicit)
+            if parsed is None:
+                raise ValueError("invalid decision_as_of")
+            return parsed
+        return self._requested_market_opinion_as_of()
+
+    def _expected_realtime_batch_ids(self) -> List[str]:
+        raw = (
+            self.strategy.config.get("decision_realtime_batch_ids")
+            or self.strategy.config.get("decision_realtime_batch_id")
+            or self.strategy.config.get("realtime_batch_ids")
+            or self.strategy.config.get("realtime_batch_id")
+            or []
+        )
+        values = [raw] if isinstance(raw, str) else list(raw or [])
+        return sorted({str(value).strip() for value in values if str(value).strip()})
 
     @staticmethod
     def _round_score(value: float) -> float:
@@ -409,6 +436,7 @@ class StockSelector:
         min_close_20 = float(row["min_close_20"]) if row.get("min_close_20") is not None else None
         avg_amount_5 = float(row["avg_amount_5"]) if row.get("avg_amount_5") is not None else None
         avg_amount_20 = float(row["avg_amount_20"]) if row.get("avg_amount_20") is not None else None
+        median_amount_20 = float(row["median_amount_20"]) if row.get("median_amount_20") is not None else None
         kline_count_20 = int(row.get("kline_count_20") or 0)
         kline_count_60 = int(row.get("kline_count_60") or 0)
         std_return_20 = float(row["std_return_20"]) if row.get("std_return_20") is not None else None
@@ -466,6 +494,16 @@ class StockSelector:
         turnover_rate = float(row["turnover_rate"]) if row.get("turnover_rate") is not None else None
         turnover_rate_5d_avg = float(row["turnover_rate_5d_avg"]) if row.get("turnover_rate_5d_avg") is not None else None
         listed_days = int(row.get("listed_days") or 0) if row.get("listed_days") is not None else None
+        listed_trade_days = (
+            int(row.get("listed_trade_days") or 0)
+            if row.get("listed_trade_days") is not None
+            else None
+        )
+        technical_latest_amount = (
+            float(row["technical_latest_amount"])
+            if row.get("technical_latest_amount") is not None
+            else None
+        )
         volume_ratio = float(row["volume_ratio"]) if row.get("volume_ratio") is not None else None
         total_mv = float(row["total_mv"]) if row.get("total_mv") is not None else None
         completeness_score = float(row["completeness_score"]) if row.get("completeness_score") is not None else None
@@ -629,6 +667,19 @@ class StockSelector:
             "industry": row.get("industry"),
             "instrument_type": row.get("instrument_type"),
             "is_st": bool(row.get("is_st")),
+            "list_status": row.get("list_status"),
+            "lifecycle_known": (
+                None if row.get("lifecycle_known") is None else bool(row.get("lifecycle_known"))
+            ),
+            "is_delisting": bool(row.get("is_delisting")),
+            "stock_status_label": row.get("stock_status_label"),
+            "is_suspended": bool(row.get("is_suspended")),
+            "daily_data_available": bool(row.get("daily_data_available")),
+            "technical_data_available": bool(row.get("technical_data_available")),
+            "factor_data_available": bool(row.get("factor_data_available")),
+            "daily_moneyflow_data_available": bool(row.get("daily_moneyflow_data_available")),
+            "chip_data_available": bool(row.get("chip_data_available")),
+            "realtime_data_available": bool(row.get("realtime_data_available")),
             "trade_date": str(row["trade_date"]) if row.get("trade_date") else None,
             "open": open_price,
             "high": high_price,
@@ -647,6 +698,8 @@ class StockSelector:
             "min_close_20": min_close_20,
             "avg_amount_5": avg_amount_5,
             "avg_amount_20": avg_amount_20,
+            "median_amount_20": median_amount_20,
+            "technical_latest_amount": technical_latest_amount,
             "kline_count_20": kline_count_20,
             "kline_count_60": kline_count_60,
             "std_return_20": std_return_20,
@@ -666,9 +719,13 @@ class StockSelector:
             "realtime_amount_ratio": realtime_amount_ratio,
             "realtime_quote_time": str(row["realtime_quote_time"]) if row.get("realtime_quote_time") else None,
             "realtime_trade_date": str(row["realtime_trade_date"]) if row.get("realtime_trade_date") else None,
+            "realtime_batch_id": row.get("realtime_batch_id"),
+            "realtime_received_at": str(row["realtime_received_at"]) if row.get("realtime_received_at") else None,
+            "realtime_is_stale": bool(row.get("realtime_is_stale")),
             "turnover_rate": turnover_rate,
             "turnover_rate_5d_avg": turnover_rate_5d_avg,
             "listed_days": listed_days,
+            "listed_trade_days": listed_trade_days,
             "volume_ratio": volume_ratio,
             "total_mv": total_mv,
             "completeness_score": completeness_score,
@@ -750,15 +807,20 @@ class StockSelector:
             "missing_fields": sorted(set(missing_fields)),
         }
 
-    def _attach_market_opinion_context(self, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _attach_market_opinion_context(
+        self,
+        candidates: List[Dict[str, Any]],
+        *,
+        decision_as_of: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
         """Attach NewsNow/RSS-driven sector opinion context for A股舆情选股 V2.
 
         `sector_opinion_daily.top_stocks_json` is the P0 bridge from hot
         themes/sectors to stock candidates. Keep this enrichment separate from
         the generic candidate SQL so other strategies are unaffected.
         """
-        diagnostics = {"enabled": self.strategy_id == "a_share_sentiment", "matched_candidates": 0}
-        if self.strategy_id != "a_share_sentiment" or not candidates:
+        diagnostics = {"enabled": self.strategy_id in SENTIMENT_STRATEGY_IDS, "matched_candidates": 0}
+        if self.strategy_id not in SENTIMENT_STRATEGY_IDS or not candidates:
             return diagnostics
 
         market_opinion_config = self.strategy.config.get("market_opinion", {}) or {}
@@ -779,8 +841,14 @@ class StockSelector:
         }
         max_age_minutes = int(market_opinion_config.get("max_age_minutes") or 60)
         allow_same_trade_date_stale = bool(market_opinion_config.get("allow_same_trade_date_stale", True))
-        requested_as_of = market_opinion_config.get("as_of_datetime") or self.strategy.config.get("market_opinion_as_of")
-        requested_as_of_dt = self._requested_market_opinion_as_of()
+        requested_as_of = (
+            decision_as_of
+            or self.strategy.config.get("decision_as_of")
+            or self.strategy.config.get("as_of_datetime")
+            or market_opinion_config.get("as_of_datetime")
+            or self.strategy.config.get("market_opinion_as_of")
+        )
+        requested_as_of_dt = decision_as_of or self._requested_market_opinion_as_of()
         if requested_as_of:
             if not requested_as_of_dt:
                 diagnostics["reason"] = "invalid_market_opinion_as_of"
@@ -799,6 +867,7 @@ class StockSelector:
             latest_candidate_trade_date=latest_candidate_trade_date,
             allowed_sector_types=sorted(allowed_sector_types),
             excluded_sector_names=sorted(excluded_sector_names),
+            decision_as_of=requested_as_of_dt,
         )
         hydrate_sector_opinion_rows(sectors)
 
@@ -821,7 +890,14 @@ class StockSelector:
         if not latest_as_of_dt:
             diagnostics["reason"] = "sector_opinion_missing_as_of_datetime"
             return diagnostics
-        now_dt = datetime.now(latest_as_of_dt.tzinfo) if latest_as_of_dt.tzinfo else datetime.now()
+        if requested_as_of_dt:
+            now_dt = requested_as_of_dt
+            if latest_as_of_dt.tzinfo and now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=latest_as_of_dt.tzinfo)
+            elif not latest_as_of_dt.tzinfo and now_dt.tzinfo is not None:
+                now_dt = now_dt.replace(tzinfo=None)
+        else:
+            now_dt = datetime.now(latest_as_of_dt.tzinfo) if latest_as_of_dt.tzinfo else datetime.now()
         age_minutes = (now_dt - latest_as_of_dt).total_seconds() / 60
         sector_trade_date = str(sectors[0].get("trade_date")) if sectors and sectors[0].get("trade_date") else None
         same_trade_date = bool(latest_candidate_trade_date and sector_trade_date == latest_candidate_trade_date)
@@ -974,11 +1050,12 @@ class StockSelector:
         candidate_limit: Optional[int] = None,
         instrument_type: str = "stock",
         market_board: Optional[str] = None,
+        decision_as_of: Any = None,
     ) -> Dict[str, Any]:
-        requested_as_of_dt = self._requested_market_opinion_as_of()
+        requested_as_of_dt = self._resolve_decision_as_of(decision_as_of)
         clock_mode = self._selection_clock_mode(requested_as_of_dt)
-        use_realtime = requested_as_of_dt is None and clock_mode == "intraday"
-        use_current_popularity = requested_as_of_dt is None
+        use_realtime = clock_mode == "intraday"
+        use_current_popularity = True
         candidate_as_of_diagnostics: Dict[str, Any] = {}
         daily_kline_operator: str | None = None
         cutoff_date: str | None = None
@@ -1011,10 +1088,45 @@ class StockSelector:
             instrument_type=instrument_type,
             market_board=normalized_market_board,
             candidate_limit=candidate_limit,
+            decision_as_of=requested_as_of_dt,
+            expected_realtime_batch_ids=self._expected_realtime_batch_ids(),
         )
 
         candidates = [self._build_candidate(row) for row in rows]
-        opinion_diagnostics = self._attach_market_opinion_context(candidates)
+        expected_realtime_batches = set(self._expected_realtime_batch_ids())
+        for candidate in candidates:
+            required_components = {
+                "daily_kline": bool(candidate.get("daily_data_available")),
+                "technical_feature": bool(candidate.get("technical_data_available")),
+                "factor_input": bool(candidate.get("factor_data_available")),
+                "daily_moneyflow": bool(candidate.get("daily_moneyflow_data_available")),
+                "chip": bool(candidate.get("chip_data_available")),
+            }
+            if clock_mode == "intraday":
+                realtime_batch_id = str(candidate.get("realtime_batch_id") or "").strip()
+                realtime_batch_matches = bool(realtime_batch_id) and (
+                    not expected_realtime_batches
+                    or realtime_batch_id in expected_realtime_batches
+                )
+                required_components["realtime"] = bool(
+                    candidate.get("realtime_data_available")
+                    and not candidate.get("realtime_is_stale")
+                    and candidate.get("realtime_quote_time")
+                    and candidate.get("realtime_received_at")
+                    and realtime_batch_matches
+                )
+            candidate["decision_clock_mode"] = clock_mode
+            candidate["decision_as_of"] = (
+                requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S")
+                if requested_as_of_dt
+                else None
+            )
+            candidate["required_data_components"] = required_components
+            candidate["required_data_complete"] = all(required_components.values())
+        opinion_diagnostics = self._attach_market_opinion_context(
+            candidates,
+            decision_as_of=requested_as_of_dt,
+        )
         bundle = {
             "candidates": candidates,
             "selection_clock_diagnostics": {
@@ -1055,6 +1167,7 @@ class StockSelector:
             "min_close_20": item.get("min_close_20"),
             "avg_amount_5": item.get("avg_amount_5"),
             "avg_amount_20": item.get("avg_amount_20"),
+            "median_amount_20": item.get("median_amount_20"),
             "kline_count_20": item.get("kline_count_20"),
             "kline_count_60": item.get("kline_count_60"),
             "std_return_20": item.get("std_return_20"),

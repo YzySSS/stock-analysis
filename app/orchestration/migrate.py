@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from app.orchestration.adj_factor_schema import ensure_adj_factor_manifest_schema
 from app.jobs.schema import ensure_job_ops_schema
+from app.orchestration.durable_task_schema import ensure_durable_task_schema
 from app.orchestration.backtest_validation_schema import ensure_backtest_validation_schema
 from app.orchestration.feature_cache_schema import ensure_feature_cache_schema
 from app.orchestration.forward_observation_schema import ensure_forward_observation_schema
@@ -26,8 +27,10 @@ from app.orchestration.portfolio_schema import ensure_portfolio_schema
 from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflow_schema
 from app.orchestration.realtime_schema import ensure_realtime_schema
 from app.orchestration.selection_run_schema import ensure_selection_run_schema
+from app.orchestration.sentiment_consistency_schema import ensure_sentiment_consistency_schema
 from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
 from app.orchestration.stock_status_pit_schema import ensure_stock_status_pit_schema
+from app.orchestration.stock_technical_feature_schema import ensure_stock_technical_feature_schema
 from app.orchestration.strategy_factor_ci_schema import ensure_strategy_factor_ci_schema
 from app.orchestration.ths_concept_hot_schema import ensure_ths_concept_hot_schema
 from app.orchestration.v2_schema import ensure_v2_schema
@@ -102,6 +105,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0020", "frozen out-of-sample validation protocol schema", ensure_backtest_validation_schema),
     Migration("0021", "prospective strategy observation and action schema", ensure_forward_observation_schema),
     Migration("0022", "adjustment factor history manifest schema", ensure_adj_factor_manifest_schema),
+    Migration("0023", "sentiment data consistency and operational snapshot schema", ensure_sentiment_consistency_schema),
+    Migration("0024", "neutral daily stock technical feature read model", ensure_stock_technical_feature_schema),
+    Migration("0025", "durable API asynchronous task queue", ensure_durable_task_schema),
 )
 
 

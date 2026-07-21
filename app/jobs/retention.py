@@ -13,6 +13,7 @@ TERMINAL_JOB_STATUSES = ("success", "succeeded", "failed", "cancelled")
 class JobRetentionPolicy:
     task_detail_days: int = 90
     selection_task_days: int = 90
+    durable_task_days: int = 30
     backtest_system_test_days: int = 90
     portfolio_raw_response_days: int = 30
     portfolio_snapshot_days: int = 90
@@ -72,6 +73,15 @@ class JobRetentionService:
                   AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
                 """,
                 (self.policy.selection_task_days,),
+            ),
+            "durable_task_delete": (
+                """
+                SELECT COUNT(*) AS count
+                FROM durable_task
+                WHERE status IN ('success','failed','cancelled')
+                  AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+                """,
+                (self.policy.durable_task_days,),
             ),
             "backtest_system_test_delete": (
                 """
@@ -152,6 +162,7 @@ class JobRetentionService:
         changed["worker_error_summary_rows"] = self._aggregate_worker_errors()
         changed["task_run_log_deleted"] = self._delete_old_task_details()
         changed["selection_run_deleted"] = self._delete_old_selection_tasks()
+        changed["durable_task_deleted"] = self._delete_old_durable_tasks()
         changed.update(self._delete_old_backtest_system_tests())
         changed["portfolio_raw_response_pruned"] = self._prune_portfolio_raw_responses()
         changed["portfolio_snapshot_pruned"] = self._prune_portfolio_snapshots()
@@ -248,6 +259,7 @@ class JobRetentionService:
             ("selection", "selection_run"),
             ("portfolio_advice", "portfolio_advice_run"),
             ("backtest", "backtest_run"),
+            ("durable_task", "durable_task"),
         )
         for source_kind, table in sources:
             with mysql_conn() as conn:
@@ -333,6 +345,16 @@ class JobRetentionService:
               AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
             """,
             (self.policy.selection_task_days,),
+        )
+
+    def _delete_old_durable_tasks(self) -> int:
+        return self._execute(
+            """
+            DELETE FROM durable_task
+            WHERE status IN ('success','failed','cancelled')
+              AND created_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+            """,
+            (self.policy.durable_task_days,),
         )
 
     def _exclude_expired_tracking_stats(self) -> int:

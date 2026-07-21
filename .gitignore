@@ -43,6 +43,12 @@ logs/
 
 # 本地设计、阶段文档与 UI 参考稿
 docs/
+!docs/
+docs/*
+!docs/a_share_sentiment_v0_5_optimization_plan_2026-07-21.md
+!docs/cloud_deployment_task_plan.md
+!docs/sentiment_data_consistency_and_realtime_probe.md
+!docs/sentiment_remediation_v2_implementation.md
 app/api/web/assets/ui-preview/
 app/api/web/pages/ui-*-preview.html
 app/api/web/pages/ui-reference.html
@@ -53,6 +59,10 @@ examples/
 src/
 versions/
 config/research_protocols/
+
+# 仅允许提交无密钥的部署环境模板。
+!deploy/env/
+!deploy/env/stock-analysis.env.example
 
 # IDE
 .vscode/

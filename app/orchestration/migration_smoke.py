@@ -45,6 +45,7 @@ REQUIRED_TABLES = {
     "worker_runtime_heartbeat",
     "task_run_daily_summary",
     "job_error_daily_summary",
+    "durable_task",
 }
 
 

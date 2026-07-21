@@ -153,6 +153,7 @@ API 服务: stock-analysis-api.service
 回测 worker: stock-analysis-backtest-worker.service
 选股 worker: stock-analysis-selection-worker.service
 持仓建议 worker: stock-analysis-portfolio-worker.service
+API 持久异步任务 worker: stock-analysis-durable-task-worker.service
 ```
 
 常用检查命令：
@@ -162,6 +163,7 @@ sudo systemctl status stock-analysis-api.service --no-pager
 sudo systemctl status stock-analysis-backtest-worker.service --no-pager
 sudo systemctl status stock-analysis-selection-worker.service --no-pager
 sudo systemctl status stock-analysis-portfolio-worker.service --no-pager
+sudo systemctl status stock-analysis-durable-task-worker.service --no-pager
 sudo /usr/sbin/nginx -t
 curl https://www.yzysstock.cloud/api/health
 ```

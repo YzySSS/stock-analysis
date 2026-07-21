@@ -1,26 +1,28 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
-import time
-from threading import Lock
 from typing import Any, Optional
+import uuid
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-import requests
 
 from app.error_learning.tracker import SelectionResultTracker
+from app.shared.cache import get_cache_backend
+from app.tracking.deep_review import DeepReviewJobService
 from app.tracking.repository import TRACKING_STATS_MAX_AGE_DAYS, TrackingRepository
 
 router = APIRouter(tags=["tracking"])
 _TRACKING_REPOSITORY = TrackingRepository()
+_DEEP_REVIEW_SERVICE = DeepReviewJobService()
 
 
 _TRACKING_SUMMARY_CACHE_TTL_SECONDS = 60.0
-_TRACKING_SUMMARY_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
-_TRACKING_SUMMARY_CACHE_LOCK = Lock()
+_TRACKING_SUMMARY_CACHE_PREFIX = "tracking:summary:v1"
+_TRACKING_SUMMARY_CACHE_GENERATION_KEY = f"{_TRACKING_SUMMARY_CACHE_PREFIX}:generation"
 
 
 def _tracking_summary_cache_key(
@@ -30,28 +32,42 @@ def _tracking_summary_cache_key(
     selection_date: Optional[str],
     instrument_type: str,
     latest_only: bool,
-) -> tuple[Any, ...]:
-    return (run_id, strategy_id, selection_date, instrument_type, latest_only)
+) -> str:
+    backend = get_cache_backend()
+    generation = backend.get(_TRACKING_SUMMARY_CACHE_GENERATION_KEY) or "base"
+    serialized_scope = json.dumps(
+        {
+            "run_id": run_id,
+            "strategy_id": strategy_id,
+            "selection_date": selection_date,
+            "instrument_type": instrument_type,
+            "latest_only": latest_only,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(serialized_scope.encode("utf-8")).hexdigest()
+    return f"{_TRACKING_SUMMARY_CACHE_PREFIX}:{generation}:{digest}"
 
 
-def _get_cached_tracking_summary(key: tuple[Any, ...]) -> dict[str, Any] | None:
-    now = time.monotonic()
-    with _TRACKING_SUMMARY_CACHE_LOCK:
-        cached = _TRACKING_SUMMARY_CACHE.get(key)
-        if not cached or cached[0] <= now:
-            _TRACKING_SUMMARY_CACHE.pop(key, None)
-            return None
-        return cached[1]
+def _get_cached_tracking_summary(key: str) -> dict[str, Any] | None:
+    cached = get_cache_backend().get(key)
+    return cached if isinstance(cached, dict) else None
 
 
-def _cache_tracking_summary(key: tuple[Any, ...], payload: dict[str, Any]) -> None:
-    with _TRACKING_SUMMARY_CACHE_LOCK:
-        _TRACKING_SUMMARY_CACHE[key] = (time.monotonic() + _TRACKING_SUMMARY_CACHE_TTL_SECONDS, payload)
+def _cache_tracking_summary(key: str, payload: dict[str, Any]) -> None:
+    get_cache_backend().set(key, payload, ttl_seconds=_TRACKING_SUMMARY_CACHE_TTL_SECONDS)
 
 
 def _invalidate_tracking_summary_cache() -> None:
-    with _TRACKING_SUMMARY_CACHE_LOCK:
-        _TRACKING_SUMMARY_CACHE.clear()
+    # Generation invalidation is O(1), works for memory and Redis backends, and
+    # avoids a broad cache clear that could evict unrelated API data.
+    get_cache_backend().set(
+        _TRACKING_SUMMARY_CACHE_GENERATION_KEY,
+        uuid.uuid4().hex,
+        ttl_seconds=24 * 60 * 60,
+    )
 
 
 class TrackingStatsToggleRequest(BaseModel):
@@ -254,12 +270,11 @@ def _tracking_payload(
     include_runs: bool = True,
 ) -> dict:
     tracker = SelectionResultTracker(repository=_TRACKING_REPOSITORY)
-    auto_excluded_count = tracker.enforce_stats_retention(
-        instrument_type=instrument_type,
-        max_age_days=TRACKING_STATS_MAX_AGE_DAYS,
-    )
-    if auto_excluded_count > 0:
-        _invalidate_tracking_summary_cache()
+    # GET endpoints are strictly read-only. Statistical expiry is already
+    # enforced by the repository's time-window predicate and record metadata;
+    # any optional flag materialization belongs in a maintenance task, not in
+    # a page request.
+    auto_excluded_count = 0
     resolved_run_id = run_id
     total = _count_tracking_items(
         instrument_type=instrument_type,
@@ -364,6 +379,7 @@ def _compact_review_item(item: dict[str, Any]) -> dict[str, Any]:
         "code": item.get("code"),
         "name": item.get("name"),
         "strategy_id": item.get("strategy_id"),
+        "strategy_version": item.get("strategy_version"),
         "strategy_display_name": item.get("strategy_display_name"),
         "selection_date": item.get("selection_date"),
         "selection_datetime": item.get("selection_datetime"),
@@ -416,27 +432,6 @@ def _render_review_prompt(template: str, *, filters: dict[str, Any], summary: di
     for key, value in replacements.items():
         prompt = prompt.replace(key, value)
     return prompt
-
-
-def _call_deepseek_review(prompt: str, model: str, timeout_seconds: int = 90) -> str:
-    _load_env_file()
-    api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY，无法执行 AI 详细复盘")
-    base_url = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.deepseek.com/v1"
-    response = requests.post(
-        f"{base_url.rstrip('/')}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        },
-        timeout=timeout_seconds,
-    )
-    response.raise_for_status()
-    data = response.json()
-    return data["choices"][0]["message"]["content"].strip()
 
 
 @router.get("/tracking/deep-review/status")
@@ -562,8 +557,10 @@ def update_tracking_item_stats(
     }
 
 
-@router.post("/tracking/deep-review")
-def run_tracking_deep_review(payload: TrackingDeepReviewRequest) -> dict:
+@router.post("/tracking/deep-review", status_code=202)
+def run_tracking_deep_review(
+    payload: TrackingDeepReviewRequest,
+) -> dict:
     max_items = max(1, min(int(payload.max_items or 80), 200))
     data = _tracking_payload(
         run_id=payload.run_id,
@@ -598,19 +595,38 @@ def run_tracking_deep_review(payload: TrackingDeepReviewRequest) -> dict:
         items=compact_items,
         model=model,
     )
-    try:
-        analysis = _call_deepseek_review(prompt, model=model)
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"DeepSeek 复盘调用失败: {str(exc)[:300]}") from exc
-    if f"分析模型：{model}" not in analysis:
-        analysis = f"{analysis.rstrip()}\n\n分析模型：{model}"
-    return {
-        "analysis": analysis,
-        "model": model,
+    strategy_versions = {
+        str(item.get("strategy_version"))
+        for item in compact_items
+        if item.get("strategy_version")
+    }
+    strategy_version = strategy_versions.pop() if len(strategy_versions) == 1 else "mixed"
+    request_payload = {
+        "prompt": prompt,
         "item_count": len(compact_items),
         "prompt_template": str(template_path),
         "filters": filters,
     }
+    job = _DEEP_REVIEW_SERVICE.create_job(
+        selection_run_id=payload.run_id,
+        strategy_id=payload.strategy_id or "mixed",
+        strategy_version=strategy_version,
+        model=model,
+        request_payload=request_payload,
+    )
+    return {
+        **job,
+        "item_count": len(compact_items),
+        "status_url": f"/api/tracking/deep-review/{job['review_job_id']}",
+    }
+
+
+@router.get("/tracking/deep-review/{review_job_id}")
+def get_tracking_deep_review_job(review_job_id: str) -> dict:
+    job = _DEEP_REVIEW_SERVICE.get_job(review_job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="未找到详细复盘任务")
+    return job
 
 
 @router.get("/tracking/filters")

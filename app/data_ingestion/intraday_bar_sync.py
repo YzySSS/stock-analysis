@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from app.shared.db import mysql_conn
+from app.shared.db import mysql_conn, mysql_read_conn
 
 SOURCE = "akshare_stock_zh_a_hist_min_em"
 
@@ -61,7 +61,7 @@ def to_int(value: Any) -> int | None:
 
 
 def latest_trade_date_for_code(code: str) -> str | None:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT trade_date FROM stock_realtime_snapshot WHERE code = %s LIMIT 1", (code,))
             row = cursor.fetchone() or {}
@@ -88,7 +88,7 @@ def parse_minute(value: Any) -> datetime | None:
 
 
 def cached_bars(code: str, trade_date: str) -> list[dict[str, Any]]:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """

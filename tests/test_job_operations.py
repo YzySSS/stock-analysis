@@ -150,6 +150,23 @@ class RetentionSafetyTests(unittest.TestCase):
         self.assertNotIn("DELETE", sql.upper())
         self.assertEqual(params, (14,))
 
+    def test_durable_task_retention_only_deletes_terminal_rows(self):
+        statements = []
+
+        class CapturingService(JobRetentionService):
+            def _execute(self, sql, params=()):
+                statements.append((" ".join(sql.split()), params))
+                return 0
+
+        CapturingService()._delete_old_durable_tasks()
+
+        self.assertEqual(len(statements), 1)
+        sql, params = statements[0]
+        self.assertIn("FROM durable_task", sql)
+        self.assertIn("status IN ('success','failed','cancelled')", sql)
+        self.assertNotIn("status='queued'", sql)
+        self.assertEqual(params, (30,))
+
 
 if __name__ == "__main__":
     unittest.main()

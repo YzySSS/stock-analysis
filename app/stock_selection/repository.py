@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from typing import Any, Callable, Sequence
 
-from app.shared.db import mysql_conn
+from app.shared.db import mysql_conn, mysql_read_conn
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
@@ -20,11 +20,24 @@ class SelectionRepository:
         "main": " AND ((sb.code LIKE 'sh.6%%' AND sb.code NOT LIKE 'sh.688%%') OR sb.code REGEXP '^sz\\.(000|001|002)') ",
     }
 
-    def __init__(self, connection_factory: ConnectionFactory | None = None) -> None:
+    def __init__(
+        self,
+        connection_factory: ConnectionFactory | None = None,
+        read_connection_factory: ConnectionFactory | None = None,
+    ) -> None:
         self._connection_factory = connection_factory or mysql_conn
+        # A borrowed connection (the snapshot materializer) must keep reads in
+        # the caller's REPEATABLE READ transaction. Normal reads use the
+        # rollback-on-exit context and never issue meaningless commits.
+        self._read_connection_factory = (
+            read_connection_factory or connection_factory or mysql_read_conn
+        )
 
     def _connect(self, *, dict_cursor: bool = True):
         return self._connection_factory(dict_cursor=dict_cursor)
+
+    def _read_connect(self, *, dict_cursor: bool = True):
+        return self._read_connection_factory(dict_cursor=dict_cursor)
 
     @classmethod
     def market_board_filter_sql(cls, market_board: str) -> str:
@@ -34,7 +47,7 @@ class SelectionRepository:
             raise ValueError(f"unsupported market board: {market_board}") from exc
 
     def count_instruments(self, instrument_type: str) -> int:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     "SELECT COUNT(*) AS count FROM stock_basic WHERE instrument_type = %s",
@@ -90,7 +103,7 @@ class SelectionRepository:
             params.append(instrument_type)
         sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY created_at DESC LIMIT 1"
 
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
                 return cursor.fetchone() or {}
@@ -143,13 +156,13 @@ class SelectionRepository:
                 )
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT * FROM selection_run WHERE run_id=%s", (run_id,))
                 return cursor.fetchone()
 
     def list_runs(self, limit: int) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
@@ -163,13 +176,13 @@ class SelectionRepository:
                 return cursor.fetchall() or []
 
     def latest_data_trade_date(self) -> Any:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT MAX(trade_date) AS trade_date FROM daily_kline")
                 return (cursor.fetchone() or {}).get("trade_date")
 
     def get_active_run_by_idempotency(self, idempotency_key: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
@@ -191,7 +204,7 @@ class SelectionRepository:
         instrument_type: str,
         max_seconds: int,
     ) -> Any:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
@@ -277,6 +290,7 @@ class SelectionRepository:
         latest_candidate_trade_date: str | None,
         allowed_sector_types: Sequence[str] | None = None,
         excluded_sector_names: Sequence[str] | None = None,
+        decision_as_of: Any | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         sector_filters: list[str] = []
         sector_filter_params: list[Any] = []
@@ -291,6 +305,7 @@ class SelectionRepository:
             sector_filters.append(f"sector_name NOT IN ({placeholders})")
             sector_filter_params.extend(normalized_excluded)
         sector_filter_sql = "" if not sector_filters else "\n              AND " + "\n              AND ".join(sector_filters)
+        point_in_time = decision_as_of or requested_as_of
         if requested_as_of:
             sql = f"""
             SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
@@ -301,12 +316,19 @@ class SelectionRepository:
                 SELECT MAX(as_of_datetime)
                 FROM sector_opinion_daily
                 WHERE as_of_datetime <= %s
+                  AND created_at <= %s
+                  AND updated_at <= %s
             )
             {sector_filter_sql}
             ORDER BY sector_score DESC
             LIMIT 30
             """
-            params: Sequence[Any] = (requested_as_of, *sector_filter_params)
+            params: Sequence[Any] = (
+                requested_as_of,
+                point_in_time,
+                point_in_time,
+                *sector_filter_params,
+            )
         else:
             sql = f"""
             SELECT id, payload_version, trade_date, sector_type, sector_name, as_of_datetime, sector_score, weighted_impact_score,
@@ -324,18 +346,40 @@ class SelectionRepository:
             """
             params = (latest_candidate_trade_date, latest_candidate_trade_date, *sector_filter_params)
 
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
                 sectors = cursor.fetchall() or []
-                cursor.execute(
-                    """
-                    SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
-                    FROM market_sector_fund_flow_snapshot
-                    WHERE trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
-                      AND quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
-                    """
-                )
+                if point_in_time:
+                    cursor.execute(
+                        """
+                        SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
+                        FROM market_sector_fund_flow_snapshot
+                        WHERE trade_date = (
+                            SELECT MAX(trade_date)
+                            FROM market_sector_fund_flow_snapshot
+                            WHERE quote_time <= %s AND created_at <= %s AND updated_at <= %s
+                        )
+                          AND quote_time <= %s
+                          AND created_at <= %s
+                          AND updated_at <= %s
+                          AND quote_time >= DATE_SUB((
+                              SELECT MAX(quote_time)
+                              FROM market_sector_fund_flow_snapshot
+                              WHERE quote_time <= %s AND created_at <= %s AND updated_at <= %s
+                          ), INTERVAL 20 MINUTE)
+                        """,
+                        (point_in_time,) * 9,
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
+                        FROM market_sector_fund_flow_snapshot
+                        WHERE trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
+                          AND quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
+                        """
+                    )
                 fund_rows = cursor.fetchall() or []
         return sectors, fund_rows
 
@@ -352,74 +396,116 @@ class SelectionRepository:
         instrument_type: str,
         market_board: str,
         candidate_limit: int | None,
+        decision_as_of: Any | None = None,
+        expected_realtime_batch_ids: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         daily_kline_latest_filter = ""
-        daily_kline_recent_filter = ""
-        daily_kline_window_filter = ""
-        cutoff_params: list[Any] = []
+        daily_kline_params: list[Any] = []
+        technical_feature_filters: list[str] = []
+        technical_feature_params: list[Any] = []
         if daily_kline_operator:
             if daily_kline_operator not in {"<", "<="} or not cutoff_date:
                 raise ValueError("invalid daily kline cutoff")
             daily_kline_latest_filter = f"WHERE trade_date {daily_kline_operator} %s"
-            daily_kline_recent_filter = f"WHERE trade_date {daily_kline_operator} %s"
-            daily_kline_window_filter = f"AND trade_date {daily_kline_operator} %s"
-            cutoff_params = [cutoff_date, cutoff_date, cutoff_date]
+            daily_kline_params.append(cutoff_date)
+            technical_feature_filters.append(f"trade_date {daily_kline_operator} %s")
+            technical_feature_params.append(cutoff_date)
         if fundamental_date_operator not in {"<", "<="} or not fundamental_as_of_date:
             raise ValueError("invalid fundamental PIT cutoff")
-        if use_pit_fundamental:
-            fundamental_join_sql = f"""
-            LEFT JOIN stock_fundamental_pit fp ON fp.id = (
-                SELECT fp2.id
-                FROM stock_fundamental_pit fp2
-                WHERE fp2.code = sb.code
-                  AND fp2.announcement_date {fundamental_date_operator} %s
-                  AND fp2.period_end_date <= %s
-                ORDER BY fp2.period_end_date DESC,
-                         fp2.announcement_date DESC,
-                         fp2.update_flag DESC,
-                         fp2.id DESC
-                LIMIT 1
-            )
-            """
-            fundamental_params: list[Any] = [fundamental_as_of_date, fundamental_as_of_date]
-        else:
-            fundamental_join_sql = "LEFT JOIN stock_fundamental_pit fp ON 1 = 0"
-            fundamental_params = []
+        # PIT fundamentals are intentionally outside the hot sentiment-wide
+        # query. They remain available to stock detail/risk workflows, while
+        # selection uses event, market, technical, money-flow and chip data.
+        fundamental_join_sql = ""
+        fundamental_params: list[Any] = []
         market_board_filter = self.market_board_filter_sql(market_board)
-        sql = """
-        SELECT
-            sb.code,
-            sb.name,
-            sb.industry,
-            sb.instrument_type,
-            sb.is_st,
-            sb.pe_tushare,
-            sb.pb_tushare,
-            sb.roe,
-            sb.roa,
-            sb.grossprofit_margin,
-            sb.netprofit_margin,
-            sb.revenue_yoy,
-            sb.profit_yoy,
-            sb.eps,
-            sb.fundamental_period AS legacy_fundamental_period,
-            fp.roe AS pit_roe,
-            fp.roa AS pit_roa,
-            fp.grossprofit_margin AS pit_grossprofit_margin,
-            fp.netprofit_margin AS pit_netprofit_margin,
-            fp.revenue_yoy AS pit_revenue_yoy,
-            fp.profit_yoy AS pit_profit_yoy,
-            fp.eps AS pit_eps,
-            fp.period_end_date AS pit_fundamental_period,
-            fp.announcement_date AS pit_fundamental_publish_date,
-            fp.source AS pit_fundamental_source,
-            (fp.id IS NOT NULL) AS pit_fundamental_available,
-            dk.open,
-            dk.high,
-            dk.low,
-            dk.close,
-            dk.amount,
-            dk.trade_date,
+        if decision_as_of is not None:
+            technical_feature_filters.append("computed_at <= %s")
+            technical_feature_params.append(decision_as_of)
+        technical_feature_date_filter = (
+            "WHERE " + " AND ".join(technical_feature_filters)
+            if technical_feature_filters
+            else ""
+        )
+        decision_date = None
+        if decision_as_of is not None:
+            decision_date = (
+                decision_as_of.date()
+                if hasattr(decision_as_of, "date") and not isinstance(decision_as_of, str)
+                else str(decision_as_of)[:10]
+            )
+        status_cutoff_sql = "%s" if decision_date is not None else "CURRENT_DATE"
+        status_knowledge_sql = ""
+        status_params: list[Any] = []
+        if decision_date is not None:
+            status_params = [decision_date, decision_as_of, decision_as_of]
+            status_knowledge_sql = " AND ss2.created_at <= %s AND ss2.updated_at <= %s"
+
+        normalized_batch_ids = sorted(
+            {
+                str(value).strip()
+                for value in (expected_realtime_batch_ids or [])
+                if str(value).strip()
+            }
+        )
+        realtime_filter_sql = ""
+        realtime_params: list[Any] = []
+        if decision_as_of is not None:
+            realtime_filter_sql = """
+              AND realtime.trade_date = %s
+              AND realtime.quote_time <= %s
+              AND realtime.received_at <= %s
+              AND realtime.updated_at <= %s
+              AND COALESCE(realtime.is_stale, 0) = 0
+            """
+            realtime_params.extend(
+                [decision_date, decision_as_of, decision_as_of, decision_as_of]
+            )
+        elif use_realtime:
+            realtime_filter_sql = """
+              AND realtime.trade_date = CURRENT_DATE
+              AND COALESCE(realtime.is_stale, 0) = 0
+            """
+        if normalized_batch_ids:
+            placeholders = ",".join(["%s"] * len(normalized_batch_ids))
+            realtime_filter_sql += f" AND realtime.batch_id IN ({placeholders})"
+            realtime_params.extend(normalized_batch_ids)
+
+        realtime_moneyflow_filter_sql = """
+          AND realtime_mf.trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
+          AND realtime_mf.quote_time >= DATE_SUB(
+              (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+              INTERVAL 20 MINUTE
+          )
+        """
+        realtime_moneyflow_params: list[Any] = []
+        if decision_as_of is not None:
+            realtime_moneyflow_filter_sql = """
+              AND realtime_mf.trade_date = (
+                  SELECT MAX(trade_date)
+                  FROM stock_realtime_moneyflow_snapshot
+                  WHERE quote_time <= %s AND created_at <= %s AND updated_at <= %s
+              )
+              AND realtime_mf.quote_time <= %s
+              AND realtime_mf.created_at <= %s
+              AND realtime_mf.updated_at <= %s
+              AND realtime_mf.quote_time >= DATE_SUB((
+                  SELECT MAX(quote_time)
+                  FROM stock_realtime_moneyflow_snapshot
+                  WHERE quote_time <= %s AND created_at <= %s AND updated_at <= %s
+              ), INTERVAL 20 MINUTE)
+            """
+            realtime_moneyflow_params = [decision_as_of] * 9
+
+        popularity_filter_sql = ""
+        popularity_params: list[Any] = []
+        if decision_as_of is not None:
+            popularity_filter_sql = """
+              AND pop.quote_time <= %s
+              AND pop.created_at <= %s
+              AND pop.updated_at <= %s
+            """
+            popularity_params = [decision_as_of] * 3
+        technical_feature_projection = """
             ma.ma5,
             ma.ma10,
             ma.ma20,
@@ -432,13 +518,77 @@ class SelectionRepository:
             ma.min_close_20,
             ma.avg_amount_5,
             ma.avg_amount_20,
+            ma.median_amount_20,
             ma.kline_count_20,
             ma.kline_count_60,
             ma.std_return_20,
             ma.pct_chg_1d,
+            ma.return_5d_pct,
+            ma.return_20d_pct,
+            ma.latest_amount AS technical_latest_amount,
+            ma.amount_ratio_5_20,
+            ma.trade_date AS technical_feature_trade_date,
+            ma.source_trade_date AS technical_source_trade_date,
+        """
+        technical_feature_join = f"""
+        LEFT JOIN stock_technical_feature_daily ma
+          ON ma.code = sb.code
+         AND ma.trade_date = (
+             SELECT MAX(trade_date)
+             FROM stock_technical_feature_daily
+             {technical_feature_date_filter}
+         )
+        """
+        sql_template = """
+        SELECT
+            sb.code,
+            sb.name,
+            sb.industry,
+            sb.instrument_type,
+            sb.is_st,
+            lifecycle.list_status,
+            (lifecycle.code IS NOT NULL) AS lifecycle_known,
+            COALESCE(name_state.is_delisting_period, 0) AS is_delisting,
+            COALESCE(status_state.status_label, '') AS stock_status_label,
+            COALESCE(status_state.status_label, '') IN ('suspended', 'paused_listing') AS is_suspended,
+            (dk.code IS NOT NULL) AS daily_data_available,
+            (ma.code IS NOT NULL) AS technical_data_available,
+            (fid.code IS NOT NULL) AS factor_data_available,
+            (mf.code IS NOT NULL) AS daily_moneyflow_data_available,
+            (chip.code IS NOT NULL) AS chip_data_available,
+            (realtime.code IS NOT NULL) AS realtime_data_available,
+            NULL AS pe_tushare,
+            NULL AS pb_tushare,
+            NULL AS roe,
+            NULL AS roa,
+            NULL AS grossprofit_margin,
+            NULL AS netprofit_margin,
+            NULL AS revenue_yoy,
+            NULL AS profit_yoy,
+            NULL AS eps,
+            NULL AS legacy_fundamental_period,
+            NULL AS pit_roe,
+            NULL AS pit_roa,
+            NULL AS pit_grossprofit_margin,
+            NULL AS pit_netprofit_margin,
+            NULL AS pit_revenue_yoy,
+            NULL AS pit_profit_yoy,
+            NULL AS pit_eps,
+            NULL AS pit_fundamental_period,
+            NULL AS pit_fundamental_publish_date,
+            NULL AS pit_fundamental_source,
+            0 AS pit_fundamental_available,
+            dk.open,
+            dk.high,
+            dk.low,
+            dk.close,
+            dk.amount,
+            dk.trade_date,
+            {technical_feature_projection}
             fid.turnover_rate,
             NULL AS turnover_rate_5d_avg,
             DATEDIFF(dk.trade_date, sb.listing_date) AS listed_days,
+            ma.kline_count_60 AS listed_trade_days,
             fid.volume_ratio,
             fid.total_mv,
             fid.completeness_score,
@@ -457,6 +607,9 @@ class SelectionRepository:
             realtime.amount AS realtime_amount,
             realtime.quote_time AS realtime_quote_time,
             realtime.trade_date AS realtime_trade_date,
+            realtime.batch_id AS realtime_batch_id,
+            realtime.received_at AS realtime_received_at,
+            realtime.is_stale AS realtime_is_stale,
             realtime_mf.inflow_amount AS realtime_mf_inflow,
             realtime_mf.outflow_amount AS realtime_mf_outflow,
             realtime_mf.net_amount AS realtime_mf_net,
@@ -493,6 +646,7 @@ class SelectionRepository:
             mcd.csi500_pct_chg,
             mcd.csi1000_pct_chg
         FROM stock_basic sb
+        LEFT JOIN stock_instrument_lifecycle lifecycle ON lifecycle.code = sb.code
         {fundamental_join_sql}
         LEFT JOIN (
             SELECT d1.code, d1.trade_date, d1.open, d1.high, d1.low, d1.close, d1.amount
@@ -504,70 +658,35 @@ class SelectionRepository:
                 GROUP BY code
             ) d2 ON d1.code = d2.code AND d1.trade_date = d2.max_date
         ) dk ON sb.code = dk.code
-        LEFT JOIN (
-            SELECT
-                code,
-                AVG(CASE WHEN rn <= 5 THEN close END) AS ma5,
-                AVG(CASE WHEN rn <= 10 THEN close END) AS ma10,
-                AVG(CASE WHEN rn <= 20 THEN close END) AS ma20,
-                AVG(CASE WHEN rn <= 30 THEN close END) AS ma30,
-                AVG(CASE WHEN rn <= 60 THEN close END) AS ma60,
-                MAX(CASE WHEN rn = 6 THEN close END) AS close_5d,
-                MAX(CASE WHEN rn = 20 THEN close END) AS close_20d,
-                MAX(CASE WHEN rn = 2 THEN close END) AS prev_close_1d,
-                MAX(CASE WHEN rn <= 20 THEN close END) AS max_close_20,
-                MIN(CASE WHEN rn <= 20 THEN close END) AS min_close_20,
-                AVG(CASE WHEN rn <= 5 THEN amount END) AS avg_amount_5,
-                AVG(CASE WHEN rn <= 20 THEN amount END) AS avg_amount_20,
-                SUM(CASE WHEN rn <= 20 THEN 1 ELSE 0 END) AS kline_count_20,
-                COUNT(*) AS kline_count_60,
-                STDDEV_SAMP(
-                    CASE
-                        WHEN rn <= 20 AND prev_close IS NOT NULL AND prev_close > 0
-                        THEN close / prev_close - 1
-                    END
-                ) AS std_return_20,
-                MAX(
-                    CASE
-                        WHEN rn = 1 AND prev_close IS NOT NULL AND prev_close > 0
-                        THEN (close - prev_close) / prev_close * 100
-                    END
-                ) AS pct_chg_1d
-            FROM (
-                SELECT
-                    code,
-                    trade_date,
-                    close,
-                    amount,
-                    LAG(close) OVER (PARTITION BY code ORDER BY trade_date) AS prev_close,
-                    ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
-                FROM daily_kline
-                WHERE trade_date >= (
-                    SELECT MIN(trade_date)
-                    FROM (
-                        SELECT DISTINCT trade_date
-                        FROM daily_kline
-                        {daily_kline_recent_filter}
-                        ORDER BY trade_date DESC
-                        LIMIT 90
-                    ) recent_trade_dates
-                )
-                {daily_kline_window_filter}
-            ) ranked
-            WHERE rn <= 60
-            GROUP BY code
-        ) ma ON sb.code = ma.code
+        LEFT JOIN stock_name_history name_state ON name_state.id = (
+            SELECT nh2.id
+            FROM stock_name_history nh2
+            WHERE nh2.code = sb.code
+              AND (dk.trade_date IS NULL OR nh2.start_date <= dk.trade_date)
+              AND (nh2.end_date IS NULL OR dk.trade_date IS NULL OR nh2.end_date >= dk.trade_date)
+            ORDER BY nh2.start_date DESC, nh2.id DESC
+            LIMIT 1
+        )
+        LEFT JOIN stock_status_snapshot status_state
+          ON status_state.id = (
+              SELECT ss2.id
+              FROM stock_status_snapshot ss2
+              WHERE ss2.code = sb.code
+                AND ss2.trade_date <= {status_cutoff_sql}
+                {status_knowledge_sql}
+              ORDER BY ss2.trade_date DESC, ss2.id DESC
+              LIMIT 1
+          )
+        {technical_feature_join}
         LEFT JOIN factor_input_daily fid ON fid.code = sb.code AND fid.trade_date = dk.trade_date
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = sb.code AND mf.trade_date = dk.trade_date
         LEFT JOIN stock_realtime_snapshot realtime ON %s = 1 AND realtime.code = sb.code
+          {realtime_filter_sql}
         LEFT JOIN stock_realtime_moneyflow_snapshot realtime_mf ON %s = 1
           AND realtime_mf.code = sb.code
-          AND realtime_mf.trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
-          AND realtime_mf.quote_time >= DATE_SUB(
-              (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
-              INTERVAL 20 MINUTE
-          )
+          {realtime_moneyflow_filter_sql}
         LEFT JOIN stock_popularity_snapshot pop ON %s = 1 AND pop.code = sb.code
+          {popularity_filter_sql}
         LEFT JOIN stock_chip_daily chip ON chip.code = sb.code AND chip.trade_date = dk.trade_date
         LEFT JOIN stock_sentiment_daily ssd ON sb.code = ssd.code
           AND ssd.trade_date = (
@@ -603,25 +722,40 @@ class SelectionRepository:
           AND sb.instrument_type = %s
           {market_board_filter}
         ORDER BY (dk.trade_date IS NULL), dk.trade_date DESC, sb.code
-        """.format(
-            daily_kline_latest_filter=daily_kline_latest_filter,
-            daily_kline_recent_filter=daily_kline_recent_filter,
-            daily_kline_window_filter=daily_kline_window_filter,
-            fundamental_join_sql=fundamental_join_sql,
-            market_board_filter=market_board_filter,
-        )
+        """
+
+        def build_sql() -> str:
+            return sql_template.format(
+                daily_kline_latest_filter=daily_kline_latest_filter,
+                fundamental_join_sql=fundamental_join_sql,
+                market_board_filter=market_board_filter,
+                technical_feature_projection=technical_feature_projection,
+                technical_feature_join=technical_feature_join,
+                status_cutoff_sql=status_cutoff_sql,
+                status_knowledge_sql=status_knowledge_sql,
+                realtime_filter_sql=realtime_filter_sql,
+                realtime_moneyflow_filter_sql=realtime_moneyflow_filter_sql,
+                popularity_filter_sql=popularity_filter_sql,
+            )
+
+        sql = build_sql()
         params = [
             *fundamental_params,
-            *cutoff_params,
+            *daily_kline_params,
+            *status_params,
+            *technical_feature_params,
             1 if use_realtime else 0,
+            *realtime_params,
             1 if use_realtime else 0,
+            *realtime_moneyflow_params,
             1 if use_current_popularity else 0,
+            *popularity_params,
             instrument_type,
         ]
         if candidate_limit:
             sql += " LIMIT %s"
             params.append(int(candidate_limit))
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
                 return cursor.fetchall() or []

@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
 from app.orchestration.realtime_schema import intraday_table_ddl
-from app.shared.db import mysql_conn
+from app.shared.db import mysql_conn, mysql_read_conn
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 
 
@@ -226,7 +226,7 @@ def fetch_rollup_bars(
         raise ValueError(f"interval must be one of {ROLLUP_INTERVALS}")
     final_limit = max(1, min(int(limit), 5000))
     target = normalize_trade_date(trade_date) if trade_date else None
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             if target is None:
                 cursor.execute(

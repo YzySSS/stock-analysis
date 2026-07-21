@@ -20,6 +20,31 @@ function formatMoneyWan(value) {
   return `${num.toFixed(2)}万`;
 }
 
+const requestedIntradayRefreshes = new Set();
+
+function waitFor(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function refreshAndLoadIntradayBars(code, tradeDate) {
+  const encodedCode = encodeURIComponent(code);
+  const encodedDate = encodeURIComponent(tradeDate || '');
+  const refreshKey = `${code}:${tradeDate || ''}`;
+  if (!requestedIntradayRefreshes.has(refreshKey)) {
+    requestedIntradayRefreshes.add(refreshKey);
+    await fetchJson(
+      `/api/stocks/${encodedCode}/intraday-bars/refresh?trade_date=${encodedDate}`,
+      { method: 'POST' },
+    );
+  }
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const bars = await fetchJson(`/api/stocks/${encodedCode}/intraday-bars?trade_date=${encodedDate}`);
+    if ((bars.items || []).length >= 2) return bars;
+    if (attempt < 7) await waitFor(1500);
+  }
+  return { items: [], count: 0, source_status: 'empty' };
+}
+
 function formatRank(rank, percentile) {
   if (rank == null) return '-';
   const pct = percentile == null ? '' : ` · 前${Math.max(0, Math.min(100, 100 - Number(percentile))).toFixed(1)}%`;
@@ -1061,7 +1086,10 @@ async function loadStockDetail() {
         ...intradayChartMeta,
         label: '实时采样线 · 正在按需补全完整分钟线',
       });
-      fetchJson(`/api/stocks/${encodeURIComponent(code)}/intraday-bars?trade_date=${encodeURIComponent(realtime.trade_date || data.latest_kline?.trade_date || '')}`)
+      refreshAndLoadIntradayBars(
+        code,
+        realtime.trade_date || data.latest_kline?.trade_date || '',
+      )
         .then((intradayBars) => {
           if ((intradayBars.items || []).length >= 2) {
             renderIntradayChart(normalizeIntradayBars(intradayBars.items || [], intradayChartMeta), {

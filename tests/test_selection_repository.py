@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import unittest
 from contextlib import contextmanager
+from datetime import date, datetime
 from pathlib import Path
 
+from pymysql.err import ProgrammingError
+
 from app.stock_selection.repository import SelectionRepository
+from app.stock_selection.selector import StockSelector
 
 
 class FakeCursor:
-    def __init__(self, *, fetchone_values=None, fetchall_values=None, rowcounts=None):
+    def __init__(self, *, fetchone_values=None, fetchall_values=None, rowcounts=None, execute_errors=None):
         self.fetchone_values = list(fetchone_values or [])
         self.fetchall_values = list(fetchall_values or [])
         self.rowcounts = list(rowcounts or [])
+        self.execute_errors = list(execute_errors or [])
         self.rowcount = 0
         self.executed = []
         self.executed_many = []
@@ -24,6 +29,10 @@ class FakeCursor:
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
+        if self.execute_errors:
+            error = self.execute_errors.pop(0)
+            if error is not None:
+                raise error
         if self.rowcounts:
             self.rowcount = self.rowcounts.pop(0)
 
@@ -88,25 +97,101 @@ class SelectionRepositoryTests(unittest.TestCase):
 
         self.assertEqual(rows, [{"code": "sh.600000"}])
         sql, params = cursor.executed[0]
-        self.assertEqual(sql.count("trade_date <= %s"), 3)
-        self.assertIn("AS ma5", sql)
-        self.assertIn("AS ma10", sql)
-        self.assertIn("AS ma30", sql)
-        self.assertIn("AS avg_amount_5", sql)
-        self.assertIn("LIMIT 90", sql)
-        self.assertIn("WHERE rn <= 60", sql)
+        self.assertEqual(sql.count("trade_date <= %s"), 2)
+        self.assertIn("LEFT JOIN stock_technical_feature_daily ma", sql)
+        self.assertIn("ma.ma5", sql)
+        self.assertIn("ma.ma10", sql)
+        self.assertIn("ma.ma30", sql)
+        self.assertIn("ma.avg_amount_5", sql)
+        self.assertIn("ma.median_amount_20", sql)
+        self.assertNotIn("ROW_NUMBER()", sql)
+        self.assertNotIn("STDDEV_SAMP", sql)
+        self.assertNotIn("LIMIT 90", sql)
         self.assertIn("AVG(trend_score) AS market_index_trend_score", sql)
         self.assertIn("COUNT(DISTINCT index_code) AS market_index_count", sql)
         self.assertIn("'000300.SH', '000905.SH', '000852.SH'", sql)
         self.assertIn("AS csi1000_pct_chg", sql)
-        self.assertIn("LEFT JOIN stock_fundamental_pit fp", sql)
-        self.assertIn("fp2.announcement_date <= %s", sql)
+        self.assertNotIn("stock_fundamental_pit", sql)
+        self.assertIn("LEFT JOIN stock_instrument_lifecycle lifecycle", sql)
+        self.assertIn("LEFT JOIN stock_name_history name_state", sql)
+        self.assertIn("LEFT JOIN stock_status_snapshot status_state", sql)
+        self.assertIn("status_state.id = (", sql)
+        self.assertIn("ss2.trade_date <= CURRENT_DATE", sql)
+        self.assertNotIn("status_state.trade_date = dk.trade_date", sql)
+        self.assertIn("AS is_suspended", sql)
+        self.assertIn("ma.kline_count_60 AS listed_trade_days", sql)
+        self.assertNotIn("lowvol_reversal_feature_daily", sql)
         self.assertIn("sb.code REGEXP '^sz\\.(000|001|002)'", sql)
         self.assertTrue(sql.rstrip().endswith("LIMIT %s"))
         self.assertEqual(
             params,
-            ["2026-07-16", "2026-07-16", "2026-07-16", "2026-07-16", "2026-07-16", 0, 0, 0, "stock", 10],
+            ["2026-07-16", "2026-07-16", 0, 0, 0, "stock", 10],
         )
+
+    def test_candidate_query_never_falls_back_to_retired_lowvol_table(self):
+        cursor = FakeCursor(
+            execute_errors=[ProgrammingError(1146, "stock_technical_feature_daily does not exist")],
+        )
+        repository = SelectionRepository(connection_factory(cursor))
+
+        with self.assertRaises(ProgrammingError):
+            repository.load_candidate_rows(
+                daily_kline_operator="<=",
+                cutoff_date="2026-07-16",
+                use_pit_fundamental=False,
+                fundamental_date_operator="<=",
+                fundamental_as_of_date="2026-07-16",
+                use_realtime=False,
+                use_current_popularity=False,
+                instrument_type="stock",
+                market_board="all",
+                candidate_limit=None,
+            )
+
+        self.assertEqual(len(cursor.executed), 1)
+        self.assertIn("stock_technical_feature_daily", cursor.executed[0][0])
+        self.assertNotIn("lowvol_reversal_feature_daily", cursor.executed[0][0])
+
+    def test_candidate_query_binds_every_volatile_source_to_decision_as_of(self):
+        decision = datetime(2026, 7, 21, 10, 15, 30)
+        cursor = FakeCursor(fetchall_values=[[]])
+        repository = SelectionRepository(connection_factory(cursor))
+
+        repository.load_candidate_rows(
+            daily_kline_operator="<",
+            cutoff_date="2026-07-21",
+            use_pit_fundamental=False,
+            fundamental_date_operator="<",
+            fundamental_as_of_date="2026-07-21",
+            use_realtime=True,
+            use_current_popularity=True,
+            instrument_type="stock",
+            market_board="all",
+            candidate_limit=None,
+            decision_as_of=decision,
+            expected_realtime_batch_ids=["batch-b", "batch-a"],
+        )
+
+        sql, params = cursor.executed[0]
+        self.assertEqual(sql.count("%s"), len(params))
+        self.assertIn("computed_at <= %s", sql)
+        self.assertIn("ss2.trade_date <= %s", sql)
+        self.assertIn("ss2.created_at <= %s", sql)
+        self.assertIn("realtime.trade_date = %s", sql)
+        self.assertIn("realtime.quote_time <= %s", sql)
+        self.assertIn("realtime.received_at <= %s", sql)
+        self.assertIn("realtime.updated_at <= %s", sql)
+        self.assertIn("COALESCE(realtime.is_stale, 0) = 0", sql)
+        self.assertIn("realtime.batch_id IN (%s,%s)", sql)
+        self.assertIn("realtime_mf.quote_time <= %s", sql)
+        self.assertIn("pop.quote_time <= %s", sql)
+        self.assertIn("pop.updated_at <= %s", sql)
+        self.assertEqual(params[0], "2026-07-21")
+        self.assertEqual(params[1:4], [date(2026, 7, 21), decision, decision])
+        self.assertEqual(params[4:6], ["2026-07-21", decision])
+        self.assertEqual(params[6], 1)
+        self.assertEqual(params[11:13], ["batch-a", "batch-b"])
+        self.assertEqual(params[-1], "stock")
 
     def test_candidate_query_rejects_dynamic_operator(self):
         repository = SelectionRepository(connection_factory(FakeCursor()))
@@ -143,8 +228,7 @@ class SelectionRepositoryTests(unittest.TestCase):
         )
 
         sql, params = cursor.executed[0]
-        self.assertIn("LEFT JOIN stock_fundamental_pit fp ON 1 = 0", sql)
-        self.assertNotIn("FROM stock_fundamental_pit fp2", sql)
+        self.assertNotIn("stock_fundamental_pit", sql)
         self.assertEqual(params, [0, 0, 0, "stock"])
 
     def test_market_opinion_type_filter_is_applied_before_limit(self):
@@ -163,7 +247,21 @@ class SelectionRepositoryTests(unittest.TestCase):
         self.assertIn("sector_type IN (%s)", sql)
         self.assertIn("sector_name NOT IN (%s)", sql)
         self.assertLess(sql.index("sector_type IN"), sql.index("LIMIT 30"))
-        self.assertEqual(params, ("2026-07-21 12:30:00", "theme", "金融"))
+        self.assertEqual(
+            params,
+            (
+                "2026-07-21 12:30:00",
+                "2026-07-21 12:30:00",
+                "2026-07-21 12:30:00",
+                "theme",
+                "金融",
+            ),
+        )
+        fund_sql, fund_params = cursor.executed[1]
+        self.assertIn("quote_time <= %s", fund_sql)
+        self.assertIn("created_at <= %s", fund_sql)
+        self.assertIn("updated_at <= %s", fund_sql)
+        self.assertEqual(fund_params, ("2026-07-21 12:30:00",) * 9)
 
     def test_save_result_rows_preserves_both_dedupe_steps(self):
         cursor = FakeCursor()
@@ -200,6 +298,74 @@ class SelectionPersistenceBoundaryTests(unittest.TestCase):
             with self.subTest(path=relative_path):
                 self.assertNotIn("mysql_conn", source)
                 self.assertNotIn("cursor.execute", source)
+
+
+class SelectorDecisionAsOfTests(unittest.TestCase):
+    class CapturingRepository:
+        def __init__(self, rows=None):
+            self.rows = list(rows or [])
+            self.candidate_kwargs = None
+
+        def load_candidate_rows(self, **kwargs):
+            self.candidate_kwargs = kwargs
+            return list(self.rows)
+
+        def load_market_opinion_rows(self, **_kwargs):
+            return [], []
+
+    def test_explicit_decision_as_of_reaches_repository_and_enables_safe_intraday(self):
+        decision = datetime(2026, 7, 21, 10, 15, 30)
+        repository = self.CapturingRepository()
+        selector = StockSelector(
+            "a_share_sentiment_v05",
+            strategy_overrides={"decision_realtime_batch_ids": ["batch-1"]},
+            repository=repository,  # type: ignore[arg-type]
+        )
+
+        selector.load_candidates_from_mysql(decision_as_of=decision)
+
+        self.assertEqual(repository.candidate_kwargs["decision_as_of"], decision)
+        self.assertTrue(repository.candidate_kwargs["use_realtime"])
+        self.assertTrue(repository.candidate_kwargs["use_current_popularity"])
+        self.assertEqual(
+            repository.candidate_kwargs["expected_realtime_batch_ids"],
+            ["batch-1"],
+        )
+        self.assertEqual(repository.candidate_kwargs["daily_kline_operator"], "<")
+
+    def test_required_data_complete_is_candidate_specific(self):
+        decision = datetime(2026, 7, 21, 10, 15, 30)
+        base = {
+            "code": "sh.600000",
+            "name": "test",
+            "trade_date": date(2026, 7, 20),
+            "daily_data_available": 1,
+            "technical_data_available": 1,
+            "factor_data_available": 1,
+            "daily_moneyflow_data_available": 1,
+            "chip_data_available": 1,
+            "realtime_data_available": 1,
+            "realtime_quote_time": decision,
+            "realtime_received_at": decision,
+            "realtime_trade_date": decision.date(),
+            "realtime_batch_id": "batch-1",
+            "realtime_is_stale": 0,
+        }
+        repository = self.CapturingRepository([base, {**base, "code": "sh.600001", "chip_data_available": 0}])
+        selector = StockSelector(
+            "a_share_sentiment_v05",
+            strategy_overrides={"decision_realtime_batch_ids": ["batch-1"]},
+            repository=repository,  # type: ignore[arg-type]
+        )
+
+        bundle = selector.load_candidates_from_mysql(decision_as_of=decision)
+
+        self.assertTrue(bundle["candidates"][0]["required_data_complete"])
+        self.assertFalse(bundle["candidates"][1]["required_data_complete"])
+        self.assertFalse(
+            bundle["candidates"][1]["required_data_components"]["chip"]
+        )
+        self.assertEqual(bundle["candidates"][0]["decision_clock_mode"], "intraday")
 
 
 if __name__ == "__main__":

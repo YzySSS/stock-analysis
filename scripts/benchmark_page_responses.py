@@ -228,7 +228,7 @@ def measure_dashboard_local_cache_miss(repetitions: int) -> dict[str, Any]:
     samples_ms: list[float] = []
     response_bytes = 0
     for _ in range(repetitions):
-        dashboard._DASHBOARD_CACHE.clear()
+        dashboard.get_cache_backend().delete("dashboard:summary:v2:compact:8")
         started = time.perf_counter()
         payload = dashboard.dashboard_summary(limit=8, compact=True)
         samples_ms.append((time.perf_counter() - started) * 1000)

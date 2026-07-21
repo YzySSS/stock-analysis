@@ -6,10 +6,16 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.data_ingestion.intraday_bar_sync import cached_bars, get_or_fetch_intraday_bars, normalize_code
+from app.data_ingestion.intraday_bar_sync import (
+    SOURCE as INTRADAY_BAR_SOURCE,
+    cached_bars,
+    latest_trade_date_for_code,
+    normalize_code,
+)
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
 from app.data_ingestion.realtime_lifecycle import fetch_rollup_bars
-from app.shared.db import mysql_conn
+from app.jobs.durable_tasks import DurableTaskService
+from app.shared.db import mysql_read_conn
 from app.shared.sentiment_scoring import enrich_opinion_news_item, score_source
 
 router = APIRouter(tags=["stocks"])
@@ -185,7 +191,7 @@ def _technical_summary(price_history: list[dict[str, Any]], realtime_price: floa
 
 @router.get("/stocks/{code}/overview")
 def stock_overview(code: str) -> dict:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -386,10 +392,51 @@ def stock_intraday_bars(
     trade_date: str | None = Query(default=None),
     refresh: bool = Query(default=False),
 ) -> dict:
-    try:
-        return get_or_fetch_intraday_bars(code=code, trade_date=trade_date, refresh=refresh)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"分钟线补全失败: {type(exc).__name__}: {str(exc)[:180]}") from exc
+    """Return cached bars without external I/O or database writes.
+
+    ``refresh`` remains in the signature for backwards compatibility, but a
+    caller must use the POST refresh endpoint so a GET can never trigger an
+    AkShare request or mutate MySQL.
+    """
+
+    if refresh:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "intraday_refresh_requires_async_post",
+                "message": "分钟线刷新已改为异步命令，请调用 POST /api/stocks/{code}/intraday-bars/refresh。",
+            },
+        )
+    final_code = normalize_code(code)
+    final_trade_date = trade_date or latest_trade_date_for_code(final_code)
+    items = cached_bars(final_code, final_trade_date) if final_trade_date else []
+    return {
+        "code": final_code,
+        "trade_date": final_trade_date,
+        "source": INTRADAY_BAR_SOURCE,
+        "source_status": "cached" if items else "empty",
+        "count": len(items),
+        "saved_rows": 0,
+        "stale": not bool(items),
+        "refresh_endpoint": f"/api/stocks/{final_code}/intraday-bars/refresh",
+        "items": items,
+    }
+
+
+@router.post("/stocks/{code}/intraday-bars/refresh", status_code=202)
+def refresh_stock_intraday_bars(
+    code: str,
+    trade_date: str | None = Query(default=None),
+) -> dict:
+    final_code = normalize_code(code)
+    queued = DurableTaskService().enqueue_intraday_refresh(final_code, trade_date)
+    return {
+        "status": "queued",
+        "job_id": queued["task_id"],
+        "code": final_code,
+        "trade_date": trade_date,
+        "message": "分钟线刷新已进入可恢复任务队列，当前 GET 接口继续返回已有缓存。",
+    }
 
 
 @router.get("/stocks/{code}/realtime-rollups")
@@ -417,7 +464,7 @@ def stock_detail(
     news_limit: int = Query(default=12, ge=0, le=50),
     intraday_limit: int = Query(default=240, ge=0, le=400),
 ) -> dict:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -754,7 +801,7 @@ def stock_detail(
     sector_opinion_news = []
     latest_sentiment_context = (latest_selection or {}).get("sentiment_context") or {}
     if not latest_sentiment_context:
-        with mysql_conn() as conn:
+        with mysql_read_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """

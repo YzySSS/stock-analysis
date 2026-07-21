@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List, Optional
 
-from app.data_ingestion.intraday_bar_sync import get_or_fetch_intraday_bars
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
-from app.shared.db import mysql_conn
+from app.shared.db import mysql_read_conn
 from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, require_supported_instrument
 from app.shared.strategy_loader import StrategyLoader, StrategyRegistryError
 from app.stock_selection.deepseek_sentiment_rerank import DeepSeekSentimentReranker
 from app.stock_selection.selector import StockSelector
 from app.data_ingestion.news_provider import NewsAggregator
 from app.stock_selection.sentiment_refresh import refresh_sentiment_candidates
+from app.stock_selection.sentiment_snapshot import SentimentCandidateSnapshotRepository
 from app.strategies.capability import StrategyCapabilityService
 
 
@@ -20,11 +21,15 @@ class StrategyService:
         self,
         registry_path: Optional[str] = None,
         dataset_snapshot: Optional[Dict[str, Any]] = None,
+        sentiment_snapshot_repository: SentimentCandidateSnapshotRepository | None = None,
     ):
         self.loader = StrategyLoader(registry_path=registry_path)
         self.capabilities = StrategyCapabilityService(
             loader=self.loader,
             dataset_snapshot=dataset_snapshot,
+        )
+        self.sentiment_snapshots = (
+            sentiment_snapshot_repository or SentimentCandidateSnapshotRepository()
         )
 
     def _serialize_strategy_item(
@@ -111,6 +116,193 @@ class StrategyService:
     def get_default_strategy_id(self) -> Optional[str]:
         return self.loader.get_default_strategy_id()
 
+    def is_registered_strategy(self, strategy_id: str) -> bool:
+        """Return whether ``strategy_id`` is available for new executions.
+
+        Historical rows may still reference retired strategies, but only entries
+        in the current registry can create a new selection run.
+        """
+
+        normalized_id = str(strategy_id or "").strip()
+        if not normalized_id:
+            return False
+        return any(
+            str(item.get("id") or "").strip() == normalized_id
+            for item in self.loader.registry.get("strategies", [])
+        )
+    @staticmethod
+    def _sentiment_read_model_enabled() -> bool:
+        return str(os.getenv("USE_SENTIMENT_READ_MODEL", "false")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    @staticmethod
+    def normalize_selection_contract(
+        item: Dict[str, Any],
+        *,
+        validation_status: str | None,
+    ) -> Dict[str, Any]:
+        """Expose one stable result contract across frozen and new versions."""
+
+        normalized = dict(item)
+        factors = normalized.get("factors") or normalized.get("factor_json") or {}
+        explain = normalized.get("explain") or normalized.get("explain_json") or {}
+        raw_metrics = (
+            explain.get("raw_metrics") if isinstance(explain, dict) else {}
+        ) or normalized.get("strategy_raw_metrics") or {}
+        signal_grade = (
+            normalized.get("signal_grade")
+            or normalized.get("grade_state")
+            or normalized.get("trade_grade_state")
+            or raw_metrics.get("trade_grade_state")
+            or "watch"
+        )
+        grade_reason = (
+            normalized.get("grade_reason")
+            or normalized.get("trade_grade_reason")
+            or raw_metrics.get("trade_grade_reason")
+        )
+        gate_results = normalized.get("gate_results")
+        if not isinstance(gate_results, dict):
+            gate_results = {
+                "hard_gate_pass": normalized.get("hard_gate_pass"),
+                "hard_gate_reasons": list(normalized.get("hard_gate_reasons") or []),
+                "watch_gate_reasons": list(normalized.get("watch_gate_reasons") or []),
+                "grade_reason": grade_reason,
+            }
+
+        evidence_ids: list[str] = []
+        for value in normalized.get("evidence_ids") or []:
+            text = str(value).strip()
+            if text and text not in evidence_ids:
+                evidence_ids.append(text)
+        sentiment_context = normalized.get("sentiment_context") or {}
+        if isinstance(sentiment_context, dict):
+            evidence_rows = (
+                list(sentiment_context.get("stock_news") or [])
+                + list(sentiment_context.get("top_news") or [])
+                + list(sentiment_context.get("sector_top_news") or [])
+            )
+            for row in evidence_rows:
+                if not isinstance(row, dict):
+                    continue
+                value = row.get("evidence_id") or row.get("news_id") or row.get("id")
+                text = str(value).strip() if value is not None else ""
+                if text and text not in evidence_ids:
+                    evidence_ids.append(text)
+
+        ai_status = normalized.get("ai_status") or normalized.get("ai_overlay_state")
+        if not ai_status:
+            ai_status = (
+                "ready"
+                if normalized.get("deepseek_sentiment_score") is not None
+                or normalized.get("deepseek_summary")
+                else "not_requested"
+            )
+        normalized.update(
+            {
+                "signal_grade": signal_grade,
+                "validation_status": normalized.get("validation_status") or validation_status or "unvalidated",
+                "score_breakdown": normalized.get("score_breakdown")
+                or normalized.get("factor_contributions")
+                or factors,
+                "gate_results": gate_results,
+                "evidence_ids": evidence_ids,
+                "ai_status": ai_status,
+            }
+        )
+        return normalized
+
+    def _published_sentiment_result(
+        self,
+        *,
+        strategy_meta: Dict[str, Any],
+        serialized_meta: Dict[str, Any],
+        limit: int,
+        score_threshold: float | None,
+        run_id: str | None,
+        input_snapshot_id: str | None,
+    ) -> Dict[str, Any]:
+        strategy_id = str(strategy_meta.get("id") or "")
+        strategy_version = str(strategy_meta.get("version") or "")
+        snapshot = self.sentiment_snapshots.latest_complete_snapshot(
+            snapshot_id=input_snapshot_id,
+            strategy_id=strategy_id,
+            strategy_version=strategy_version,
+        )
+        if snapshot is None:
+            suffix = f"（请求快照 {input_snapshot_id}）" if input_snapshot_id else ""
+            raise ValueError(f"策略 {strategy_id} 当前没有可用的完整舆情候选快照{suffix}")
+
+        config = self.loader.load_config(strategy_id)
+        effective_threshold = (
+            float(score_threshold)
+            if score_threshold is not None
+            else float((config.get("selection") or {}).get("score_threshold") or 0)
+        )
+        items: List[Dict[str, Any]] = []
+        for raw in snapshot.candidates:
+            if not bool(raw.get("is_selected")):
+                continue
+            score = float(raw.get("score") or 0)
+            if score < effective_threshold:
+                continue
+            item = {
+                **dict(raw),
+                "factors": raw.get("factor_json") or {},
+                "explain": raw.get("explain_json") or {},
+                "trade_plan": raw.get("trade_plan_json") or {},
+                "source_lineage": raw.get("source_lineage") or raw.get("source_lineage_json") or [],
+                "strategy_id": strategy_id,
+                "strategy_display_name": strategy_meta.get("display_name"),
+                "strategy_version": strategy_version,
+                "signal_grade": raw.get("trade_grade_state"),
+                "validation_status": serialized_meta.get("validation_status"),
+                "run_id": run_id,
+            }
+            items.append(
+                self.normalize_selection_contract(
+                    item,
+                    validation_status=str(serialized_meta.get("validation_status") or "unvalidated"),
+                )
+            )
+            if len(items) >= max(1, int(limit)):
+                break
+
+        final_run_id = run_id or f"snapshot_{snapshot.snapshot_id}"
+        for item in items:
+            item["run_id"] = final_run_id
+        manifest = dict(snapshot.manifest)
+        return {
+            "run_id": final_run_id,
+            "strategy_id": strategy_id,
+            "score_threshold": effective_threshold,
+            "count": len(items),
+            "results": items,
+            "input_snapshot_id": snapshot.snapshot_id,
+            "data_freshness": {
+                "status": "published",
+                "decision_as_of": str(manifest.get("decision_as_of")) if manifest.get("decision_as_of") else None,
+                "published_at": str(manifest.get("published_at")) if manifest.get("published_at") else None,
+                "coverage_ratio": float(manifest.get("coverage_ratio") or 0),
+                "freshness_seconds": manifest.get("freshness_seconds"),
+            },
+            "diagnostics": {"read_model": "sentiment_candidate_snapshot", "snapshot_id": snapshot.snapshot_id},
+            "strategy": {
+                "id": strategy_id,
+                "display_name": strategy_meta.get("display_name"),
+                "version": strategy_version,
+                "status": strategy_meta.get("status"),
+                "runtime_ready": serialized_meta.get("runtime_ready"),
+                "availability": serialized_meta.get("availability"),
+                "availability_label": serialized_meta.get("availability_label"),
+                "score_threshold": effective_threshold,
+            },
+        }
+
     def _resolve_strategy_id(self, strategy_id: Optional[str]) -> str:
         final_strategy_id = strategy_id or self.get_default_strategy_id()
         if not final_strategy_id:
@@ -142,7 +334,7 @@ class StrategyService:
           AND sf.horizon_days = %s
         """
         try:
-            with mysql_conn() as conn:
+            with mysql_read_conn() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(sql, (strategy_id, instrument_type, horizon_days, strategy_id, instrument_type, horizon_days))
                     rows = cursor.fetchall() or []
@@ -315,7 +507,7 @@ class StrategyService:
             LIMIT %s
             """
             params = (*type_params, limit)
-        with mysql_conn() as conn:
+        with mysql_read_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
                 rows = cursor.fetchall() or []
@@ -662,6 +854,7 @@ class StrategyService:
         save: bool = True,
         score_threshold: Optional[float] = None,
         run_id: Optional[str] = None,
+        input_snapshot_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         instrument_type = require_supported_instrument(
             instrument_type,
@@ -674,6 +867,19 @@ class StrategyService:
             final_strategy_id,
             instrument_type=instrument_type,
         )
+
+        if self._sentiment_read_model_enabled() and final_strategy_id in {
+            "a_share_sentiment",
+            "a_share_sentiment_v05",
+        }:
+            return self._published_sentiment_result(
+                strategy_meta=strategy_meta,
+                serialized_meta=serialized_meta,
+                limit=limit,
+                score_threshold=score_threshold,
+                run_id=run_id,
+                input_snapshot_id=input_snapshot_id,
+            )
 
         overrides = {}
         if score_threshold is not None:
@@ -723,6 +929,13 @@ class StrategyService:
                     else deepseek_rerank_results
                     or []
                 )
+                selected_items = [
+                    self.normalize_selection_contract(
+                        item,
+                        validation_status=str(serialized_meta.get("validation_status") or "unvalidated"),
+                    )
+                    for item in selected_items
+                ]
                 saved_run_id = selector.save_selection_results(selected_items, run_id=run_id)
                 result = {
                     "run_id": saved_run_id,
@@ -734,13 +947,30 @@ class StrategyService:
                     "results": selected_items,
                 }
             else:
-                result = selector.run_and_save(
+                selected_items = selector.run_from_mysql(
                     limit=limit,
                     instrument_type=instrument_type,
-                    run_id=run_id,
                     candidate_limit=candidate_limit,
                     market_board=market_board,
                 )
+                selected_items = [
+                    self.normalize_selection_contract(
+                        item,
+                        validation_status=str(serialized_meta.get("validation_status") or "unvalidated"),
+                    )
+                    for item in selected_items
+                ]
+                saved_run_id = selector.save_selection_results(selected_items, run_id=run_id)
+                result = {
+                    "run_id": saved_run_id,
+                    "strategy_id": final_strategy_id,
+                    "strategy_display_name": strategy_meta.get("display_name"),
+                    "strategy_version": strategy_meta.get("version"),
+                    "score_threshold": selector.strategy.config.get("score_threshold"),
+                    "count": len(selected_items),
+                    "diagnostics": selector.last_run_diagnostics,
+                    "results": selected_items,
+                }
         else:
             items = progressive_rerank_results if progressive_rerank_results is not None else deepseek_rerank_results if deepseek_rerank_results is not None else selector.run_from_mysql(
                     limit=limit,
@@ -751,6 +981,13 @@ class StrategyService:
             transient_run_id = run_id or selector.build_run_id(prefix="selection_preview")
             for item in items:
                 item["run_id"] = transient_run_id
+            items = [
+                self.normalize_selection_contract(
+                    item,
+                    validation_status=str(serialized_meta.get("validation_status") or "unvalidated"),
+                )
+                for item in items
+            ]
             result = {
                 "run_id": transient_run_id,
                 "strategy_id": final_strategy_id,
@@ -794,27 +1031,15 @@ class StrategyService:
         selector = StockSelector(strategy_id=strategy_id, strategy_overrides=overrides)
         final_run_id = selector.save_single_result(item=item, run_id=run_id)
 
-        intraday_cache = {"enabled": True, "status": "skipped", "reason": "missing code/trade_date"}
         code = item.get("code")
         trade_date = item.get("trade_date") or item.get("latest_trade_date")
-        if code and trade_date:
-            try:
-                cached = get_or_fetch_intraday_bars(code=str(code), trade_date=str(trade_date), refresh=False)
-                intraday_cache = {
-                    "enabled": True,
-                    "status": "ok" if cached.get("count", 0) >= 2 else "empty",
-                    "source_status": cached.get("source_status"),
-                    "trade_date": cached.get("trade_date"),
-                    "count": cached.get("count", 0),
-                }
-            except Exception as exc:
-                intraday_cache = {
-                    "enabled": True,
-                    "status": "failed",
-                    "trade_date": str(trade_date),
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:200],
-                }
+        intraday_cache = {
+            "enabled": True,
+            "status": "queued" if code and trade_date else "skipped",
+            "trade_date": str(trade_date) if trade_date else None,
+        }
+        if not code or not trade_date:
+            intraday_cache["reason"] = "missing code/trade_date"
 
         return {
             "run_id": final_run_id,

@@ -6,19 +6,20 @@ import time
 from fastapi import APIRouter
 
 from app.jobs.readiness import build_operational_readiness, recent_error_summaries
-from app.shared.db import mysql_conn, ping_mysql
+from app.shared.cache import get_cache_backend
+from app.shared.db import mysql_read_conn, ping_mysql
 from app.shared.instrument_policy import STOCK_DAILY_COMPLETENESS_RATIO, STOCK_INSTRUMENT_TYPE
 
 router = APIRouter(tags=["system"])
 
 SYSTEM_STATUS_CACHE_TTL_SECONDS = 60
-_SYSTEM_STATUS_CACHE: dict | None = None
-_SYSTEM_STATUS_CACHE_AT = 0.0
+SYSTEM_STATUS_CACHE_KEY = "system:status:v2"
 
 
 TASK_SCHEDULES = [
     {"task_name": "stock_basic_sync", "task_label": "股票基础信息同步", "schedule": "每天 01:30"},
     {"task_name": "daily_kline_increment", "task_label": "日线增量更新", "schedule": "每天 02:00"},
+    {"task_name": "stock_technical_feature_daily_refresh", "task_label": "日技术特征读模型刷新", "schedule": "每天 02:05；交易日 18:40"},
     {"task_name": "adj_factor_daily_update", "task_label": "复权因子日更", "schedule": "每天 02:10"},
     {"task_name": "adj_factor_history_backfill", "task_label": "历史复权因子补齐", "schedule": "按需 / 后台批次"},
     {"task_name": "daily_kline_backfill", "task_label": "历史日线补齐", "schedule": "每天 02:15"},
@@ -42,6 +43,8 @@ TASK_SCHEDULES = [
     {"task_name": "stock_realtime_lifecycle", "task_label": "实时行情分层与保留", "schedule": "交易日 15:20"},
     {"task_name": "market_opinion_update", "task_label": "热点舆情聚合", "schedule": "交易日 09:00-15:59 每 15 分钟"},
     {"task_name": "market_opinion_lifecycle", "task_label": "舆情快照去重与保留", "schedule": "交易日 16:05"},
+    {"task_name": "sentiment_candidate_snapshot_materialize", "task_label": "舆情候选快照物化", "schedule": "交易时段约每 15 分钟；交易日 18:55"},
+    {"task_name": "operational_read_models_refresh", "task_label": "实时榜单与运维读模型刷新", "schedule": "交易时段每 5 分钟；交易日 19:00"},
     {"task_name": "strategy_forward_observation_submit", "task_label": "舆情策略前瞻观察", "schedule": "交易日 16:20"},
     {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内判断交易时段"},
     {"task_name": "portfolio_etf_quote_update", "task_label": "持仓 ETF 行情", "schedule": "交易日 09:00-15:59 每 5 分钟"},
@@ -87,7 +90,7 @@ SELECT
 
 
 def _basic_data_ranges() -> dict:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -142,7 +145,7 @@ def _basic_data_ranges() -> dict:
 
 
 def _scalar(sql: str) -> int | None:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(sql)
             row = cursor.fetchone()
@@ -153,7 +156,7 @@ def _scalar(sql: str) -> int | None:
 
 
 def _coverage_stats() -> dict:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -181,7 +184,7 @@ def _coverage_stats() -> dict:
 
 
 def _kline_latest_shortfall() -> dict:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM daily_kline")
             row = cursor.fetchone() or {}
@@ -276,7 +279,7 @@ def _kline_history_completeness() -> dict:
     a partial market slice.  Use current stock_basic listing_date as a pragmatic
     expected universe for each trade date, then compare actual daily_kline rows.
     """
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -359,7 +362,7 @@ def _kline_history_completeness() -> dict:
 
 
 def _fetch_stock_status_snapshot_map(trade_date: str) -> dict[str, dict]:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -385,7 +388,7 @@ def _fetch_stock_status_snapshot_map(trade_date: str) -> dict[str, dict]:
 
 
 def _latest_dates() -> dict:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(LATEST_DATES_SQL)
             row = cursor.fetchone() or {}
@@ -427,7 +430,7 @@ def _data_baseline_summary() -> dict:
     """
     latest = _latest_dates()
     latest_kline_date = latest.get("daily_kline_latest_complete_trade_date") or latest.get("daily_kline_latest_trade_date")
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM stock_basic WHERE instrument_type='stock'")
             total_stock = int((cursor.fetchone() or {}).get("total") or 0)
@@ -550,7 +553,7 @@ def _sentiment_quality_stats() -> dict:
     Keep this query bounded to stock_sentiment_daily/stock_news aggregates so
     /api/system/status stays fast and does not scan行情/因子大表。
     """
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM stock_sentiment_daily")
             latest_row = cursor.fetchone() or {}
@@ -635,7 +638,7 @@ def _field_missing_stats() -> dict:
         "revenue_yoy",
         "profit_yoy",
     ]
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             total_sql = "SELECT COUNT(*) AS total FROM stock_basic WHERE instrument_type='stock'"
             cursor.execute(total_sql)
@@ -673,7 +676,7 @@ def _valuation_gap_breakdown() -> dict:
     latest_trade_date = _latest_dates().get("daily_kline_latest_trade_date")
     status_map = _fetch_stock_status_snapshot_map(latest_trade_date) if latest_trade_date else {}
 
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -855,7 +858,7 @@ def _latest_task_runs() -> list[dict]:
     ) t2 ON t1.id = t2.max_id
     ORDER BY t1.id DESC
     """
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(sql, TRACKED_TASKS)
             rows = cursor.fetchall() or []
@@ -930,7 +933,7 @@ def _realtime_lifecycle_summary() -> dict:
         "stock_realtime_bar_rollup",
         "stock_realtime_intraday_tracked",
     )
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -1017,7 +1020,7 @@ def _market_opinion_storage_summary() -> dict:
         "sector_opinion_news_ref",
         "sector_opinion_source_ref",
     )
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -1070,14 +1073,15 @@ def _market_opinion_storage_summary() -> dict:
 
 @router.get("/system/status")
 def system_status() -> dict:
-    global _SYSTEM_STATUS_CACHE, _SYSTEM_STATUS_CACHE_AT
-    now = time.monotonic()
-    if _SYSTEM_STATUS_CACHE and now - _SYSTEM_STATUS_CACHE_AT < SYSTEM_STATUS_CACHE_TTL_SECONDS:
-        cached = dict(_SYSTEM_STATUS_CACHE)
+    now = time.time()
+    cached_entry = get_cache_backend().get(SYSTEM_STATUS_CACHE_KEY)
+    if isinstance(cached_entry, dict) and isinstance(cached_entry.get("payload"), dict):
+        cached = dict(cached_entry["payload"])
+        cached_at = float(cached_entry.get("cached_at") or now)
         cached["cache"] = {
             "hit": True,
             "ttl_seconds": SYSTEM_STATUS_CACHE_TTL_SECONDS,
-            "age_seconds": round(now - _SYSTEM_STATUS_CACHE_AT, 2),
+            "age_seconds": round(max(0.0, now - cached_at), 2),
         }
         return cached
 
@@ -1117,8 +1121,11 @@ def system_status() -> dict:
         },
         "market_opinion_update": _market_opinion_update_status(task_runs),
     }
-    _SYSTEM_STATUS_CACHE = dict(payload)
-    _SYSTEM_STATUS_CACHE_AT = now
+    get_cache_backend().set(
+        SYSTEM_STATUS_CACHE_KEY,
+        {"payload": payload, "cached_at": now},
+        ttl_seconds=SYSTEM_STATUS_CACHE_TTL_SECONDS,
+    )
     payload["cache"] = {
         "hit": False,
         "ttl_seconds": SYSTEM_STATUS_CACHE_TTL_SECONDS,

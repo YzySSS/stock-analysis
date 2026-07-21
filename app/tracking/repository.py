@@ -4,7 +4,7 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from app.shared.db import mysql_conn
+from app.shared.db import mysql_conn, mysql_read_conn
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
@@ -14,11 +14,25 @@ TRACKING_STATS_MAX_AGE_DAYS = 14
 class TrackingRepository:
     """Persistence boundary for saved-selection tracking and filters."""
 
-    def __init__(self, connection_factory: ConnectionFactory | None = None) -> None:
+    def __init__(
+        self,
+        connection_factory: ConnectionFactory | None = None,
+        read_connection_factory: ConnectionFactory | None = None,
+    ) -> None:
         self._connection_factory = connection_factory or mysql_conn
+        # Tests and custom repositories historically inject one factory; keep
+        # that contract while using rollback-only pooled reads by default.
+        self._read_connection_factory = (
+            read_connection_factory
+            or connection_factory
+            or mysql_read_conn
+        )
 
     def _connect(self, *, dict_cursor: bool = True):
         return self._connection_factory(dict_cursor=dict_cursor)
+
+    def _read_connect(self, *, dict_cursor: bool = True):
+        return self._read_connection_factory(dict_cursor=dict_cursor)
 
     @staticmethod
     def _stats_cutoff(
@@ -225,7 +239,7 @@ class TrackingRepository:
         LEFT JOIN period_dk ON sr.id = period_dk.selection_result_id
         ORDER BY {order_by}
         """
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
                 return cursor.fetchall() or []
@@ -249,7 +263,7 @@ class TrackingRepository:
             include_in_stats_only=include_in_stats_only,
         )
         count_expression = "COUNT(*)" if run_id else "COUNT(DISTINCT sr.trade_date, sr.strategy_id, sr.code)"
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     f"""
@@ -291,7 +305,7 @@ class TrackingRepository:
             params.append(selection_date)
         sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY sr.trade_date DESC, created_at DESC LIMIT %s"
         params.append(max(1, int(limit)))
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params)
                 return cursor.fetchall() or []
@@ -369,7 +383,7 @@ class TrackingRepository:
     ) -> bool:
         """Return whether the latest saved row for a business key is outside the stats window."""
         cutoff = self._stats_cutoff(max_age_days=max_age_days, as_of_datetime=as_of_datetime)
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
@@ -413,7 +427,7 @@ class TrackingRepository:
                 return int(cursor.rowcount or 0)
 
     def list_strategy_options(self, instrument_type: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._read_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """

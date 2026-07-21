@@ -1,0 +1,18 @@
+[Unit]
+Description=Stock Analysis Durable API Task Worker
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/.openclaw/workspace/stock-analysis
+Environment=PYTHONPATH=/root/.openclaw/workspace/stock-analysis
+ExecStartPre=/root/.openclaw/workspace/stock-analysis/.venv/bin/python -m app.orchestration.migrate --check
+ExecStart=/root/.openclaw/workspace/stock-analysis/.venv/bin/python -m app.jobs.durable_worker --poll-seconds 3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

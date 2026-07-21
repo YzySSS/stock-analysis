@@ -9,7 +9,7 @@ from app.strategies.service import StrategyService
 from scripts.run_strategy_factor_ci_daily_update import runtime_strategy_ids
 
 
-def ready_snapshot(*, factor_codes: int = 100, moneyflow_codes: int = 94) -> dict:
+def ready_snapshot(*, factor_codes: int = 100, moneyflow_codes: int = 100) -> dict:
     return {
         "stock_count": 100,
         "reference_trade_date": "2026-07-15",
@@ -24,18 +24,47 @@ def ready_snapshot(*, factor_codes: int = 100, moneyflow_codes: int = 94) -> dic
 
 
 class StrategyCapabilityContractTests(unittest.TestCase):
-    def test_only_sentiment_strategy_is_registered_and_no_default_is_set(self):
+    def test_registry_exposes_only_frozen_and_shadow_sentiment_versions(self):
         service = StrategyService(dataset_snapshot=ready_snapshot())
         items = service.list_strategies()
 
-        self.assertEqual([item["id"] for item in items], ["a_share_sentiment"])
-        self.assertEqual({item["id"] for item in items if item["runtime_ready"]}, {"a_share_sentiment"})
-        self.assertEqual([item for item in items if item["backtest_ready"]], [])
+        self.assertEqual(
+            {item["id"] for item in items},
+            {"a_share_sentiment", "a_share_sentiment_v05"},
+        )
+        self.assertEqual(
+            {item["id"] for item in items if item["runtime_ready"]},
+            {"a_share_sentiment"},
+        )
+        self.assertFalse(any(item["backtest_ready"] for item in items))
         self.assertIsNone(service.get_default_strategy_id())
         self.assertFalse(any(item["is_default"] for item in items))
         self.assertFalse(any(item["validated"] for item in items))
-        self.assertEqual(items[0]["backtest_status"], "disabled")
-        self.assertEqual(items[0]["validation_status"], "unvalidated")
+        by_id = {item["id"]: item for item in items}
+        self.assertEqual(by_id["a_share_sentiment"]["mode"], "frozen_baseline")
+        self.assertEqual(by_id["a_share_sentiment"]["status"], "stable")
+        self.assertEqual(by_id["a_share_sentiment_v05"]["mode"], "shadow_only")
+        self.assertEqual(by_id["a_share_sentiment_v05"]["validation_status"], "shadow_only")
+        self.assertEqual(by_id["a_share_sentiment_v05"]["availability"], "prototype")
+
+    def test_loadable_prototype_is_not_misreported_as_runtime_ready(self):
+        item = StrategyService(dataset_snapshot=ready_snapshot()).get_strategy_capability(
+            "a_share_sentiment_v05"
+        )
+
+        self.assertTrue(item["loadable"])
+        self.assertTrue(item["data_ready"])
+        self.assertEqual(item["runtime_status"], "prototype")
+        self.assertFalse(item["runtime_ready"])
+        self.assertTrue(any("prototype" in reason for reason in item["runtime_reasons"]))
+
+    def test_v05_requires_98_percent_cross_sectional_coverage(self):
+        item = StrategyService(
+            dataset_snapshot=ready_snapshot(moneyflow_codes=97),
+        ).get_strategy_capability("a_share_sentiment_v05")
+
+        self.assertFalse(item["data_ready"])
+        self.assertTrue(any("stock_moneyflow_daily" in reason for reason in item["runtime_reasons"]))
 
     def test_required_dataset_gap_blocks_runtime(self):
         item = StrategyService(
@@ -60,7 +89,9 @@ class CapabilityPreflightTests(unittest.TestCase):
             result = runtime_strategy_ids(instrument_type="stock")
 
         self.assertEqual(result, ["ready"])
-        service_cls.return_value.list_strategies.assert_called_once_with(instrument_type="stock")
+        service_cls.return_value.list_strategies.assert_called_once_with(
+            instrument_type="stock"
+        )
 
     def test_selection_rejects_removed_strategy_before_estimate_or_insert(self):
         class RejectingStrategyService:
@@ -71,11 +102,22 @@ class CapabilityPreflightTests(unittest.TestCase):
                 raise ValueError("策略 removed_strategy 未注册")
 
         service = object.__new__(SelectionRunService)
-        service._estimate_seconds = lambda **_kwargs: self.fail("拒绝后不应估算任务时长")
+        service._estimate_seconds = lambda **_kwargs: self.fail(
+            "拒绝后不应估算任务时长"
+        )
         service.repository = object()
-        with patch("app.stock_selection.run_tasks.StrategyService", return_value=RejectingStrategyService()):
+        with patch(
+            "app.stock_selection.run_tasks.StrategyService",
+            return_value=RejectingStrategyService(),
+        ):
             with self.assertRaisesRegex(ValueError, "未注册"):
-                service.submit({"strategy_id": "removed_strategy", "instrument_type": "stock", "limit": 3})
+                service.submit(
+                    {
+                        "strategy_id": "removed_strategy",
+                        "instrument_type": "stock",
+                        "limit": 3,
+                    }
+                )
 
     def test_selection_requires_explicit_strategy_before_estimate_or_insert(self):
         class UnexpectedStrategyService:
@@ -83,23 +125,33 @@ class CapabilityPreflightTests(unittest.TestCase):
                 raise AssertionError("缺少策略时不应进入能力检查")
 
         service = object.__new__(SelectionRunService)
-        service._estimate_seconds = lambda **_kwargs: self.fail("缺少策略时不应估算任务时长")
+        service._estimate_seconds = lambda **_kwargs: self.fail(
+            "缺少策略时不应估算任务时长"
+        )
         service.repository = object()
-        with patch("app.stock_selection.run_tasks.StrategyService", return_value=UnexpectedStrategyService()):
+        with patch(
+            "app.stock_selection.run_tasks.StrategyService",
+            return_value=UnexpectedStrategyService(),
+        ):
             with self.assertRaisesRegex(ValueError, "明确指定 strategy_id"):
                 service.submit({"instrument_type": "stock", "limit": 3})
 
     def test_backtest_uses_registry_capability_preflight(self):
         class RejectingStrategyService:
             def require_backtest_ready(self, *_args, **_kwargs):
-                raise ValueError("策略 a_share_sentiment 当前不可回测：回测状态为 disabled")
+                raise ValueError(
+                    "策略 a_share_sentiment 当前不可回测：回测状态为 disabled"
+                )
 
         request = BacktestRequest(
             strategy_id="a_share_sentiment",
             start_date="2026-07-01",
             end_date="2026-07-02",
         )
-        with patch("app.backtest.service.StrategyService", return_value=RejectingStrategyService()):
+        with patch(
+            "app.backtest.service.StrategyService",
+            return_value=RejectingStrategyService(),
+        ):
             with self.assertRaisesRegex(ValueError, "disabled"):
                 BacktestService()._validate_request(request)
 

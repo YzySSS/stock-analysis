@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 import unittest
 from inspect import signature
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -152,6 +154,27 @@ class BacktestGuardTests(unittest.TestCase):
         self.assertEqual(normalized["validation_status"], "validation_pending")
         self.assertEqual(normalized["methodology_version"], "legacy_pre_point_in_time_v1")
         self.assertIn("不可作为交易证据", normalized["risk_notice"])
+
+
+class ApiProviderBoundaryTests(unittest.TestCase):
+    def test_http_routes_do_not_import_external_data_or_ai_clients(self):
+        routes_root = Path(__file__).resolve().parents[1] / "app" / "api" / "routes"
+        forbidden_roots = {"requests", "akshare", "tushare", "tavily"}
+        offenders = []
+        for path in routes_root.glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules = [alias.name.split(".", 1)[0] for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    modules = [node.module.split(".", 1)[0]]
+                else:
+                    continue
+                for module in modules:
+                    if module in forbidden_roots:
+                        offenders.append(f"{path.name}:{node.lineno}:{module}")
+
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":
