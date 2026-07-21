@@ -72,6 +72,8 @@ class SelectionSseTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 503)
         self.assertEqual(raised.exception.detail["code"], "SSE_UNAVAILABLE")
         self.assertEqual(raised.exception.detail["fallback"], "polling")
+        self.assertEqual(raised.exception.detail["cache_mode"], "memory")
+        self.assertEqual(raised.exception.detail["redis_status"], "disabled")
 
     def test_endpoint_offloads_lazy_redis_probe_from_event_loop(self):
         caller_thread_id = threading.get_ident()

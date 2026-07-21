@@ -285,6 +285,11 @@ def get_selection_run(run_id: str) -> dict:
 async def get_selection_run_events(run_id: str, request: Request) -> StreamingResponse:
     diagnostics = await asyncio.to_thread(_selection_sse_cache_diagnostics)
     if not _selection_sse_is_ready(diagnostics):
+        redis_status = (
+            diagnostics.get("status")
+            if diagnostics.get("backend") == "redis"
+            else "disabled"
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -292,7 +297,7 @@ async def get_selection_run_events(run_id: str, request: Request) -> StreamingRe
                 "message": "Redis 状态流当前不可用，请使用任务状态轮询接口。",
                 "fallback": "polling",
                 "cache_mode": diagnostics.get("backend") or "unknown",
-                "redis_status": diagnostics.get("status") or "unknown",
+                "redis_status": redis_status or "unknown",
             },
         )
 
