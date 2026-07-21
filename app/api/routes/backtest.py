@@ -16,6 +16,8 @@ from app.shared.index_universe import ALL_A_UNIVERSE_CODE, universe_label
 router = APIRouter(tags=["backtest"])
 backtest_repository = BacktestRepository()
 
+SENTIMENT_STRATEGY_IDS = frozenset({"a_share_sentiment", "a_share_sentiment_v05"})
+
 
 def _to_float(value: object) -> float | None:
     if value is None:
@@ -43,7 +45,7 @@ def _adjust_price(price: float | None, factor: float | None, entry_factor: float
 
 
 class BacktestRunRequest(BaseModel):
-    strategy_id: str
+    strategy_id: str = "a_share_sentiment"
     start_date: str
     end_date: str
     return_mode: str = "1d"
@@ -79,6 +81,28 @@ def run_backtest(payload: BacktestRunRequest) -> dict:
     except UnsupportedInstrumentError as exc:
         raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
+        message = str(exc)
+        if payload.strategy_id in SENTIMENT_STRATEGY_IDS and (
+            "不可回测" in message or "未找到策略" in message
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "STRATEGY_NOT_REPLAYABLE",
+                    "strategy_id": payload.strategy_id,
+                    "message": "该舆情策略尚未形成可进行历史重放的不可变新闻与行情快照。回测页面和历史结果继续保留。",
+                    "reason": message,
+                },
+            ) from exc
+        if "未找到策略" in message:
+            raise HTTPException(
+                status_code=410,
+                detail={
+                    "code": "STRATEGY_RETIRED",
+                    "strategy_id": payload.strategy_id,
+                    "message": "该选股策略已退役；历史回测结果仍可查询，但不能再创建新任务。",
+                },
+            ) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -99,6 +123,7 @@ def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str
     """
     base_names = {
         "a_share_sentiment": "A股舆情选股",
+        "a_share_sentiment_v05": "A股舆情选股 v0.5",
     }
     base = base_names.get(strategy_id or "", strategy_id or "-")
     if not strategy_version:

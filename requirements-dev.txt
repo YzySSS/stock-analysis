@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# 测试 Redis 路径，不需要本机 Redis 服务。
+fakeredis>=2.30.0

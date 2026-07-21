@@ -13,9 +13,11 @@ from pymysql.err import IntegrityError
 
 from app.jobs.errors import record_job_error
 from app.jobs.mysql_state import MySQLJobStateRepository, MySQLJobTable, StaleRecoveryResult
+from app.shared.cache import get_cache_backend
 from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, require_supported_instrument
 from app.stock_selection.forward_observation import ForwardObservationRepository
 from app.stock_selection.repository import SelectionRepository
+from app.stock_selection.selector import SENTIMENT_STRATEGY_IDS
 from app.strategies.service import StrategyService
 
 
@@ -66,6 +68,9 @@ class SelectionTaskPayload(BaseModel):
     max_picks: int = Field(default=3, ge=1, le=200)
     score_threshold: float | None = Field(default=None, ge=0, le=100)
     save: bool = False
+    input_snapshot_id: str | None = Field(default=None, max_length=96)
+    strategy_version: str | None = Field(default=None, max_length=32)
+    data_freshness: dict[str, Any] = Field(default_factory=dict)
     forward_protocol_id: str | None = Field(default=None, min_length=1, max_length=96)
     forward_observation_id: str | None = Field(default=None, min_length=1, max_length=96)
 
@@ -77,6 +82,7 @@ class SelectionRunService:
     HEARTBEAT_SECONDS = 3.0
     STALE_RUNNING_SECONDS = 15 * 60
     DEFAULT_MAX_ATTEMPTS = 2
+    STATUS_CACHE_TTL_SECONDS = 60 * 60
 
     def __init__(
         self,
@@ -101,8 +107,16 @@ class SelectionRunService:
         strategy_id = str(request.get("strategy_id") or "").strip()
         if not strategy_id:
             raise ValueError("当前未设置默认策略，请明确指定 strategy_id")
-        strategy_service.require_runtime_ready(strategy_id, instrument_type=instrument_type)
+        capability = strategy_service.require_runtime_ready(strategy_id, instrument_type=instrument_type)
+        if bool(request.get("forward_protocol_id")) != bool(request.get("forward_observation_id")):
+            raise ValueError("forward_protocol_id and forward_observation_id must be supplied together")
         effective_limit = request.get("max_picks") if request.get("max_picks") is not None else request.get("limit")
+        idempotency_date = self._latest_data_trade_date()
+        snapshot_meta = self._resolve_submission_snapshot_meta(
+            strategy_service=strategy_service,
+            strategy_id=strategy_id,
+            strategy_version=str(capability.get("version") or ""),
+        )
         request_payload = SelectionTaskPayload(
             **{
                 **request,
@@ -111,11 +125,20 @@ class SelectionRunService:
                 "limit": effective_limit,
                 "max_picks": effective_limit,
                 "save": False,
+                "input_snapshot_id": snapshot_meta.get("snapshot_id"),
+                "strategy_version": capability.get("version"),
+                "data_freshness": {
+                    "status": snapshot_meta.get("freshness_status") or (
+                        "published" if snapshot_meta.get("snapshot_id") else "snapshot_unpublished"
+                    ),
+                    "trade_date": str(snapshot_meta.get("trade_date") or idempotency_date),
+                    "published_at": snapshot_meta.get("published_at"),
+                    "decision_as_of": snapshot_meta.get("decision_as_of"),
+                    "freshness_seconds": snapshot_meta.get("freshness_seconds"),
+                    "coverage_ratio": snapshot_meta.get("coverage_ratio"),
+                },
             }
         ).model_dump()
-        if bool(request_payload.get("forward_protocol_id")) != bool(request_payload.get("forward_observation_id")):
-            raise ValueError("forward_protocol_id and forward_observation_id must be supplied together")
-        idempotency_date = self._latest_data_trade_date()
         idempotency_key = self._idempotency_key(request_payload, idempotency_date)
         existing = self._get_active_by_idempotency(idempotency_key)
         if existing:
@@ -149,11 +172,77 @@ class SelectionRunService:
             raise
         return self.get_run(run_id, include_result=False)
 
+    @staticmethod
+    def _resolve_submission_snapshot_meta(
+        *,
+        strategy_service: StrategyService,
+        strategy_id: str,
+        strategy_version: str,
+    ) -> Dict[str, Any]:
+        """Pin one ready snapshot only when the sentiment read model is active.
+
+        Process-local memory pointers are not shared between the materializer,
+        API and worker. A pointer miss therefore falls back to a manifest-only
+        MySQL read; it never loads candidate rows or runs the live selector.
+        """
+
+        if (
+            strategy_id not in SENTIMENT_STRATEGY_IDS
+            or not strategy_service._sentiment_read_model_enabled()
+        ):
+            return {}
+
+        try:
+            cached = get_cache_backend().get(
+                f"sentiment:snapshot:latest:{strategy_id}"
+            )
+        except Exception:
+            cached = None
+        snapshot_meta = dict(cached) if isinstance(cached, dict) else {}
+        cached_version = str(snapshot_meta.get("strategy_version") or "")
+        if not snapshot_meta.get("snapshot_id") or cached_version != strategy_version:
+            manifest = strategy_service.sentiment_snapshots.latest_complete_manifest(
+                strategy_id=strategy_id,
+                strategy_version=strategy_version,
+            )
+            snapshot_meta = dict(manifest or {})
+
+        if not snapshot_meta.get("snapshot_id"):
+            raise ValueError(
+                f"策略 {strategy_id} 当前没有 ready/passed 舆情候选快照；"
+                "请先运行快照物化任务，禁止回退为请求内实时扫描"
+            )
+        return snapshot_meta
+
     def get_run(self, run_id: str, include_result: bool = True) -> Dict[str, Any]:
         row = self.repository.get_run(run_id)
         if not row:
             raise ValueError("selection run not found")
-        return self._normalize_row(row, include_result=include_result)
+        payload = self._normalize_row(row, include_result=include_result)
+        self._cache_run_status(payload)
+        return payload
+
+    @staticmethod
+    def status_cache_key(run_id: str) -> str:
+        return f"selection:run:{str(run_id).strip()}:status"
+
+    def _cache_run_status(self, payload: Dict[str, Any]) -> None:
+        status_payload = {key: value for key, value in payload.items() if key != "result"}
+        try:
+            get_cache_backend().set(
+                self.status_cache_key(str(payload.get("run_id") or "")),
+                status_payload,
+                ttl_seconds=self.STATUS_CACHE_TTL_SECONDS,
+            )
+        except Exception:
+            # MySQL owns correctness; status caching only removes repeated reads.
+            return
+
+    def _refresh_cached_status(self, run_id: str) -> None:
+        try:
+            self.get_run(run_id, include_result=False)
+        except Exception:
+            return
 
     def list_runs(self, limit: int = 20) -> list[Dict[str, Any]]:
         rows = self.repository.list_runs(limit)
@@ -191,6 +280,7 @@ class SelectionRunService:
             run = self.get_run(run_id, include_result=False)
             request = SelectionTaskPayload.model_validate(run.get("request") or {})
             if self.job_states.finish_cancelled_if_requested(run_id, worker_id):
+                self._refresh_cached_status(run_id)
                 return
 
             self._mark_execution_stage(run_id, worker_id)
@@ -210,13 +300,16 @@ class SelectionRunService:
                 save=False,
                 score_threshold=request.score_threshold,
                 run_id=run_id,
+                input_snapshot_id=request.input_snapshot_id,
             )
             stop_event.set()
             heartbeat.join(timeout=1)
             if cancel_seen.is_set():
                 self.job_states.finish_cancelled_if_requested(run_id, worker_id)
+                self._refresh_cached_status(run_id)
                 return
             if self.job_states.finish_cancelled_if_requested(run_id, worker_id):
+                self._refresh_cached_status(run_id)
                 return
             self._finish_success(run_id, worker_id, result, request)
         except Exception as exc:
@@ -224,6 +317,7 @@ class SelectionRunService:
             if heartbeat:
                 heartbeat.join(timeout=1)
             if self.job_states.finish_cancelled_if_requested(run_id, worker_id):
+                self._refresh_cached_status(run_id)
                 return
             logger.exception("selection run failed run_id=%s", run_id)
             error_code = "invalid_request" if isinstance(exc, ValidationError) else "selection_failed"
@@ -281,6 +375,7 @@ class SelectionRunService:
 
     def _mark_execution_stage(self, run_id: str, worker_id: str) -> None:
         self.repository.mark_execution_stage(run_id, worker_id)
+        self._refresh_cached_status(run_id)
 
     def _finish_success(
         self,
@@ -299,6 +394,7 @@ class SelectionRunService:
         if not updated:
             logger.warning("selection success ignored after ownership/status change run_id=%s", run_id)
             return
+        self._refresh_cached_status(run_id)
         if request and request.forward_protocol_id and request.forward_observation_id:
             try:
                 ForwardObservationRepository().finalize_success(
@@ -340,6 +436,7 @@ class SelectionRunService:
             error_message=error_message,
         )
         if updated:
+            self._refresh_cached_status(run_id)
             record_job_error("selection", "selection", error_code, error_message)
             if request and request.forward_observation_id:
                 try:
@@ -379,6 +476,9 @@ class SelectionRunService:
             "elapsed_seconds": elapsed_seconds,
             "result_count": int(row.get("result_count") or 0),
             "request": request,
+            "input_snapshot_id": request.get("input_snapshot_id"),
+            "strategy_version": request.get("strategy_version"),
+            "data_freshness": request.get("data_freshness") or {},
             "idempotency_date": _dt(row.get("idempotency_date")),
             "worker_id": row.get("worker_id"),
             "locked_at": _dt(row.get("locked_at")),

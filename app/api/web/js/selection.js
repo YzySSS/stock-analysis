@@ -121,24 +121,87 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForSelectionRun(runId) {
-  const deadline = Date.now() + 10 * 60 * 1000;
+function applySelectionRunStatus(status) {
+  renderSelectionTaskStatus(status);
+  if (status.status === 'success') return true;
+  if (status.status === 'cancelled') {
+    throw new Error('选股任务已取消');
+  }
+  if (status.status === 'no_data') {
+    throw new Error(status.error_message || '当前数据不足，任务未执行');
+  }
+  if (status.status === 'failed') {
+    throw new Error(status.error_message || '选股运行失败');
+  }
+  return false;
+}
+
+async function waitForSelectionRunByPolling(runId, deadline) {
   while (Date.now() < deadline) {
     const status = await fetchJson(`/api/selection/runs/${encodeURIComponent(runId)}`);
-    renderSelectionTaskStatus(status);
-    if (status.status === 'success') return status;
-    if (status.status === 'cancelled') {
-      throw new Error('选股任务已取消');
-    }
-    if (status.status === 'no_data') {
-      throw new Error(status.error_message || '当前数据不足，任务未执行');
-    }
-    if (status.status === 'failed') {
-      throw new Error(status.error_message || '选股运行失败');
-    }
+    if (applySelectionRunStatus(status)) return status;
     await sleep(status.status === 'queued' ? 1000 : 2000);
   }
   throw new Error('选股运行超时，请稍后在历史 run_id 中查询结果');
+}
+
+function waitForSelectionRunByEvents(runId, deadline) {
+  return new Promise((resolve, reject) => {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      reject(new Error('选股运行超时，请稍后在历史 run_id 中查询结果'));
+      return;
+    }
+
+    const source = new EventSource(`/api/selection/runs/${encodeURIComponent(runId)}/events`);
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(connectTimer);
+      source.close();
+      callback(value);
+    };
+    const fallBackToPolling = (message) => {
+      const error = new Error(message || '选股状态流不可用');
+      error.selectionSseFallback = true;
+      finish(reject, error);
+    };
+    const connectTimer = setTimeout(
+      () => fallBackToPolling('选股状态流连接超时'),
+      Math.min(5000, remainingMs),
+    );
+
+    source.addEventListener('status', (event) => {
+      clearTimeout(connectTimer);
+      try {
+        const status = JSON.parse(event.data);
+        if (applySelectionRunStatus(status)) {
+          finish(resolve, status);
+        }
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          fallBackToPolling('选股状态流数据异常');
+        } else {
+          finish(reject, error);
+        }
+      }
+    });
+    source.addEventListener('timeout', () => fallBackToPolling('选股状态流已超时'));
+    source.onerror = () => fallBackToPolling('选股状态流暂不可用');
+  });
+}
+
+async function waitForSelectionRun(runId) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  if (typeof EventSource !== 'undefined') {
+    try {
+      return await waitForSelectionRunByEvents(runId, deadline);
+    } catch (error) {
+      if (!error.selectionSseFallback) throw error;
+    }
+  }
+  return waitForSelectionRunByPolling(runId, deadline);
 }
 
 function setSelectionInputsDisabled(disabled) {

@@ -10,6 +10,7 @@ let currentBacktestTradesLimit = 10;
 
 const BACKTEST_STRATEGY_LABELS = {
   a_share_sentiment: 'A股舆情选股',
+  a_share_sentiment_v05: 'A股舆情选股 v0.5',
 };
 
 function backtestStrategyLabel(strategyId) {
@@ -40,27 +41,30 @@ async function loadBacktestStrategies() {
   if (!select) return [];
   const previousValue = select.value;
   const data = await fetchJson('/api/strategies?instrument_type=stock');
-  const items = (data.strategies || []).filter((item) => item.backtest_ready === true);
+  const items = (data.strategies || []).filter((item) => Object.hasOwn(BACKTEST_STRATEGY_LABELS, item.id));
   items.forEach((item) => {
     BACKTEST_STRATEGY_LABELS[item.id] = item.display_name || item.id;
   });
   if (!items.length) {
-    select.innerHTML = '<option value="">当前没有达到研究回测门槛的策略</option>';
+    select.innerHTML = '<option value="a_share_sentiment">A股舆情选股（历史重放能力未就绪）</option>';
     select.disabled = true;
     if (submit) submit.disabled = true;
     return [];
   }
   select.innerHTML = items.map((item) => (
-    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.display_name || item.id)}（${item.evidence_status === 'historical_diagnostic_fail' ? '历史诊断未通过 · 仅研究' : `研究态 · ${item.validation_status === 'validated' ? '已验证' : '未验证'}`}）</option>`
+    `<option value="${escapeHtml(item.id)}">${escapeHtml(item.display_name || item.id)}（${item.backtest_ready === true ? '研究回测可用' : '历史舆情快照未就绪'}）</option>`
   )).join('');
   const preferred = items.some((item) => item.id === previousValue)
     ? previousValue
     : items.some((item) => item.id === data.default_strategy)
       ? data.default_strategy
-      : items[0].id;
+      : items.some((item) => item.id === 'a_share_sentiment')
+        ? 'a_share_sentiment'
+        : items[0].id;
   select.value = preferred;
   select.disabled = false;
   if (submit) submit.disabled = false;
+  syncBacktestStrategyDefaults();
   return items;
 }
 
@@ -76,6 +80,26 @@ function backtestTradeStrategyLabel(item) {
   return BACKTEST_TRADE_STRATEGY_LABELS[id] || id || '-';
 }
 
+const BACKTEST_STRATEGY_DEFAULTS = {
+  a_share_sentiment: {
+    threshold: 60,
+    maxPicks: 3,
+  },
+  a_share_sentiment_v05: {
+    threshold: 68,
+    maxPicks: 3,
+  },
+};
+
+function syncBacktestStrategyDefaults() {
+  const strategyId = qs('#backtest-strategy-id')?.value || 'a_share_sentiment';
+  const defaults = BACKTEST_STRATEGY_DEFAULTS[strategyId];
+  if (!defaults) return;
+  const threshold = qs('#backtest-score-threshold');
+  const maxPicks = qs('#backtest-max-picks');
+  if (threshold) threshold.value = String(defaults.threshold);
+  if (maxPicks) maxPicks.value = String(defaults.maxPicks);
+}
 
 function pctCell(value) {
   const cls = getPctClass(value) || '';
@@ -721,6 +745,7 @@ qs('#backtest-trade-strategy-id')?.addEventListener('change', () => {
   currentBacktestTradesPage = 1;
   loadTrades(currentBacktestRunId, 1);
 });
+qs('#backtest-strategy-id')?.addEventListener('change', syncBacktestStrategyDefaults);
 qs('#backtest-ashare-realistic-preset')?.addEventListener('click', applyAShareRealisticPreset);
 qsa('[data-backtest-chart-mode]').forEach((button) => {
   button.addEventListener('click', () => {

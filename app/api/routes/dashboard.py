@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
-from threading import Lock
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
@@ -12,14 +10,13 @@ from app.dashboard.repository import DashboardRepository
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
 from app.error_learning.tracker import SelectionResultTracker
 from app.market_timing.service import build_market_timing_signal
+from app.shared.cache import get_cache_backend
 
 router = APIRouter(tags=["dashboard"])
 _DASHBOARD_REPOSITORY = DashboardRepository()
 
 
 _DASHBOARD_CACHE_TTL_SECONDS = 30.0
-_DASHBOARD_CACHE: dict[int, tuple[float, dict[str, Any]]] = {}
-_DASHBOARD_CACHE_LOCK = Lock()
 
 
 def _to_float(value) -> float | None:
@@ -244,18 +241,16 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_cached_dashboard(limit: int) -> dict[str, Any] | None:
-    now = time.monotonic()
-    with _DASHBOARD_CACHE_LOCK:
-        cached = _DASHBOARD_CACHE.get(limit)
-        if not cached or cached[0] <= now:
-            _DASHBOARD_CACHE.pop(limit, None)
-            return None
-        return cached[1]
+    cached = get_cache_backend().get(f"dashboard:summary:v2:compact:{limit}")
+    return cached if isinstance(cached, dict) else None
 
 
 def _cache_dashboard(limit: int, payload: dict[str, Any]) -> None:
-    with _DASHBOARD_CACHE_LOCK:
-        _DASHBOARD_CACHE[limit] = (time.monotonic() + _DASHBOARD_CACHE_TTL_SECONDS, payload)
+    get_cache_backend().set(
+        f"dashboard:summary:v2:compact:{limit}",
+        payload,
+        ttl_seconds=_DASHBOARD_CACHE_TTL_SECONDS,
+    )
 
 
 def _clean_industry_name(name: str | None) -> str:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from typing import Any, Callable
 
-from app.shared.db import mysql_conn
+from app.shared.db import mysql_read_conn
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
@@ -13,7 +13,7 @@ class DashboardRepository:
     """Persistence boundary for dashboard read models."""
 
     def __init__(self, connection_factory: ConnectionFactory | None = None) -> None:
-        self._connection_factory = connection_factory or mysql_conn
+        self._connection_factory = connection_factory or mysql_read_conn
 
     def _connect(self, *, dict_cursor: bool = True):
         return self._connection_factory(dict_cursor=dict_cursor)

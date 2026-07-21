@@ -6,15 +6,19 @@
 
 ## 当前策略范围
 
-仓库只保留一个可执行选股策略：
+仓库只保留 A 股舆情选股系列。普通选股入口当前只允许冻结基线运行：
 
 - `a_share_sentiment`：A 股舆情选股，当前版本 `0.4.4`
 - 结合新闻/公告/题材、板块与主题资金、热门度、盘中交易确认和风险约束
 - 默认最多返回 3 只；没有股票达到门槛时允许返回 0 只
-- 当前状态为 `experimental / enabled / unvalidated`
+- 当前状态为 `stable / frozen_baseline / enabled / unvalidated`
 - 尚未通过正式样本外验证，不应把观察结果解释为收益承诺
 
-其他历史、实验和诊断失败的选股策略已从注册表与执行代码中移除。通用回测框架仍保留，用于查看历史任务和承接未来经过单独冻结、验证的策略；当前舆情策略的 `backtest_status` 为 `disabled`，不能直接发起回测。
+仓库同时保留整改版 `a_share_sentiment_v05 / 0.5.0`，状态固定为
+`experimental / shadow_only / prototype`。它只允许测试、候选快照和同批影子
+对照，不能从普通选股 API 创建任务，也不会自动晋级或替换 `0.4.4`。
+
+其他非舆情、历史和诊断失败的选股策略已从注册表与执行代码中移除。通用回测框架仍保留，用于查看历史任务和承接未来经过单独冻结、验证的策略；两个舆情版本的 `backtest_status` 均为 `disabled`，不能直接发起回测。
 
 ## 项目结构
 
@@ -33,6 +37,7 @@ app/
   shared/            配置、数据库、日志等公共能力
 config/              运行配置
 deploy/              systemd 等部署文件
+docs/                舆情整改实施、部署、验收与回滚 runbook
 scripts/             数据同步、补数、审计和运维脚本
 tests/               自动化测试
 requirements.txt     Python 依赖
@@ -153,6 +158,7 @@ API 服务: stock-analysis-api.service
 回测 worker: stock-analysis-backtest-worker.service
 选股 worker: stock-analysis-selection-worker.service
 持仓建议 worker: stock-analysis-portfolio-worker.service
+API 持久异步任务 worker: stock-analysis-durable-task-worker.service
 ```
 
 常用检查命令：
@@ -162,6 +168,7 @@ sudo systemctl status stock-analysis-api.service --no-pager
 sudo systemctl status stock-analysis-backtest-worker.service --no-pager
 sudo systemctl status stock-analysis-selection-worker.service --no-pager
 sudo systemctl status stock-analysis-portfolio-worker.service --no-pager
+sudo systemctl status stock-analysis-durable-task-worker.service --no-pager
 sudo /usr/sbin/nginx -t
 curl https://www.yzysstock.cloud/api/health
 ```

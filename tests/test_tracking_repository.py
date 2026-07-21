@@ -194,7 +194,7 @@ class TrackingRepositoryTests(unittest.TestCase):
         self.assertEqual(first["filtered_summary"]["total_count"], 176)
         self.assertEqual(first["filtered_summary"]["excluded_count"], 175)
         self.assertEqual(first["stats_retention"]["max_age_days"], 14)
-        self.assertEqual(len(fake_tracker.retention_calls), 2)
+        self.assertEqual(fake_tracker.retention_calls, [])
         self.assertEqual(fake_tracker.calls[0]["limit"], 10)
         self.assertEqual(fake_tracker.calls[0]["offset"], 20)
         self.assertFalse(fake_tracker.calls[0].get("include_in_stats_only", False))

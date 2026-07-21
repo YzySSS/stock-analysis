@@ -6,7 +6,7 @@ from typing import Any
 
 from app.jobs.errors import sanitize_error_message
 from app.orchestration.migrate import migration_plan
-from app.shared.db import mysql_conn, ping_mysql
+from app.shared.db import mysql_read_conn, ping_mysql
 from app.shared.instrument_policy import (
     STOCK_DAILY_COMPLETENESS_LOOKBACK_DAYS,
     STOCK_DAILY_COMPLETENESS_RATIO,
@@ -32,6 +32,13 @@ class WorkerDefinition:
 WORKER_DEFINITIONS = (
     WorkerDefinition("backtest", "回测 Worker", "backtest_run", stale_seconds=30 * 60),
     WorkerDefinition("selection", "选股 Worker", "selection_run"),
+    WorkerDefinition(
+        "durable_task",
+        "API 持久异步任务 Worker",
+        "durable_task",
+        id_column="task_id",
+        stale_seconds=5 * 60,
+    ),
     WorkerDefinition(
         "portfolio_advice",
         "持仓建议 Worker",
@@ -86,7 +93,7 @@ def classify_worker_snapshot(row: dict[str, Any] | None, stale_seconds: int = WO
 
 def _worker_snapshots() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             for definition in WORKER_DEFINITIONS:
                 cursor.execute(
@@ -125,7 +132,7 @@ def _worker_snapshots() -> list[dict[str, Any]]:
 
 def _queue_snapshots() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             for definition in WORKER_DEFINITIONS:
                 cursor.execute(
@@ -173,7 +180,7 @@ def _critical_task_snapshots() -> list[dict[str, Any]]:
     names = [item[0] for item in CRITICAL_TASKS]
     labels = dict(CRITICAL_TASKS)
     placeholders = ", ".join(["%s"] * len(names))
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -253,7 +260,7 @@ def _serialize_data_snapshot(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _data_snapshots() -> dict[str, Any]:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(DATA_SNAPSHOT_SQL)
             row = cursor.fetchone() or {}
@@ -261,7 +268,7 @@ def _data_snapshots() -> dict[str, Any]:
 
 
 def recent_error_summaries(days: int = 7, limit: int = 12) -> list[dict[str, Any]]:
-    with mysql_conn() as conn:
+    with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """

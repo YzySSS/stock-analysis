@@ -6,6 +6,7 @@ import math
 import os
 import signal
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -52,18 +53,80 @@ def _hard_deadline(label: str, timeout_seconds: float):
         yield
         return
 
-    previous_handler = signal.getsignal(signal.SIGALRM)
+    timeout_message = f"{label} exceeded {timeout:g}s hard timeout"
+    is_main_thread = threading.current_thread() is threading.main_thread()
+    has_posix_alarm = is_main_thread and all(
+        hasattr(signal, attribute)
+        for attribute in ("SIGALRM", "ITIMER_REAL", "setitimer")
+    )
 
-    def handle_timeout(_signum, _frame):
-        raise MarketTimingSourceTimeout(f"{label} exceeded {timeout:g}s hard timeout")
+    if has_posix_alarm:
+        previous_handler = signal.getsignal(signal.SIGALRM)
 
-    signal.signal(signal.SIGALRM, handle_timeout)
-    signal.setitimer(signal.ITIMER_REAL, timeout)
+        def handle_timeout(_signum, _frame):
+            raise MarketTimingSourceTimeout(timeout_message)
+
+        signal.signal(signal.SIGALRM, handle_timeout)
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+        return
+
+    # Windows has no SIGALRM/setitimer.  A timer-raised SIGINT wakes the
+    # CPython main thread during common blocking waits, while the handler below
+    # distinguishes the synthetic timeout from a user's Ctrl+C.
+    if is_main_thread and hasattr(signal, "SIGINT") and hasattr(signal, "raise_signal"):
+        expired = threading.Event()
+        active = threading.Event()
+        active.set()
+        previous_handler = signal.getsignal(signal.SIGINT)
+
+        def handle_timeout(signum, frame):
+            if expired.is_set():
+                raise MarketTimingSourceTimeout(timeout_message)
+            if callable(previous_handler):
+                previous_handler(signum, frame)
+                return
+            if previous_handler == signal.SIG_IGN:
+                return
+            raise KeyboardInterrupt
+
+        def expire() -> None:
+            if not active.is_set():
+                return
+            expired.set()
+            signal.raise_signal(signal.SIGINT)
+
+        timer = threading.Timer(timeout, expire)
+        timer.daemon = True
+        signal.signal(signal.SIGINT, handle_timeout)
+        timer.start()
+        try:
+            yield
+        finally:
+            active.clear()
+            timer.cancel()
+            try:
+                timer.join()
+            finally:
+                signal.signal(signal.SIGINT, previous_handler)
+        return
+
+    # Signal handlers can only be installed by the main thread.  Keep worker
+    # thread usage portable and report an overrun deterministically when the
+    # wrapped operation returns.
+    started_at = time.monotonic()
     try:
         yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
+    except BaseException as exc:
+        if time.monotonic() - started_at >= timeout:
+            raise MarketTimingSourceTimeout(timeout_message) from exc
+        raise
+    if time.monotonic() - started_at >= timeout:
+        raise MarketTimingSourceTimeout(timeout_message)
 
 
 def _remaining_source_timeout(source_timeout_seconds: float, total_deadline: float | None) -> float:

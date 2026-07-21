@@ -3,11 +3,11 @@ default_strategy: null
 strategies:
   - id: a_share_sentiment
     display_name: A股舆情选股
-    entrypoint: app.strategies.active.thematic_strategies.AShareSentimentStrategy
+    entrypoint: app.strategies.active.a_share_sentiment_strategy.AShareSentimentStrategy
     config_path: app/strategies/registry/configs/a_share_sentiment.yaml
     version: 0.4.4
-    status: experimental
-    mode: current
+    status: stable
+    mode: frozen_baseline
     executable: true
     capability:
       supported_instrument_types: [stock]
@@ -17,7 +17,28 @@ strategies:
       runtime_status: enabled
       backtest_status: disabled
       validation_status: unvalidated
+      evidence_status: prospective_observation
+      evidence_note: 0.4.4 按不可变标签与前瞻合同冻结；仅作为当前稳定对照，不以旧版样本宣称交易有效性
+    tags: [sentiment, news, moneyflow, market-index, risk-control, stable, frozen]
+    description: 冻结的 A 股舆情 0.4.4 基线，继续用于现有前瞻观察、兼容执行和 v0.5 影子对照
+
+  - id: a_share_sentiment_v05
+    display_name: A股舆情选股 v0.5
+    entrypoint: app.strategies.active.a_share_sentiment_strategy.AShareSentimentV05Strategy
+    config_path: app/strategies/registry/configs/a_share_sentiment_v05.yaml
+    version: 0.5.0
+    status: experimental
+    mode: shadow_only
+    executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily, stock_chip_daily, sector_opinion_daily]
+      minimum_coverage: 0.98
+      maximum_data_age_days: 1
+      runtime_status: prototype
+      backtest_status: disabled
+      validation_status: shadow_only
       evidence_status: none
-      evidence_note: 0.4.4完成实体消歧、历史缓存出口校验、局部方向与局部事件时效持久化；旧版样本不沿用，当前未通过正式样本外验证
-    tags: [sentiment, news, moneyflow, market-index, risk-control, experimental]
-    description: 贴合 A 股新闻、公告和题材驱动特征，优先使用本地舆情缓存，并支持候选池渐进精排
+      evidence_note: 0.5.0 仅允许测试与影子观察；本地确定性结果、AI建议和 0.4.4 对照证据必须分开保存
+    tags: [sentiment, direct-catalyst, theme-leader, deterministic, shadow-only, experimental]
+    description: 确定性双轨舆情核心；市场状态只作硬门，AI仅生成带证据的有界建议且不改变正式得分

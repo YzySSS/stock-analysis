@@ -457,6 +457,32 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
   if (summaryText) summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}${retentionText}${autoExcludedText}`;
 }
 
+function waitForMilliseconds(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForDeepReviewJob(initialJob, { maxAttempts = 100, intervalMilliseconds = 1500 } = {}) {
+  const reviewJobId = initialJob?.review_job_id;
+  if (!reviewJobId) throw new Error('复盘任务未返回 review_job_id');
+  const statusUrl = initialJob.status_url || `/api/tracking/deep-review/${encodeURIComponent(reviewJobId)}`;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) await waitForMilliseconds(intervalMilliseconds);
+    const job = await fetchJson(statusUrl);
+    lastTrackingState.deepReview = job;
+    if (job.status === 'success') return job;
+    if (job.status === 'failed') {
+      throw new Error(job.error?.message || 'DeepSeek 复盘任务执行失败');
+    }
+    const summaryText = qs('#tracking-summary-text');
+    if (summaryText) {
+      summaryText.textContent = job.status === 'running'
+        ? `DeepSeek 详细复盘执行中（任务 ${reviewJobId}）...`
+        : `DeepSeek 详细复盘已排队（任务 ${reviewJobId}）...`;
+    }
+  }
+  throw new Error('复盘任务等待超时，可稍后刷新任务状态');
+}
+
 async function runDeepReview() {
   const button = qs('#tracking-deep-review');
   const summaryText = qs('#tracking-summary-text');
@@ -468,9 +494,9 @@ async function runDeepReview() {
     button.disabled = true;
     button.textContent = '复盘中...';
   }
-  if (summaryText) summaryText.textContent = '正在调用 DeepSeek 进行详细复盘...';
+  if (summaryText) summaryText.textContent = '正在创建 DeepSeek 详细复盘任务...';
   try {
-    const result = await fetchJson('/api/tracking/deep-review', {
+    const submittedJob = await fetchJson('/api/tracking/deep-review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -481,7 +507,11 @@ async function runDeepReview() {
         max_items: 80,
       }),
     });
-    lastTrackingState.deepReview = result;
+    lastTrackingState.deepReview = submittedJob;
+    if (summaryText) {
+      summaryText.textContent = `详细复盘已提交：${submittedJob.review_job_id || '-'}，等待执行...`;
+    }
+    const result = await waitForDeepReviewJob(submittedJob);
     renderDeepReviewAnalysis(result);
     if (summaryText) summaryText.textContent = `详细复盘完成：${result.item_count ?? '-'} 条，模型 ${result.model || '-'}`;
   } catch (error) {

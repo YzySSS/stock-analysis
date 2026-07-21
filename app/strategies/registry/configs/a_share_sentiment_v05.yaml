@@ -1,0 +1,76 @@
+selection:
+  max_picks: 3
+  score_threshold: 60
+  # Keep untradable limit-up names as observation candidates; the v0.5 gate
+  # prevents them from becoming trade grade.
+  allow_limit_up: true
+
+# The v0.5 core has two candidate lanes but one deterministic absolute scale.
+hard_filters:
+  min_listed_days: 60
+  min_latest_amount: 50000000
+  min_median_amount_20: 80000000
+  min_independent_sources: 2
+  min_theme_recognition: 62
+  min_actionable_news_timeliness: 80
+  require_decision_data_version: true
+  watch_realtime_loss_pct: -5
+  watch_intraday_low_pct: -8
+  watch_intraday_amplitude_pct: 10
+
+grading:
+  reject_below: 60
+  tradable_at: 68
+  cautious_tradable_at: 72
+  cautious_direct_catalyst_only: true
+  risk_on_max_tradable: 3
+  cautious_max_tradable: 1
+  max_tradable_per_theme: 1
+  max_tradable_per_industry: 2
+
+ai_overlay:
+  min_confidence: 0.65
+  max_positive_adjustment: 4
+  max_negative_adjustment: -8
+  # Both positive and negative output are retained for explanation only. AI
+  # cannot change the formal score, ordering or signal grade.
+  positive_adjustment_mode: advisory_only
+  evidence_ids_required: true
+
+factors:
+  catalyst_quality:
+    name: 催化质量
+    category: sentiment
+    direction: positive
+    weight: 0.25
+    description: 事件重要度、方向、可信度、时效和原始来源。
+  persistence:
+    name: 催化或主题持续性
+    category: sentiment
+    direction: positive
+    weight: 0.15
+    description: 直接催化使用事件有效期，主题龙头使用主题多源持续性。
+  relation_recognition:
+    name: 个股关系与辨识度
+    category: sentiment
+    direction: positive
+    weight: 0.15
+    description: 股票与事件或主题的直接关系、主题内地位和有界人气辅助。
+  fund_confirmation:
+    name: 资金确认
+    category: moneyflow
+    direction: positive
+    weight: 0.15
+    description: 个股日频/实时资金、大单结构与主题资金确认。
+  price_volume_confirmation:
+    name: 价量确认
+    category: technical
+    direction: positive
+    weight: 0.20
+    description: 日线趋势、成交确认与价格承接；绝对股价不参与 alpha。
+  chip_liquidity_capacity:
+    name: 筹码流动性容量
+    category: risk
+    direction: positive
+    weight: 0.10
+    description: 筹码抛压、二十日流动性和成交容量。

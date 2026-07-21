@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.api.routes.system import (
@@ -32,8 +33,24 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "strategy_forward_observation_submit",
                 "strategy_forward_outcome_update",
                 "adj_factor_history_backfill",
+                "stock_technical_feature_daily_refresh",
+                "sentiment_candidate_snapshot_materialize",
+                "operational_read_models_refresh",
             }.issubset(TRACKED_TASKS)
         )
+
+    def test_technical_feature_refresh_is_in_print_only_cron_output(self):
+        source = Path("scripts/setup_kline_cron.sh").read_text(encoding="utf-8")
+        self.assertIn('TECHNICAL_FEATURE_JOB="5 2 * * *', source)
+        self.assertIn("refresh_stock_technical_feature_daily.py", source)
+        self.assertIn("stock_technical_feature_daily_refresh.log", source)
+        self.assertIn('"$TECHNICAL_FEATURE_JOB"', source)
+        self.assertIn("materialize_sentiment_candidate_snapshot.py", source)
+        self.assertIn("sentiment_candidate_snapshot_materialize.log", source)
+        self.assertIn('"$SENTIMENT_SNAPSHOT_JOB"', source)
+        self.assertIn("refresh_operational_read_models.py", source)
+        self.assertIn("operational_read_models_refresh.log", source)
+        self.assertIn('"$OPERATIONAL_READ_MODELS_JOB"', source)
 
     def test_old_running_task_is_exposed_as_stale(self):
         conn_context = MagicMock()
@@ -54,7 +71,7 @@ class SystemTaskRegistryTests(unittest.TestCase):
             }
         ]
 
-        with patch("app.api.routes.system.mysql_conn", return_value=conn_context):
+        with patch("app.api.routes.system.mysql_read_conn", return_value=conn_context):
             items = _latest_task_runs()
 
         self.assertEqual(items[0]["status"], "stale")

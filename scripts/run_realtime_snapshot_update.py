@@ -6,6 +6,7 @@ import math
 import os
 import signal
 import sys
+import threading
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
@@ -151,18 +152,81 @@ def fetch_deadline(timeout_seconds: float):
         yield
         return
 
-    previous_handler = signal.getsignal(signal.SIGALRM)
+    timeout_message = f"stock_zh_a_spot exceeded {timeout:g}s hard timeout"
+    is_main_thread = threading.current_thread() is threading.main_thread()
+    has_posix_alarm = is_main_thread and all(
+        hasattr(signal, attribute)
+        for attribute in ("SIGALRM", "ITIMER_REAL", "setitimer")
+    )
 
-    def handle_timeout(_signum, _frame):
-        raise RealtimeFetchTimeout(f"stock_zh_a_spot exceeded {timeout:g}s hard timeout")
+    if has_posix_alarm:
+        previous_handler = signal.getsignal(signal.SIGALRM)
 
-    signal.signal(signal.SIGALRM, handle_timeout)
-    signal.setitimer(signal.ITIMER_REAL, timeout)
+        def handle_timeout(_signum, _frame):
+            raise RealtimeFetchTimeout(timeout_message)
+
+        signal.signal(signal.SIGALRM, handle_timeout)
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+        return
+
+    # Windows does not expose SIGALRM/setitimer.  SIGINT raised from a timer
+    # thread wakes the CPython main thread even while it is in time.sleep or a
+    # blocking socket wait, so it provides the closest equivalent without
+    # installing another service or spawning a subprocess for every request.
+    if is_main_thread and hasattr(signal, "SIGINT") and hasattr(signal, "raise_signal"):
+        expired = threading.Event()
+        active = threading.Event()
+        active.set()
+        previous_handler = signal.getsignal(signal.SIGINT)
+
+        def handle_timeout(signum, frame):
+            if expired.is_set():
+                raise RealtimeFetchTimeout(timeout_message)
+            if callable(previous_handler):
+                previous_handler(signum, frame)
+                return
+            if previous_handler == signal.SIG_IGN:
+                return
+            raise KeyboardInterrupt
+
+        def expire() -> None:
+            if not active.is_set():
+                return
+            expired.set()
+            signal.raise_signal(signal.SIGINT)
+
+        timer = threading.Timer(timeout, expire)
+        timer.daemon = True
+        signal.signal(signal.SIGINT, handle_timeout)
+        timer.start()
+        try:
+            yield
+        finally:
+            active.clear()
+            timer.cancel()
+            try:
+                timer.join()
+            finally:
+                signal.signal(signal.SIGINT, previous_handler)
+        return
+
+    # Python only permits signal handlers in the main thread.  Calls made from
+    # a worker thread still receive a deterministic timeout error once control
+    # returns to Python, instead of failing with ValueError/AttributeError.
+    started_at = time.monotonic()
     try:
         yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
+    except BaseException as exc:
+        if time.monotonic() - started_at >= timeout:
+            raise RealtimeFetchTimeout(timeout_message) from exc
+        raise
+    if time.monotonic() - started_at >= timeout:
+        raise RealtimeFetchTimeout(timeout_message)
 
 
 def fetch_spot_rows(
