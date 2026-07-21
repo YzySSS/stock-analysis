@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -108,6 +109,34 @@ class RealtimeRankReadModelTests(unittest.TestCase):
         self.assertEqual([row["code"] for row in gain], ["000001.SZ", "000002.SZ"])
         self.assertTrue(all(row["source_batch_id"] == "batch-1" for row in first))
 
+    def test_rank_score_is_bounded_when_raw_market_amount_exceeds_decimal_range(self):
+        quote_time = datetime(2026, 7, 21, 15, 0)
+        raw_amount = 25_000_000_000.0
+        _snapshot_id, rows = build_realtime_rank_rows(
+            realtime_rows=[
+                {
+                    "code": "600000.SH",
+                    "name": "A",
+                    "trade_date": date(2026, 7, 21),
+                    "quote_time": quote_time,
+                    "pct_chg": 1.5,
+                    "amount": raw_amount,
+                    "latest_price": 10,
+                    "batch_id": "batch-large-amount",
+                    "source": "local_quote",
+                }
+            ],
+            moneyflow_rows=[],
+            popularity_rows=[],
+            source_batch_id="batch-large-amount",
+            limit=100,
+        )
+
+        amount_row = next(row for row in rows if row["rank_type"] == "amount_top")
+        self.assertEqual(amount_row["amount"], raw_amount)
+        self.assertEqual(amount_row["rank_score"], 100.0)
+        self.assertEqual(json.loads(amount_row["metrics_json"])["raw_rank_value"], raw_amount)
+
     def test_refresh_deletes_same_snapshot_before_atomic_batch_insert(self):
         quote_time = datetime(2026, 7, 21, 10, 4)
         cursor = _ScriptedCursor(
@@ -149,6 +178,7 @@ class RealtimeRankReadModelTests(unittest.TestCase):
         self.assertEqual(result["published_rows"], 2)
         self.assertEqual(len(cursor.executed_many), 1)
         self.assertGreaterEqual(delete_index, 0)
+        self.assertIn("LEFT(batch_id, 18) = 'realtime_snapshot_'", cursor.executed[0][0])
         self.assertIn("INSERT INTO stock_realtime_rank_snapshot", cursor.executed_many[0][0])
         retention_sql = [
             (sql, params)

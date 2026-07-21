@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from datetime import date, datetime
 
 from app.api.routes.system import LATEST_DATES_SQL
 from app.jobs.errors import error_fingerprint, infer_error_code, sanitize_error_message
@@ -12,6 +14,22 @@ from app.jobs.readiness import (
 )
 from app.jobs.retention import JobRetentionPolicy, JobRetentionService
 from app.jobs.worker_runtime import WorkerRuntimeHeartbeat
+from app.shared.task_log import _serialize_metadata
+
+
+class TaskRunLoggerSerializationTests(unittest.TestCase):
+    def test_metadata_serialization_normalizes_date_and_datetime_values(self):
+        payload = json.loads(
+            _serialize_metadata(
+                {
+                    "summary_date": date(2026, 7, 21),
+                    "captured_at": datetime(2026, 7, 21, 22, 0, 1),
+                }
+            )
+        )
+
+        self.assertEqual(payload["summary_date"], "2026-07-21")
+        self.assertEqual(payload["captured_at"], "2026-07-21 22:00:01")
 
 
 class WorkerReadinessTests(unittest.TestCase):

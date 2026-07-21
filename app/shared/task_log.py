@@ -8,6 +8,10 @@ from app.jobs.errors import error_fingerprint, infer_error_code, record_job_erro
 from app.shared.db import mysql_conn
 
 
+def _serialize_metadata(metadata: Optional[Dict[str, Any]]) -> str:
+    return json.dumps(metadata or {}, ensure_ascii=False, default=str)
+
+
 class TaskRunLogger:
     def start(self, task_name: str, run_id: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         sql = """
@@ -23,7 +27,7 @@ class TaskRunLogger:
                         run_id,
                         "running",
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        json.dumps(metadata or {}, ensure_ascii=False),
+                        _serialize_metadata(metadata),
                     ),
                 )
 
@@ -62,7 +66,7 @@ class TaskRunLogger:
                         safe_message,
                         resolved_error_code,
                         fingerprint,
-                        json.dumps(metadata or {}, ensure_ascii=False),
+                        _serialize_metadata(metadata),
                         task_name,
                         run_id,
                     ),

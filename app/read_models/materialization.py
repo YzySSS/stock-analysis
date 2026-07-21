@@ -151,14 +151,21 @@ def _rank_rows(
         candidates.append((score, item))
     candidates.sort(key=lambda pair: (-pair[0], str(pair[1].get("code") or "")))
 
+    selected = candidates[: max(1, int(limit))]
+    selected_count = len(selected)
     ranked: list[dict[str, Any]] = []
-    for rank_no, (score, item) in enumerate(candidates[: max(1, int(limit))], start=1):
+    for rank_no, (score, item) in enumerate(selected, start=1):
         quote_time = _as_datetime(item.get("quote_time"))
         trade_date = _as_date(item.get("trade_date")) or (quote_time.date() if quote_time else None)
         if quote_time is None or trade_date is None:
             continue
+        normalized_rank_score = round(
+            (selected_count - rank_no + 1) / max(1, selected_count) * 100.0,
+            4,
+        )
         metrics = {
             "score_field": score_field,
+            "raw_rank_value": score,
             "source_rank": item.get("source_rank"),
             "source_score": item.get("source_score"),
             "source_quote_time": quote_time,
@@ -178,7 +185,7 @@ def _rank_rows(
                 "pct_chg": item.get("pct_chg"),
                 "amount": item.get("amount"),
                 "net_amount": item.get("net_amount"),
-                "rank_score": score,
+                "rank_score": normalized_rank_score,
                 "is_stale": 1 if item.get("is_stale") else 0,
                 "source": str(item.get("source") or "local_mysql")[:64],
                 "metrics_json": _canonical_json(metrics),
@@ -500,7 +507,12 @@ class LocalReadModelMaterializer:
                     SELECT trade_date, batch_id, MAX(quote_time) AS quote_time,
                            MAX(source) AS source, COUNT(*) AS row_count
                     FROM stock_realtime_snapshot
-                    WHERE trade_date = (SELECT MAX(trade_date) FROM stock_realtime_snapshot)
+                    WHERE LEFT(batch_id, 18) = 'realtime_snapshot_'
+                      AND trade_date = (
+                          SELECT MAX(trade_date)
+                          FROM stock_realtime_snapshot
+                          WHERE LEFT(batch_id, 18) = 'realtime_snapshot_'
+                      )
                     GROUP BY trade_date, batch_id
                     ORDER BY quote_time DESC, (batch_id IS NOT NULL) DESC
                     LIMIT 1
