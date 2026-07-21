@@ -19,9 +19,9 @@ Research Baseline 2026.07
 | --- | --- |
 | 产品定位 | 个人纪律型投研工作台；辅助研究，不自动交易，不构成投资建议 |
 | 部署形态 | 单机模块化单体；FastAPI + MySQL + Nginx + 3 个独立 worker |
-| 数据库 | migration `0021`，生产与独立 smoke 库均为 `21/21` |
+| 数据库 | migration `0022`，生产库为 `22/22` |
 | 自动回归 | 279 项通过 |
-| 运行状态 | readiness `ready`，3 个 worker healthy/idle，3 类队列均为 0 |
+| 运行状态 | 2026-07-21 15:44 readiness `degraded`：日线已到 07-21、因子输入暂到 07-20；3 个 worker healthy/idle，3 类队列均为 0 |
 | 公网边界 | `/api/health` 公开；其余页面/API 由 Basic Auth 保护；重型入口限流 |
 | TLS | Let’s Encrypt，当前有效期至 2026-10-16；Certbot 每日两轮自动续期，续期成功后校验并 reload Nginx |
 | 数据真相 | DQ1～DQ5 已完成：行情、历史股票状态、公告日基本面、历史指数成分均按 point-in-time 使用 |
