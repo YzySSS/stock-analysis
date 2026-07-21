@@ -59,41 +59,6 @@ def system_page() -> FileResponse:
     return serve_page("system.html")
 
 
-@router.get("/ui-reference/stock-detail", include_in_schema=False)
-def stock_detail_ui_reference_page() -> FileResponse:
-    return serve_page("ui-reference.html")
-
-
-@router.get("/ui-reference/image2", include_in_schema=False)
-def stock_detail_image2_ui_reference_page() -> FileResponse:
-    return serve_page("ui-image2-preview.html")
-
-
-@router.get("/ui-reference/pages", include_in_schema=False)
-def pages_image2_ui_reference_page() -> FileResponse:
-    return serve_page("ui-pages-preview.html")
-
-
-@router.get("/ui-reference/terminal", include_in_schema=False)
-def terminal_ui_reference_page() -> FileResponse:
-    return serve_page("ui-terminal-preview.html")
-
-
-@router.api_route("/preview", methods=["GET", "HEAD"], include_in_schema=False)
-def preview_page() -> FileResponse:
-    return serve_page("ui-terminal-preview.html")
-
-
-@router.api_route("/ui-preview", methods=["GET", "HEAD"], include_in_schema=False)
-def ui_preview_page() -> FileResponse:
-    return serve_page("ui-terminal-preview.html")
-
-
-@router.get("/ui-reference/simple", include_in_schema=False)
-def simple_image2_ui_reference_page() -> FileResponse:
-    return serve_page("ui-simple-preview.html")
-
-
 @router.get("/stocks/{code}", include_in_schema=False)
 def stock_detail_page(code: str) -> FileResponse:
     _ = code

@@ -813,7 +813,6 @@ function normalizeRunResponse(result) {
     requested_strategy_id: result.strategy?.id || result.strategy_id || null,
     strategy: result.strategy || null,
     diagnostics: result.diagnostics || items[0]?.run_diagnostics || null,
-    sentiment_prefetch: result.sentiment_prefetch || null,
     progressive_rerank: result.progressive_rerank || null,
     summary: {
       selected_trade_date: items[0]?.selection_date || null,
@@ -857,23 +856,12 @@ function renderSelectionResults(data) {
   summaryLine.textContent = isNoHistory
     ? (data.message || '当前条件下暂无真实历史选股结果。')
     : `run_id：${data.run_id || '最新'} · 选股交易日：${summary.selected_trade_date || '-'} · 入库时间：${summary.run_created_at || '-'} · 最新交易日：${summary.latest_trade_date || '-'} · 达标展示：${items.length} / 原始入选 ${summary.total_count || 0} 条`;
-  const diagnostics = data.diagnostics || {};
-  const v13Filter = diagnostics.v13_filter_summary || null;
-  const v12Filter = diagnostics.v12_filter_summary || null;
-  const filterSummary = v13Filter
-    ? ` · 三因子硬过滤：${v13Filter.before ?? '-'} → ${v13Filter.after ?? '-'}，剔除 ${v13Filter.removed ?? '-'}`
-    : v12Filter
-      ? ` · 多因子硬过滤：${v12Filter.before ?? '-'} → ${v12Filter.after ?? '-'}，剔除 ${v12Filter.removed ?? '-'}`
-      : '';
-  const sentimentSummary = data.sentiment_prefetch
-    ? ` · 舆情精排：Tavily ${data.sentiment_prefetch.tavily_runs ?? 0}/${data.sentiment_prefetch.requested ?? '-'}`
-    : '';
   const progressiveSummary = data.progressive_rerank
     ? ` · 舆情精排：板块 ${data.progressive_rerank.local_sector_count ?? 0}→${data.progressive_rerank.selected_sector_count ?? 0}，股票 ${data.progressive_rerank.preliminary_stock_count ?? 0}→${data.count ?? items.length}，Tavily 板块 ${data.progressive_rerank.sector_tavily?.tavily_runs ?? 0} / 个股 ${data.progressive_rerank.stock_tavily?.tavily_runs ?? 0}`
     : '';
   const boardSummary = data.diagnostics?.market_board_filter_summary;
   const boardText = boardSummary?.market_board_label || marketBoardLabel(getMarketBoardValue());
-  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 股票池：${boardText} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分${filterSummary}${sentimentSummary}${progressiveSummary}`;
+  topSummary.textContent = `样本池：${summary.sample_size || '-'} · 股票池：${boardText} · 原始入选上限：${data.strategy?.max_picks ?? '-'} · 数据更新时间：${summary.updated_at || '-'} · 当前策略：${data.strategy?.display_name || data.strategy?.id || '-'} · 策略版本：${data.strategy?.version || '-'} · 当前运行阈值：${data.strategy?.score_threshold ?? '-'} 分${progressiveSummary}`;
 
   renderSelectionRunStatus(data, items);
 

@@ -44,11 +44,6 @@ PROFILE_TARGETS: dict[str, tuple[Target, ...]] = {
         Target("backtest_js", "/static/js/backtest.js", "asset"),
         Target("backtest_strategies", "/api/strategies?instrument_type=stock", "api"),
         Target("backtest_factor_status", "/api/factor-input/status", "api"),
-        Target(
-            "backtest_validations",
-            "/api/backtest/validations?limit=10&compact=true",
-            "api",
-        ),
         Target("backtest_runs", "/api/backtest/runs?limit=20&compact=true", "api"),
     ),
 }
@@ -161,7 +156,6 @@ def measure_backtest_first_screen(
     fixed_paths = (
         "/api/strategies?instrument_type=stock",
         "/api/factor-input/status",
-        "/api/backtest/validations?limit=10&compact=true",
         "/api/backtest/runs?limit=20&compact=true",
     )
     samples_ms: list[float] = []

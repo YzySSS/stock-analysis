@@ -53,14 +53,14 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
         }
         picks = [{"code": "sh.600000", "entry_price": None, "entry_price_type": "next_open"}]
         request = BacktestRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             start_date="2026-07-01",
             end_date="2026-07-01",
             return_mode="1d",
             trade_strategy_id="next_open_1d",
         )
 
-        trades, rejections = service._build_trades("run", "lowvol_reversal", "2026-07-01", picks, request)
+        trades, rejections = service._build_trades("run", "test_strategy", "2026-07-01", picks, request)
 
         self.assertEqual(rejections, {})
         self.assertEqual(trades[0]["trade_date"], "2026-07-01")
@@ -79,7 +79,7 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
             ]
         }
         request = BacktestRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             start_date="2026-07-01",
             end_date="2026-07-01",
             return_mode="3d",
@@ -88,7 +88,7 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
 
         trades, _ = service._build_trades(
             "run",
-            "lowvol_reversal",
+            "test_strategy",
             "2026-07-01",
             [{"code": "sh.600000", "entry_price": None}],
             request,
@@ -181,7 +181,7 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
             strategy = FakeStrategy()
 
         request = BacktestRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             start_date="2026-07-01",
             end_date="2026-07-02",
             trade_strategy_id="next_open_1d",

@@ -13,9 +13,6 @@ const HOLDING_STRATEGIES = [
 
 const LEGACY_STRATEGY_MAP = {
   a_share_sentiment: 'short_term',
-  leader_tactics: 'short_term',
-  lowvol_reversal: 'swing',
-  quality_lowvol: 'swing',
 };
 
 function money(value, digits = 2) {

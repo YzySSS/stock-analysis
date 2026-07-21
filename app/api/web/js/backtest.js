@@ -9,14 +9,6 @@ let currentBacktestTradesLimit = 10;
 
 
 const BACKTEST_STRATEGY_LABELS = {
-  lowvol_reversal: '低波反转策略 v2.1',
-  v13_three_factor: '三因子策略',
-  v12_legacy: '多因子策略',
-  fund_chip_repair: '资金筹码修复选股',
-  quality_lowvol: '质量低波选股',
-  leader_tactics: '龙头战法选股',
-  low_position_resonance: '低位共振修复',
-  multi_timeframe_resonance: '多周期共振',
   a_share_sentiment: 'A股舆情选股',
 };
 
@@ -41,75 +33,6 @@ function backtestUniverseLabel(item) {
   return item?.universe_label || BACKTEST_UNIVERSE_LABELS[code] || code;
 }
 
-const BACKTEST_VALIDATION_LABELS = {
-  pending: '待执行',
-  inconclusive: '证据不足',
-  historical_diagnostic_pass: '历史诊断通过',
-  historical_diagnostic_fail: '历史诊断未通过',
-  prospective_oos_pass: '前瞻样本外通过候选',
-  prospective_oos_fail: '前瞻样本外未通过',
-  superseded: '已废弃并替换',
-};
-
-function validationStatusClass(item) {
-  if (item?.verdict === 'prospective_oos_pass' || item?.verdict === 'historical_diagnostic_pass') return 'status-ok';
-  if (item?.verdict === 'historical_diagnostic_fail' || item?.verdict === 'prospective_oos_fail' || item?.status === 'failed') return 'status-error';
-  return 'status-warn';
-}
-
-function renderBacktestValidations(items = []) {
-  const container = qs('#backtest-validation-list');
-  if (!container) return;
-  if (!items.length) {
-    container.classList.add('empty-state');
-    container.innerHTML = '尚未冻结验证协议';
-    return;
-  }
-  container.classList.remove('empty-state');
-  container.innerHTML = items.map((item) => {
-    const report = item.report_json || {};
-    const metrics = report.metrics || {};
-    const mode = item.validation_mode === 'prospective_oos' ? '前瞻样本外' : '历史冻结诊断';
-    const verdict = BACKTEST_VALIDATION_LABELS[item.verdict] || item.verdict || item.status || '-';
-    return `
-      <article class="backtest-validation-row">
-        <div class="backtest-validation-head">
-          <div>
-            <strong>${escapeHtml(backtestStrategyLabel(item.strategy_id))}</strong>
-            <span>${escapeHtml(item.start_date || '-')} → ${escapeHtml(item.end_date || '-')} · ${escapeHtml(item.universe_code || 'ALL_A')}</span>
-          </div>
-          <span class="badge ${validationStatusClass(item)}">${escapeHtml(verdict)}</span>
-        </div>
-        <div class="backtest-validation-metrics">
-          <span>类型 <b>${escapeHtml(mode)}</b></span>
-          <span>交易日 <b>${escapeHtml(metrics.sample_days ?? '-')}</b></span>
-          <span>净收益 <b class="${getPctClass(metrics.strategy_total_return_pct) || ''}">${formatPercent(metrics.strategy_total_return_pct)}</b></span>
-          <span>超额 <b class="${getPctClass(metrics.excess_return_pct) || ''}">${formatPercent(metrics.excess_return_pct)}</b></span>
-          <span>回撤 <b class="${getPctClass(metrics.strategy_max_drawdown_pct) || ''}">${formatPercent(metrics.strategy_max_drawdown_pct)}</b></span>
-          <span>Sharpe <b>${formatRatio(metrics.strategy_sharpe_ratio)}</b></span>
-        </div>
-        <div class="backtest-validation-foot">
-          <span class="muted">冻结截止：${escapeHtml(item.freeze_data_cutoff_date || '-')} · 配置 ${escapeHtml((item.strategy_config_hash || '').slice(0, 10) || '-')}</span>
-          ${item.run_id ? `<button class="btn btn-secondary btn-small" type="button" data-load-validation-run="${escapeHtml(item.run_id)}">查看回测</button>` : ''}
-        </div>
-      </article>
-    `;
-  }).join('');
-  container.querySelectorAll('[data-load-validation-run]').forEach((button) => {
-    button.addEventListener('click', () => loadBacktestResult(button.dataset.loadValidationRun));
-  });
-}
-
-async function loadBacktestValidations() {
-  const container = qs('#backtest-validation-list');
-  if (!container) return;
-  try {
-    const data = await fetchJson('/api/backtest/validations?limit=10&compact=true');
-    renderBacktestValidations(data.items || []);
-  } catch (error) {
-    renderError(container, `冻结验证加载失败：${error.message}`);
-  }
-}
 
 async function loadBacktestStrategies() {
   const select = qs('#backtest-strategy-id');
@@ -138,7 +61,6 @@ async function loadBacktestStrategies() {
   select.value = preferred;
   select.disabled = false;
   if (submit) submit.disabled = false;
-  syncBacktestStrategyDefaults();
   return items;
 }
 
@@ -154,46 +76,6 @@ function backtestTradeStrategyLabel(item) {
   return BACKTEST_TRADE_STRATEGY_LABELS[id] || id || '-';
 }
 
-const BACKTEST_STRATEGY_DEFAULTS = {
-  lowvol_reversal: {
-    threshold: 60,
-    maxPicks: 3,
-  },
-  v13_three_factor: {
-    threshold: 65,
-    maxPicks: 3,
-  },
-  fund_chip_repair: {
-    threshold: 60,
-    maxPicks: 3,
-  },
-  quality_lowvol: {
-    threshold: 60,
-    maxPicks: 3,
-  },
-  leader_tactics: {
-    threshold: 60,
-    maxPicks: 3,
-  },
-  low_position_resonance: {
-    threshold: 60,
-    maxPicks: 3,
-  },
-  multi_timeframe_resonance: {
-    threshold: 60,
-    maxPicks: 3,
-  },
-};
-
-function syncBacktestStrategyDefaults() {
-  const strategyId = qs('#backtest-strategy-id')?.value || 'lowvol_reversal';
-  const defaults = BACKTEST_STRATEGY_DEFAULTS[strategyId];
-  if (!defaults) return;
-  const threshold = qs('#backtest-score-threshold');
-  const maxPicks = qs('#backtest-max-picks');
-  if (threshold) threshold.value = String(defaults.threshold);
-  if (maxPicks) maxPicks.value = String(defaults.maxPicks);
-}
 
 function pctCell(value) {
   const cls = getPctClass(value) || '';
@@ -759,7 +641,6 @@ async function loadBacktestResult(runId, options = {}) {
 async function refreshBacktestPage() {
   await loadBacktestStrategies();
   await loadFactorStatus();
-  await loadBacktestValidations();
   await loadRuns({ autoLoadLatest: true });
 }
 
@@ -840,7 +721,6 @@ qs('#backtest-trade-strategy-id')?.addEventListener('change', () => {
   currentBacktestTradesPage = 1;
   loadTrades(currentBacktestRunId, 1);
 });
-qs('#backtest-strategy-id')?.addEventListener('change', syncBacktestStrategyDefaults);
 qs('#backtest-ashare-realistic-preset')?.addEventListener('click', applyAShareRealisticPreset);
 qsa('[data-backtest-chart-mode]').forEach((button) => {
   button.addEventListener('click', () => {
@@ -850,7 +730,6 @@ qsa('[data-backtest-chart-mode]').forEach((button) => {
   });
 });
 
-syncBacktestStrategyDefaults();
 refreshBacktestPage().catch((error) => {
   const message = qs('#backtest-form-message');
   const messageShell = message?.closest('.backtest-terminal-foot');

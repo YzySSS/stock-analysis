@@ -130,11 +130,7 @@ def _strategy_label(strategy_id: str) -> str:
         "long_term": "长期",
         "short_term": "短期",
         "swing": "波段",
-        # Legacy values kept for already-saved positions.
         "a_share_sentiment": "短期",
-        "leader_tactics": "短期",
-        "lowvol_reversal": "波段",
-        "quality_lowvol": "波段",
     }
     return labels.get(strategy_id, strategy_id)
 
@@ -156,10 +152,8 @@ def _decision_level_from_plan(plan: dict[str, Any] | None) -> str:
 
 def _strategy_profile(strategy_id: str | None, max_loss_pct: float | None = None) -> dict[str, Any]:
     normalized = strategy_id or "short_term"
-    if normalized in {"a_share_sentiment", "leader_tactics"}:
+    if normalized == "a_share_sentiment":
         normalized = "short_term"
-    elif normalized in {"lowvol_reversal", "quality_lowvol"}:
-        normalized = "swing"
     defaults = {
         "short_term": {"label": "短期", "max_days": 5, "max_loss_pct": 5.0, "chase_ma": "ma5", "chase_gap_pct": 6.0},
         "swing": {"label": "波段", "max_days": 28, "max_loss_pct": 10.0, "chase_ma": "ma20", "chase_gap_pct": 10.0},
@@ -665,8 +659,8 @@ def _build_trade_plan(position: dict[str, Any], market: dict[str, Any], history:
     high20 = _to_float(technical.get("high20"))
     low20 = _to_float(technical.get("low20"))
     max_loss_pct = _to_float(position.get("max_loss_pct")) or 5.0
-    is_short = strategy_id in {"short_term", "a_share_sentiment", "leader_tactics"}
-    is_swing = strategy_id in {"swing", "lowvol_reversal", "quality_lowvol"}
+    is_short = strategy_id in {"short_term", "a_share_sentiment"}
+    is_swing = strategy_id == "swing"
     exit_tradable = _is_exit_tradable(position, market)
 
     if current is None or cost is None or cost <= 0:

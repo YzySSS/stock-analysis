@@ -105,7 +105,7 @@ class FakeRepository:
     def load_run(self, _run_id):
         return {
             "run_id": "run-test",
-            "strategy_id": "v13_three_factor",
+            "strategy_id": "test_strategy",
             "strategy_version": "0.1.0",
             "status": "success",
             "start_date": self.signal_dates[0],

@@ -422,22 +422,22 @@ class SelectionRepository:
             dk.trade_date,
             ma.ma5,
             ma.ma10,
-            COALESCE(lf.ma20, ma.ma20) AS ma20,
+            ma.ma20,
             ma.ma30,
-            lf.ma60,
-            lf.close_5d,
-            COALESCE(lf.close_20d, ma.close_20d) AS close_20d,
-            lf.prev_close_1d,
-            COALESCE(lf.max_close_20, ma.max_close_20) AS max_close_20,
-            COALESCE(lf.min_close_20, ma.min_close_20) AS min_close_20,
+            ma.ma60,
+            ma.close_5d,
+            ma.close_20d,
+            ma.prev_close_1d,
+            ma.max_close_20,
+            ma.min_close_20,
             ma.avg_amount_5,
-            COALESCE(lf.avg_amount_20, ma.avg_amount_20) AS avg_amount_20,
-            COALESCE(lf.kline_count_20, ma.kline_count_20) AS kline_count_20,
-            lf.kline_count_60,
-            lf.std_return_20,
-            lf.pct_chg_1d,
+            ma.avg_amount_20,
+            ma.kline_count_20,
+            ma.kline_count_60,
+            ma.std_return_20,
+            ma.pct_chg_1d,
             fid.turnover_rate,
-            lf.turnover_rate_5d_avg,
+            NULL AS turnover_rate_5d_avg,
             DATEDIFF(dk.trade_date, sb.listing_date) AS listed_days,
             fid.volume_ratio,
             fid.total_mv,
@@ -511,18 +511,35 @@ class SelectionRepository:
                 AVG(CASE WHEN rn <= 10 THEN close END) AS ma10,
                 AVG(CASE WHEN rn <= 20 THEN close END) AS ma20,
                 AVG(CASE WHEN rn <= 30 THEN close END) AS ma30,
+                AVG(CASE WHEN rn <= 60 THEN close END) AS ma60,
+                MAX(CASE WHEN rn = 6 THEN close END) AS close_5d,
                 MAX(CASE WHEN rn = 20 THEN close END) AS close_20d,
+                MAX(CASE WHEN rn = 2 THEN close END) AS prev_close_1d,
                 MAX(CASE WHEN rn <= 20 THEN close END) AS max_close_20,
                 MIN(CASE WHEN rn <= 20 THEN close END) AS min_close_20,
                 AVG(CASE WHEN rn <= 5 THEN amount END) AS avg_amount_5,
                 AVG(CASE WHEN rn <= 20 THEN amount END) AS avg_amount_20,
-                SUM(CASE WHEN rn <= 20 THEN 1 ELSE 0 END) AS kline_count_20
+                SUM(CASE WHEN rn <= 20 THEN 1 ELSE 0 END) AS kline_count_20,
+                COUNT(*) AS kline_count_60,
+                STDDEV_SAMP(
+                    CASE
+                        WHEN rn <= 20 AND prev_close IS NOT NULL AND prev_close > 0
+                        THEN close / prev_close - 1
+                    END
+                ) AS std_return_20,
+                MAX(
+                    CASE
+                        WHEN rn = 1 AND prev_close IS NOT NULL AND prev_close > 0
+                        THEN (close - prev_close) / prev_close * 100
+                    END
+                ) AS pct_chg_1d
             FROM (
                 SELECT
                     code,
                     trade_date,
                     close,
                     amount,
+                    LAG(close) OVER (PARTITION BY code ORDER BY trade_date) AS prev_close,
                     ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS rn
                 FROM daily_kline
                 WHERE trade_date >= (
@@ -532,15 +549,14 @@ class SelectionRepository:
                         FROM daily_kline
                         {daily_kline_recent_filter}
                         ORDER BY trade_date DESC
-                        LIMIT 45
+                        LIMIT 90
                     ) recent_trade_dates
                 )
                 {daily_kline_window_filter}
             ) ranked
-            WHERE rn <= 30
+            WHERE rn <= 60
             GROUP BY code
         ) ma ON sb.code = ma.code
-        LEFT JOIN lowvol_reversal_feature_daily lf ON lf.code = sb.code AND lf.trade_date = dk.trade_date
         LEFT JOIN factor_input_daily fid ON fid.code = sb.code AND fid.trade_date = dk.trade_date
         LEFT JOIN stock_moneyflow_daily mf ON mf.code = sb.code AND mf.trade_date = dk.trade_date
         LEFT JOIN stock_realtime_snapshot realtime ON %s = 1 AND realtime.code = sb.code

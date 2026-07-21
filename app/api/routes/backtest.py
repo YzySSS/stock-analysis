@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 from app.backtest.policy import research_disclosure
 from app.backtest.repository import BacktestRepository
 from app.backtest.service import BacktestRequest, BacktestService
-from app.backtest.strategy_validation import StrategyValidationService
 from app.shared.instrument_policy import UnsupportedInstrumentError
 from app.shared.index_universe import ALL_A_UNIVERSE_CODE, universe_label
 
@@ -44,7 +43,7 @@ def _adjust_price(price: float | None, factor: float | None, entry_factor: float
 
 
 class BacktestRunRequest(BaseModel):
-    strategy_id: str = "lowvol_reversal"
+    strategy_id: str
     start_date: str
     end_date: str
     return_mode: str = "1d"
@@ -99,14 +98,6 @@ def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str
     recorded when the run was created, even after later strategy iterations.
     """
     base_names = {
-        "lowvol_reversal": "低波反转策略",
-        "v13_three_factor": "三因子策略",
-        "v12_legacy": "多因子策略",
-        "fund_chip_repair": "资金筹码修复选股",
-        "quality_lowvol": "质量低波选股",
-        "leader_tactics": "龙头战法选股",
-        "low_position_resonance": "低位共振修复",
-        "multi_timeframe_resonance": "多周期共振",
         "a_share_sentiment": "A股舆情选股",
     }
     base = base_names.get(strategy_id or "", strategy_id or "-")
@@ -320,29 +311,6 @@ def get_backtest_runs(
             for row in rows
         ]
     }
-
-
-@router.get("/backtest/validations")
-def get_backtest_validations(
-    limit: int = Query(default=20, ge=1, le=100),
-    strategy_id: Optional[str] = Query(default=None),
-    compact: bool = Query(default=False),
-) -> dict:
-    return {
-        "items": StrategyValidationService().list(
-            limit=limit,
-            strategy_id=strategy_id,
-            compact=compact,
-        )
-    }
-
-
-@router.get("/backtest/validations/{protocol_id}")
-def get_backtest_validation(protocol_id: str) -> dict:
-    try:
-        return StrategyValidationService().get(protocol_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/factor-input/status")

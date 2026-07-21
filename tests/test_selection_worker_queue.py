@@ -102,11 +102,11 @@ class FakeJobStates:
 class SelectionRunServiceTests(unittest.TestCase):
     def test_idempotency_key_is_stable_for_equivalent_payload(self):
         first = SelectionRunService._idempotency_key(
-            {"strategy_id": "lowvol_reversal", "max_picks": 3, "save": False},
+            {"strategy_id": "test_strategy", "max_picks": 3, "save": False},
             date(2026, 7, 16),
         )
         second = SelectionRunService._idempotency_key(
-            {"save": False, "max_picks": 3, "strategy_id": "lowvol_reversal"},
+            {"save": False, "max_picks": 3, "strategy_id": "test_strategy"},
             date(2026, 7, 16),
         )
         self.assertEqual(first, second)
@@ -115,7 +115,7 @@ class SelectionRunServiceTests(unittest.TestCase):
         service = SelectionRunService(job_states=FakeJobStates())
         service.get_run = lambda *_args, **_kwargs: {
             "request": {
-                "strategy_id": "lowvol_reversal",
+                "strategy_id": "test_strategy",
                 "instrument_type": "stock",
                 "limit": 3,
                 "max_picks": 3,
@@ -139,7 +139,7 @@ class SelectionRunServiceTests(unittest.TestCase):
         service = SelectionRunService(job_states=FakeJobStates(cancel_results=[False, True]))
         service.get_run = lambda *_args, **_kwargs: {
             "request": {
-                "strategy_id": "lowvol_reversal",
+                "strategy_id": "test_strategy",
                 "instrument_type": "stock",
                 "market_board": None,
                 "limit": 3,

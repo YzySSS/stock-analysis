@@ -510,34 +510,6 @@ class BacktestService:
             for row in self.repository.fetch_trade_dates(start_date, end_date)
         ]
 
-    def _has_lowvol_feature_cache(self, trade_date: str) -> bool:
-        row = self.repository.lowvol_feature_cache_counts(trade_date)
-        cache_count = int(row.get("cache_count") or 0)
-        expected_count = int(row.get("expected_count") or 0)
-        if expected_count <= 0:
-            return cache_count > 0
-        return cache_count >= max(1000, int(expected_count * 0.9))
-
-    def _load_candidates_from_feature_cache(
-        self,
-        selector: StockSelector,
-        trade_date: str,
-        instrument_type: str,
-        universe_code: str,
-    ) -> List[Dict[str, Any]]:
-        rows = self.repository.load_feature_candidate_rows(
-            trade_date,
-            instrument_type,
-            universe_code,
-        )
-        candidates: List[Dict[str, Any]] = []
-        for row in rows:
-            item = selector._build_candidate(self._sanitize_point_in_time_fields(row))
-            item["open"] = _to_float(row.get("open"))
-            item["close"] = _to_float(row.get("close"))
-            candidates.append(item)
-        return candidates
-
     def _ensure_index_universe_snapshot(self, universe_code: str, trade_date: str) -> None:
         if universe_code == ALL_A_UNIVERSE_CODE:
             return
@@ -565,17 +537,6 @@ class BacktestService:
         universe_code: str,
     ) -> List[Dict[str, Any]]:
         self._ensure_index_universe_snapshot(universe_code, trade_date)
-        try:
-            if self._has_lowvol_feature_cache(trade_date):
-                return self._load_candidates_from_feature_cache(
-                    selector,
-                    trade_date,
-                    instrument_type,
-                    universe_code,
-                )
-        except Exception:
-            # Cache table is optional; fall back to point-in-time window SQL.
-            pass
         kline_window_start = self._fetch_window_start_date("daily_kline", trade_date, 90)
         factor_window_start = self._fetch_window_start_date("factor_input_daily", trade_date, 10)
         rows = self.repository.load_candidate_rows(

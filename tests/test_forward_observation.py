@@ -329,7 +329,7 @@ class ForwardEvidenceTests(unittest.TestCase):
         repository = MagicMock()
         repository.evidence_rows.return_value = ({}, [], [], [])
 
-        summary = ForwardObservationService(repository=repository).evidence_summary("quality_lowvol")
+        summary = ForwardObservationService(repository=repository).evidence_summary("test_strategy")
 
         self.assertEqual(summary["status"], "not_configured")
         self.assertEqual(summary["validation_status"], "unvalidated")

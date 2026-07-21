@@ -50,7 +50,7 @@ class SelectionTradePlanRiskControlTests(unittest.TestCase):
 
         plan = build_selection_trade_plan(
             {"code": "sh.600000", "close": 100.0},
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             raw_metrics={"selected_price": 100.0},
         )
 

@@ -49,7 +49,7 @@ class InstrumentPolicyTests(unittest.TestCase):
 class SelectionGuardTests(unittest.TestCase):
     def test_selection_run_rejects_etf_before_task_creation(self):
         payload = SelectionRunRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             instrument_type="etf",
         )
 
@@ -64,7 +64,7 @@ class SelectionGuardTests(unittest.TestCase):
 
     def test_selection_sync_execution_is_disabled_before_task_creation(self):
         payload = SelectionRunRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             instrument_type="stock",
             async_run=False,
         )
@@ -109,7 +109,7 @@ class BacktestGuardTests(unittest.TestCase):
         from app.api.routes.backtest import BacktestRunRequest, run_backtest
 
         payload = BacktestRunRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             start_date="2026-04-24",
             end_date="2026-04-27",
             save=False,
@@ -125,7 +125,7 @@ class BacktestGuardTests(unittest.TestCase):
 
     def test_backtest_rejects_etf_before_data_query(self):
         payload = BacktestRunRequest(
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             start_date="2026-04-24",
             end_date="2026-04-27",
             instrument_type="etf",
@@ -141,7 +141,7 @@ class BacktestGuardTests(unittest.TestCase):
         normalized = normalize_run_row(
             {
                 "run_id": "test-run",
-                "strategy_id": "lowvol_reversal",
+                "strategy_id": "test_strategy",
                 "strategy_version": "v2.1",
                 "status": "success",
                 "request_json": {"instrument_type": "stock"},

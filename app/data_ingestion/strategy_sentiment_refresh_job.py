@@ -15,7 +15,7 @@ from app.shared.task_log import TaskRunLogger
 from app.stock_selection.selector import StockSelector
 
 TASK_NAME = "strategy_sentiment_refresh"
-DEFAULT_STRATEGIES = ["fund_chip_repair", "quality_lowvol", "leader_tactics", "a_share_sentiment"]
+DEFAULT_STRATEGIES = ["a_share_sentiment"]
 
 
 def latest_trade_date() -> str:
@@ -135,7 +135,7 @@ def refresh_pool(rows: List[Dict[str, Any]], trade_date: str, tavily_top_n: int,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Refresh sentiment for strategy-relevant TopN candidate pool.")
+    parser = argparse.ArgumentParser(description="Refresh sentiment for the A-share sentiment strategy candidate pool.")
     parser.add_argument("--trade-date", default=None)
     parser.add_argument("--strategies", default=",".join(DEFAULT_STRATEGIES))
     parser.add_argument("--top-per-strategy", type=int, default=80)
@@ -163,4 +163,3 @@ def main() -> None:
     except Exception as exc:
         logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], meta)
         raise
-

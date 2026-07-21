@@ -24,7 +24,7 @@ def _existing_sentiment_codes(trade_date: str, min_news_count: int = 1) -> set[s
             return {row["code"] for row in cursor.fetchall() or []}
 
 
-def refresh_v12_candidate_sentiment(
+def refresh_sentiment_candidates(
     candidates: List[Dict[str, Any]],
     candidate_limit: int = 40,
     news_top_n: int = 10,

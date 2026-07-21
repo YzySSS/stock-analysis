@@ -13,7 +13,7 @@ class PagePayloadCompactionTests(unittest.TestCase):
         raw = {
             "code": "sh.600000",
             "name": "浦发银行",
-            "strategy_id": "lowvol_reversal",
+            "strategy_id": "test_strategy",
             "selection_date": "2026-07-01",
             "current_price": 10.5,
             "factor_scores": {"large": "x" * 8000},
@@ -58,7 +58,7 @@ class PagePayloadCompactionTests(unittest.TestCase):
     def test_compact_backtest_run_omits_full_summary(self):
         row = {
             "run_id": "run",
-            "strategy_id": "lowvol_reversal",
+            "strategy_id": "test_strategy",
             "methodology_version": "close_signal_next_open_v2",
             "summary_json": {"equity_curve": [{"value": "x" * 5000}]},
             "request_json": {"max_picks": 3},

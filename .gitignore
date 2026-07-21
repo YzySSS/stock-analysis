@@ -31,12 +31,28 @@ config/env.sh
 # 数据文件
 data/*.json
 data/*.txt
+data_cache/
+backtest_results/
+backups/
 *.log
 
 # 报告输出
 daily_reports/
 reports/
 logs/
+
+# 本地设计、阶段文档与 UI 参考稿
+docs/
+app/api/web/assets/ui-preview/
+app/api/web/pages/ui-*-preview.html
+app/api/web/pages/ui-reference.html
+
+# 已退役的历史代码树
+archive/
+examples/
+src/
+versions/
+config/research_protocols/
 
 # IDE
 .vscode/

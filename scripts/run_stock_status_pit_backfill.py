@@ -15,7 +15,6 @@ from app.data_ingestion.stock_status_pit_sync import StockStatusPitSync  # noqa:
 from app.shared.db import mysql_conn  # noqa: E402
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock  # noqa: E402
 from app.shared.task_log import TaskRunLogger  # noqa: E402
-from scripts.refresh_lowvol_reversal_feature_cache import refresh as refresh_feature_cache  # noqa: E402
 
 
 TASK_NAME = "stock_status_pit_backfill"
@@ -78,7 +77,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only backfill delisted codes without a successful historical-market manifest",
     )
-    parser.add_argument("--skip-feature-cache", action="store_true")
     return parser
 
 
@@ -118,15 +116,6 @@ def main() -> None:
             pending_market_only=args.pending_market_only,
         )
         market_result = payload.get("market_data") or {}
-        successful_codes = market_result.get("successful_codes") or []
-        if "market-data" in stages and successful_codes and not args.skip_feature_cache:
-            payload["feature_cache"] = refresh_feature_cache(
-                start_date,
-                end_date,
-                lookback_days=180,
-                codes=successful_codes,
-            )
-
         suspension_failures = len((payload.get("suspensions") or {}).get("failed_dates") or [])
         market_failures = (
             len(market_result.get("failed_codes") or [])

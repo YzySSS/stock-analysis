@@ -94,7 +94,7 @@ class PageResponseBenchmarkTests(unittest.TestCase):
                 timeout_seconds=10,
             )
 
-        self.assertEqual(result["request_count"], 6)
+        self.assertEqual(result["request_count"], 5)
         self.assertEqual(result["selected_run_id"], "run-1")
         self.assertTrue(any("/api/backtest/results?run_id=run-1" in url for url in requested_urls))
         self.assertTrue(any("return_mode=3d" in url for url in requested_urls))

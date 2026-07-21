@@ -24,43 +24,23 @@ def ready_snapshot(*, factor_codes: int = 100, moneyflow_codes: int = 94) -> dic
 
 
 class StrategyCapabilityContractTests(unittest.TestCase):
-    def test_failed_historical_diagnostics_are_research_only_and_no_default_is_set(self):
+    def test_only_sentiment_strategy_is_registered_and_no_default_is_set(self):
         service = StrategyService(dataset_snapshot=ready_snapshot())
         items = service.list_strategies()
 
-        self.assertEqual({item["id"] for item in items if item["runtime_ready"]}, {
-            "v12_legacy",
-            "a_share_sentiment",
-        })
-        self.assertEqual({item["id"] for item in items if item["backtest_ready"]}, {
-            "lowvol_reversal",
-            "v13_three_factor",
-        })
+        self.assertEqual([item["id"] for item in items], ["a_share_sentiment"])
+        self.assertEqual({item["id"] for item in items if item["runtime_ready"]}, {"a_share_sentiment"})
+        self.assertEqual([item for item in items if item["backtest_ready"]], [])
         self.assertIsNone(service.get_default_strategy_id())
         self.assertFalse(any(item["is_default"] for item in items))
         self.assertFalse(any(item["validated"] for item in items))
-        by_id = {item["id"]: item for item in items}
-        for strategy_id in ("lowvol_reversal", "v13_three_factor"):
-            item = by_id[strategy_id]
-            self.assertFalse(item["runtime_ready"])
-            self.assertTrue(item["backtest_ready"])
-            self.assertEqual(item["availability"], "research")
-            self.assertEqual(item["evidence_status"], "historical_diagnostic_fail")
-            self.assertIn("冻结历史诊断未通过", item["backtest_note"])
-
-    def test_loadable_prototype_is_not_misreported_as_runtime_ready(self):
-        item = StrategyService(dataset_snapshot=ready_snapshot()).get_strategy_capability("quality_lowvol")
-
-        self.assertTrue(item["loadable"])
-        self.assertTrue(item["data_ready"])
-        self.assertEqual(item["runtime_status"], "prototype")
-        self.assertFalse(item["runtime_ready"])
-        self.assertTrue(any("prototype" in reason for reason in item["runtime_reasons"]))
+        self.assertEqual(items[0]["backtest_status"], "disabled")
+        self.assertEqual(items[0]["validation_status"], "unvalidated")
 
     def test_required_dataset_gap_blocks_runtime(self):
         item = StrategyService(
             dataset_snapshot=ready_snapshot(factor_codes=80),
-        ).get_strategy_capability("v12_legacy")
+        ).get_strategy_capability("a_share_sentiment")
 
         self.assertFalse(item["data_ready"])
         self.assertFalse(item["runtime_ready"])
@@ -82,20 +62,20 @@ class CapabilityPreflightTests(unittest.TestCase):
         self.assertEqual(result, ["ready"])
         service_cls.return_value.list_strategies.assert_called_once_with(instrument_type="stock")
 
-    def test_selection_rejects_prototype_before_estimate_or_insert(self):
+    def test_selection_rejects_removed_strategy_before_estimate_or_insert(self):
         class RejectingStrategyService:
             def get_default_strategy_id(self):
-                return "quality_lowvol"
+                return None
 
             def require_runtime_ready(self, *_args, **_kwargs):
-                raise ValueError("策略 quality_lowvol 当前不可运行：实时状态为 prototype")
+                raise ValueError("策略 removed_strategy 未注册")
 
         service = object.__new__(SelectionRunService)
         service._estimate_seconds = lambda **_kwargs: self.fail("拒绝后不应估算任务时长")
         service.repository = object()
         with patch("app.stock_selection.run_tasks.StrategyService", return_value=RejectingStrategyService()):
-            with self.assertRaisesRegex(ValueError, "prototype"):
-                service.submit({"strategy_id": "quality_lowvol", "instrument_type": "stock", "limit": 3})
+            with self.assertRaisesRegex(ValueError, "未注册"):
+                service.submit({"strategy_id": "removed_strategy", "instrument_type": "stock", "limit": 3})
 
     def test_selection_requires_explicit_strategy_before_estimate_or_insert(self):
         class UnexpectedStrategyService:
@@ -112,10 +92,10 @@ class CapabilityPreflightTests(unittest.TestCase):
     def test_backtest_uses_registry_capability_preflight(self):
         class RejectingStrategyService:
             def require_backtest_ready(self, *_args, **_kwargs):
-                raise ValueError("策略 quality_lowvol 当前不可回测：回测状态为 disabled")
+                raise ValueError("策略 a_share_sentiment 当前不可回测：回测状态为 disabled")
 
         request = BacktestRequest(
-            strategy_id="quality_lowvol",
+            strategy_id="a_share_sentiment",
             start_date="2026-07-01",
             end_date="2026-07-02",
         )

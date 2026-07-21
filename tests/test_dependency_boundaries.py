@@ -138,7 +138,7 @@ class DependencyBoundaryTests(unittest.TestCase):
                 [
                     "run_selection",
                     "--strategy",
-                    "lowvol_reversal",
+                    "a_share_sentiment",
                     "--limit",
                     "4",
                     "--score-threshold",
@@ -152,7 +152,7 @@ class DependencyBoundaryTests(unittest.TestCase):
 
         service_class.return_value.submit.assert_called_once_with(
             {
-                "strategy_id": "lowvol_reversal",
+                "strategy_id": "a_share_sentiment",
                 "limit": 4,
                 "max_picks": 4,
                 "score_threshold": 60.0,
@@ -166,13 +166,10 @@ class DependencyBoundaryTests(unittest.TestCase):
         self.assertIn("Direct synchronous selection is disabled", main_block)
         self.assertNotIn("run_from_mysql", main_block)
 
-    def test_unrouted_web_page_and_grid_prototype_are_archived(self):
+    def test_retired_legacy_code_trees_are_removed(self):
         self.assertFalse((PROJECT_ROOT / "app" / "api" / "web" / "index.html").exists())
-        self.assertTrue((PROJECT_ROOT / "archive" / "legacy_web_index.html").exists())
-        self.assertTrue((PROJECT_ROOT / "archive" / "legacy_grid_trader.py").exists())
-        grid_wrapper = (PROJECT_ROOT / "src" / "grid_trader.py").read_text(encoding="utf-8")
-        self.assertIn("archive.legacy_grid_trader", grid_wrapper)
-        self.assertNotIn("class ETFGridTrader", grid_wrapper)
+        for directory in ("archive", "examples", "src", "versions"):
+            self.assertFalse((PROJECT_ROOT / directory).exists(), directory)
 
 
 if __name__ == "__main__":

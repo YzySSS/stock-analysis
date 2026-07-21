@@ -12,7 +12,7 @@ class BacktestWorkerResilienceTests(unittest.TestCase):
         service = BacktestService()
         service.get_run = lambda _run_id: {
             "request_json": {
-                "strategy_id": "lowvol_reversal",
+                "strategy_id": "test_strategy",
                 "start_date": "2026-04-24",
                 "end_date": "2026-04-27",
                 "unknown_future_field": True,

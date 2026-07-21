@@ -119,7 +119,12 @@ class BacktestRepositoryTests(unittest.TestCase):
         cursor = FakeCursor(fetchall_values=[[]])
         repository = BacktestRepository(connection_factory(cursor))
 
-        repository.load_feature_candidate_rows("2026-07-16", "stock")
+        repository.load_candidate_rows(
+            trade_date="2026-07-16",
+            instrument_type="stock",
+            kline_window_start="2026-04-01",
+            factor_window_start="2026-07-01",
+        )
 
         sql, params = cursor.executed[0]
         self.assertIn("stock_instrument_lifecycle", sql)
@@ -132,7 +137,17 @@ class BacktestRepositoryTests(unittest.TestCase):
         self.assertIn("fp2.period_end_date DESC", sql)
         self.assertIn("f.pe_tushare", sql)
         self.assertIn("pit_fundamental_available", sql)
-        self.assertEqual(params, ("2026-07-16", "stock"))
+        self.assertEqual(
+            params,
+            (
+                "2026-04-01",
+                "2026-07-16",
+                "2026-07-01",
+                "2026-07-16",
+                "2026-07-16",
+                "stock",
+            ),
+        )
 
     def test_fallback_candidate_sql_uses_the_same_fundamental_asof_boundary(self):
         cursor = FakeCursor(fetchall_values=[[]])
@@ -166,10 +181,12 @@ class BacktestRepositoryTests(unittest.TestCase):
         cursor = FakeCursor(fetchall_values=[[]])
         repository = BacktestRepository(connection_factory(cursor))
 
-        repository.load_feature_candidate_rows(
-            "2026-07-16",
-            "stock",
-            "000300.SH",
+        repository.load_candidate_rows(
+            trade_date="2026-07-16",
+            instrument_type="stock",
+            kline_window_start="2026-04-01",
+            factor_window_start="2026-07-01",
+            universe_code="000300.SH",
         )
 
         sql, params = cursor.executed[0]
@@ -179,6 +196,10 @@ class BacktestRepositoryTests(unittest.TestCase):
         self.assertEqual(
             params,
             (
+                "2026-04-01",
+                "2026-07-16",
+                "2026-07-01",
+                "2026-07-16",
                 "000300.SH",
                 "000300.SH",
                 "2026-07-16",
@@ -213,7 +234,7 @@ class BacktestRepositoryTests(unittest.TestCase):
 
         repository.save_results(
             run_id="run-1",
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
             picks=[
                 {
                     "trade_date": "2026-04-24",
@@ -229,7 +250,7 @@ class BacktestRepositoryTests(unittest.TestCase):
             trades=[
                 {
                     "run_id": "run-1",
-                    "strategy_id": "lowvol_reversal",
+                    "strategy_id": "test_strategy",
                     "trade_date": "2026-04-24",
                     "code": "sh.600000",
                     "entry_date": "2026-04-27",
@@ -239,7 +260,7 @@ class BacktestRepositoryTests(unittest.TestCase):
             daily=[
                 {
                     "run_id": "run-1",
-                    "strategy_id": "lowvol_reversal",
+                    "strategy_id": "test_strategy",
                     "trade_date": "2026-04-24",
                     "pick_count": 1,
                 }
@@ -248,17 +269,16 @@ class BacktestRepositoryTests(unittest.TestCase):
 
         self.assertEqual(len(cursor.executed_many), 3)
         pick_params = cursor.executed_many[0][1][0]
-        self.assertEqual(pick_params[0:4], ("run-1", "lowvol_reversal", "2026-04-24", "sh.600000"))
+        self.assertEqual(pick_params[0:4], ("run-1", "test_strategy", "2026-04-24", "sh.600000"))
         self.assertEqual(pick_params[-2:], ('{"a": 1}', '{"b": 2}'))
 
 
 class BacktestPersistenceBoundaryTests(unittest.TestCase):
-    def test_route_service_and_validation_do_not_open_mysql_connections(self):
+    def test_route_and_service_do_not_open_mysql_connections(self):
         project_root = Path(__file__).resolve().parents[1]
         relative_paths = [
             "app/api/routes/backtest.py",
             "app/backtest/service.py",
-            "app/backtest/validation_baseline.py",
         ]
         for relative_path in relative_paths:
             source = (project_root / relative_path).read_text(encoding="utf-8")

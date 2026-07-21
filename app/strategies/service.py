@@ -11,7 +11,7 @@ from app.shared.strategy_loader import StrategyLoader, StrategyRegistryError
 from app.stock_selection.deepseek_sentiment_rerank import DeepSeekSentimentReranker
 from app.stock_selection.selector import StockSelector
 from app.data_ingestion.news_provider import NewsAggregator
-from app.stock_selection.sentiment_refresh import refresh_v12_candidate_sentiment
+from app.stock_selection.sentiment_refresh import refresh_sentiment_candidates
 from app.strategies.capability import StrategyCapabilityService
 
 
@@ -255,83 +255,6 @@ class StrategyService:
             "factors": factor_items,
         }
 
-    @staticmethod
-    def _sentiment_score_0_100(value: Any) -> float:
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            return 0.0
-        if number != number:
-            return 0.0
-        if -1 <= number <= 1:
-            number = 50 + number * 50
-        return round(max(0.0, min(number, 100.0)), 4)
-
-    def _rank_v12_prefetch_by_sentiment(
-        self,
-        selector: StockSelector,
-        preliminary_items: List[Dict[str, Any]],
-        limit: int,
-        instrument_type: str,
-        candidate_limit: Optional[int],
-        market_board: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        rank_config = selector.strategy.config.get("sentiment_rank", {}) or {}
-        v12_weight = float(rank_config.get("v12_weight", 0.8) or 0.8)
-        sentiment_weight = float(rank_config.get("sentiment_weight", 0.2) or 0.2)
-        weight_total = v12_weight + sentiment_weight
-        if weight_total <= 0:
-            v12_weight, sentiment_weight, weight_total = 0.8, 0.2, 1.0
-        v12_weight = v12_weight / weight_total
-        sentiment_weight = sentiment_weight / weight_total
-
-        preliminary_codes = [item.get("code") for item in preliminary_items if item.get("code")]
-        preliminary_code_set = set(preliminary_codes)
-        preliminary_scores = {item.get("code"): item.get("score") for item in preliminary_items if item.get("code")}
-
-        refreshed_bundle = selector.load_candidates_from_mysql(
-            candidate_limit=candidate_limit,
-            instrument_type=instrument_type,
-            market_board=market_board,
-        )
-        refreshed_bundle["candidates"] = [
-            item for item in refreshed_bundle.get("candidates", []) if item.get("code") in preliminary_code_set
-        ]
-        context = selector.strategy.prepare_context(refreshed_bundle)
-        factor_rows = selector.strategy.compute_factors(context)
-
-        ranked: List[Dict[str, Any]] = []
-        for item in factor_rows:
-            sentiment_score = self._sentiment_score_0_100(item.get("sentiment_score"))
-            preliminary_score = float(preliminary_scores.get(item.get("code")) or 0)
-            final_score = round(preliminary_score * v12_weight + sentiment_score * sentiment_weight, 4)
-            factors = {**(item.get("factors") or {}), "sentiment": sentiment_score}
-            enriched = {
-                **item,
-                "score": final_score,
-                "factors": factors,
-                "v12_preliminary_score": preliminary_score,
-                "sentiment_rank_score": sentiment_score,
-                "sentiment_rank_weights": {"v12": round(v12_weight, 4), "sentiment": round(sentiment_weight, 4)},
-                "selection_phase": "v12_top40_weighted_sentiment_rank",
-                "strategy_id": selector.strategy_id,
-                "strategy_display_name": selector.strategy_meta.get("display_name"),
-                "strategy_version": selector.strategy_meta.get("version"),
-            }
-            enriched["explain"] = {
-                **selector._enhance_explain(enriched),
-                "selection_phase": "多因子初筛 Top40 后，按初筛分 + Tavily 舆情分加权精排",
-                "v12_preliminary_score": preliminary_score,
-                "sentiment_score_0_100": sentiment_score,
-                "weighted_score": final_score,
-                "rank_weights": {"v12": round(v12_weight, 4), "sentiment": round(sentiment_weight, 4)},
-            }
-            ranked.append(enriched)
-
-        ranked.sort(key=lambda row: (row.get("score") or 0, row.get("sentiment_rank_score") or 0), reverse=True)
-        for index, item in enumerate(ranked[:limit], start=1):
-            item["rank_no"] = index
-        return ranked[:limit]
 
     @staticmethod
     def _parse_json_list(value: Any) -> List[Dict[str, Any]]:
@@ -532,7 +455,7 @@ class StrategyService:
         ]
         preliminary = sector_filtered[:stock_local_limit]
 
-        stock_tavily_summary = refresh_v12_candidate_sentiment(
+        stock_tavily_summary = refresh_sentiment_candidates(
             preliminary,
             candidate_limit=stock_local_limit,
             news_top_n=news_top_n,
@@ -760,43 +683,10 @@ class StrategyService:
 
         selector = StockSelector(strategy_id=final_strategy_id, strategy_overrides=overrides)
         candidate_limit = None if instrument_type == "stock" else max(limit, 200)
-        sentiment_prefetch_summary = None
-        sentiment_prefetch_results = None
         progressive_rerank_summary = None
         progressive_rerank_results = None
         deepseek_rerank_summary = None
         deepseek_rerank_results = None
-
-        if final_strategy_id == "v12_legacy":
-            prefetch_config = selector.strategy.config.get("sentiment_prefetch", {}) or {}
-            if prefetch_config.get("enabled", False):
-                preliminary_limit = int(prefetch_config.get("candidate_limit") or 40)
-                preliminary_bundle = selector.load_candidates_from_mysql(
-                    candidate_limit=candidate_limit,
-                    instrument_type=instrument_type,
-                    market_board=market_board,
-                )
-                preliminary_context = selector.strategy.prepare_context(preliminary_bundle)
-                preliminary_factors = selector.strategy.compute_factors(preliminary_context)
-                preliminary_items = selector.apply_global_live_selection_rules(selector.strategy.score(preliminary_factors))[:preliminary_limit]
-                sentiment_prefetch_summary = refresh_v12_candidate_sentiment(
-                    preliminary_items,
-                    candidate_limit=preliminary_limit,
-                    news_top_n=int(prefetch_config.get("news_top_n") or 10),
-                    max_age_days=int(prefetch_config.get("max_age_days") or 7),
-                    min_credibility=float(prefetch_config.get("min_credibility") or 0.35),
-                    sleep_seconds=float(prefetch_config.get("sleep_seconds") or 0.1),
-                    skip_existing=bool(prefetch_config.get("skip_existing", False)),
-                )
-                selector = StockSelector(strategy_id=final_strategy_id, strategy_overrides=overrides)
-                sentiment_prefetch_results = self._rank_v12_prefetch_by_sentiment(
-                    selector=selector,
-                    preliminary_items=preliminary_items,
-                    limit=limit,
-                    instrument_type=instrument_type,
-                    candidate_limit=candidate_limit,
-                    market_board=market_board,
-                )
 
         if final_strategy_id == "a_share_sentiment":
             progressive_config = selector.strategy.config.get("progressive_rerank", {}) or {}
@@ -826,11 +716,9 @@ class StrategyService:
                 deepseek_rerank_results = selector.finalize_sentiment_results(deepseek_rerank_results)
 
         if save:
-            if sentiment_prefetch_results is not None or progressive_rerank_results is not None or deepseek_rerank_results is not None:
+            if progressive_rerank_results is not None or deepseek_rerank_results is not None:
                 selected_items = (
-                    sentiment_prefetch_results
-                    if sentiment_prefetch_results is not None
-                    else progressive_rerank_results
+                    progressive_rerank_results
                     if progressive_rerank_results is not None
                     else deepseek_rerank_results
                     or []
@@ -854,7 +742,7 @@ class StrategyService:
                     market_board=market_board,
                 )
         else:
-            items = sentiment_prefetch_results if sentiment_prefetch_results is not None else progressive_rerank_results if progressive_rerank_results is not None else deepseek_rerank_results if deepseek_rerank_results is not None else selector.run_from_mysql(
+            items = progressive_rerank_results if progressive_rerank_results is not None else deepseek_rerank_results if deepseek_rerank_results is not None else selector.run_from_mysql(
                     limit=limit,
                     instrument_type=instrument_type,
                     candidate_limit=candidate_limit,
@@ -883,8 +771,6 @@ class StrategyService:
         }
         if selector.last_run_diagnostics:
             result["diagnostics"] = selector.last_run_diagnostics
-        if sentiment_prefetch_summary is not None:
-            result["sentiment_prefetch"] = sentiment_prefetch_summary
         if progressive_rerank_summary is not None:
             result["progressive_rerank"] = progressive_rerank_summary
         if deepseek_rerank_summary is not None:

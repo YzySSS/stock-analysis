@@ -55,19 +55,19 @@ def connection_factory(cursor):
 
 class SelectionRepositoryTests(unittest.TestCase):
     def test_latest_result_meta_keeps_strategy_and_instrument_filters(self):
-        expected = {"run_id": "run-1", "strategy_id": "lowvol_reversal"}
+        expected = {"run_id": "run-1", "strategy_id": "test_strategy"}
         cursor = FakeCursor(fetchone_values=[expected])
         repository = SelectionRepository(connection_factory(cursor))
 
         actual = repository.latest_result_run_meta(
             "stock",
-            strategy_id="lowvol_reversal",
+            strategy_id="test_strategy",
         )
 
         self.assertEqual(actual, expected)
         sql, params = cursor.executed[0]
         self.assertIn("sr2.strategy_id = %s", sql)
-        self.assertEqual(params, ["stock", "stock", "lowvol_reversal"])
+        self.assertEqual(params, ["stock", "stock", "test_strategy"])
 
     def test_candidate_query_owns_cutoff_board_and_limit_sql(self):
         cursor = FakeCursor(fetchall_values=[[{"code": "sh.600000"}]])
@@ -93,7 +93,8 @@ class SelectionRepositoryTests(unittest.TestCase):
         self.assertIn("AS ma10", sql)
         self.assertIn("AS ma30", sql)
         self.assertIn("AS avg_amount_5", sql)
-        self.assertIn("WHERE rn <= 30", sql)
+        self.assertIn("LIMIT 90", sql)
+        self.assertIn("WHERE rn <= 60", sql)
         self.assertIn("AVG(trend_score) AS market_index_trend_score", sql)
         self.assertIn("COUNT(DISTINCT index_code) AS market_index_count", sql)
         self.assertIn("'000300.SH', '000905.SH', '000852.SH'", sql)
@@ -168,8 +169,8 @@ class SelectionRepositoryTests(unittest.TestCase):
         cursor = FakeCursor()
         repository = SelectionRepository(connection_factory(cursor))
         payload = [
-            ("run-1", "2026-07-16", "lowvol_reversal", "sh.600000", 80, 1, "{}"),
-            ("run-1", "2026-07-16", "lowvol_reversal", "sz.000001", 79, 2, "{}"),
+            ("run-1", "2026-07-16", "test_strategy", "sh.600000", 80, 1, "{}"),
+            ("run-1", "2026-07-16", "test_strategy", "sz.000001", 79, 2, "{}"),
         ]
 
         repository.save_result_rows(payload=payload, run_id="run-1")
@@ -180,8 +181,8 @@ class SelectionRepositoryTests(unittest.TestCase):
         self.assertEqual(
             [params for _, params in cursor.executed[1:]],
             [
-                ("2026-07-16", "lowvol_reversal", "sh.600000"),
-                ("2026-07-16", "lowvol_reversal", "sz.000001"),
+                ("2026-07-16", "test_strategy", "sh.600000"),
+                ("2026-07-16", "test_strategy", "sz.000001"),
             ],
         )
 

@@ -1168,8 +1168,6 @@ class StockSelector:
     def _enhance_explain(self, item: Dict[str, Any]) -> Dict[str, Any]:
         base_explain = self.strategy.explain(item)
         strategy_raw_metrics = base_explain.get("raw_metrics") or {}
-        if not strategy_raw_metrics and item.get("raw_lowvol_reversal_metrics"):
-            strategy_raw_metrics = item.get("raw_lowvol_reversal_metrics") or {}
         return {
             **base_explain,
             "summary": {
