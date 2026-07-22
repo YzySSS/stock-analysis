@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.shared.db import mysql_conn
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 from app.shared.task_log import TaskRunLogger
+from app.data_ingestion.realtime_lifecycle import ensure_intraday_hot_partition
 
 TASK_NAME = "stock_realtime_snapshot_update"
 LOCK_NAME = "stock_realtime_snapshot_update_lock"
@@ -304,6 +305,10 @@ def save_rows(rows: list[RealtimeRow], batch_id: str) -> dict:
     if not rows:
         return {"snapshot_rows": 0, "intraday_rows": 0, "deleted_old_rows": 0, "retention_deferred": True}
 
+    created_partitions: list[str] = []
+    for trade_date in sorted({row.trade_date for row in rows if row.trade_date}):
+        created_partitions.extend(ensure_intraday_hot_partition(trade_date))
+
     values = [
         (
             r.code,
@@ -399,6 +404,7 @@ def save_rows(rows: list[RealtimeRow], batch_id: str) -> dict:
         "retention_deferred": True,
         "retention_task": "stock_realtime_lifecycle",
         "latest_trade_date": latest_trade_date,
+        "created_partitions": created_partitions,
     }
 
 

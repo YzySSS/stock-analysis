@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS stock_realtime_rollup_manifest (
     rollup_codes INT NOT NULL DEFAULT 0,
     first_quote_minute DATETIME DEFAULT NULL,
     last_quote_minute DATETIME DEFAULT NULL,
+    source_fingerprint CHAR(64) DEFAULT NULL,
     error_code VARCHAR(64) DEFAULT NULL,
     error_message VARCHAR(500) DEFAULT NULL,
     started_at DATETIME DEFAULT NULL,

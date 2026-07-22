@@ -170,6 +170,12 @@ function renderRealtimeLifecycle(item = {}) {
   const rollup = item.rollup || {};
   const tracked = item.tracked || {};
   const manifests = item.latest_manifests || [];
+  const failed = item.failed_manifests || [];
+  const missing = item.missing_manifests || [];
+  const pending = item.pending_manifests || [];
+  const futureDates = raw.p_future_dates || [];
+  const healthClass = item.health === 'ok' ? 'status-ok' : item.health === 'pending' || item.health === 'warn' ? 'status-warn' : 'status-error';
+  const healthLabel = item.health === 'ok' ? '完整' : item.health === 'pending' ? '待收盘' : item.health === 'warn' ? '不完整' : '异常';
   const manifestRows = manifests.length
     ? manifests.map((manifest) => {
         const statusClass = manifest.status === 'success' ? 'status-ok' : manifest.status === 'partial' ? 'status-warn' : 'status-error';
@@ -182,16 +188,48 @@ function renderRealtimeLifecycle(item = {}) {
         `;
       }).join('')
     : '<div class="empty-state">暂无分钟汇总 manifest。</div>';
+  const issueRows = [
+    ...failed.map((manifest) => `
+      <div class="system-error-summary-row">
+        <b>${escapeHtml(manifest.trade_date || '-')} · ${escapeHtml(manifest.interval_minutes || '-')}m 汇总失败</b>
+        <span class="badge status-error">${escapeHtml(manifest.status || 'failed')}</span>
+        <small>${escapeHtml(manifest.error_code || '-')} · ${escapeHtml(manifest.error_message || '-')}</small>
+      </div>
+    `),
+    ...missing.map((manifest) => `
+      <div class="system-error-summary-row">
+        <b>${escapeHtml(manifest.trade_date || '-')} · ${escapeHtml(manifest.interval_minutes || '-')}m manifest 缺失</b>
+        <span class="badge status-error">missing</span>
+        <small>该原始交易日已到生命周期执行时间，但没有完成记录。</small>
+      </div>
+    `),
+    ...pending.map((manifest) => `
+      <div class="system-error-summary-row">
+        <b>${escapeHtml(manifest.trade_date || '-')} · ${escapeHtml(manifest.interval_minutes || '-')}m 待收盘汇总</b>
+        <span class="badge status-warn">pending</span>
+        <small>15:20 生命周期任务执行后应生成 manifest。</small>
+      </div>
+    `),
+    ...(futureDates.length ? [`
+      <div class="system-error-summary-row">
+        <b>原始分钟数据仍在 p_future</b>
+        <span class="badge status-error">未归档</span>
+        <small>${escapeHtml(futureDates.join('、'))} · 约 ${escapeHtml(raw.p_future_approx_rows ?? 0)} 行</small>
+      </div>
+    `] : []),
+  ].join('');
   const partitionLabel = raw.partitioned ? `${raw.daily_partitions ?? 0} 个日分区` : '尚未分区';
   return `
     <div class="system-gap-callout">
-      <strong>原始 1m：${escapeHtml(raw.trade_days ?? 0)} 个交易日</strong>
+      <strong>原始 1m：${escapeHtml(raw.trade_days ?? 0)} 个交易日 <span class="badge ${healthClass}">${escapeHtml(healthLabel)}</span></strong>
+      <p>${escapeHtml(item.message || '-')}</p>
       <p>全市场保留 ${escapeHtml(policy.full_market_raw_trade_days ?? '-')} 日 · ${escapeHtml(partitionLabel)} · 约 ${escapeHtml(raw.allocated_mb ?? '-')} MiB</p>
     </div>
     <div class="system-gap-list">
       <span>5m/15m 汇总保留 ${escapeHtml(policy.rollup_trade_days ?? '-')} 个交易日，当前约 ${escapeHtml(rollup.approx_rows ?? 0)} 行。</span>
       <span>持仓/跟踪股 1m 保留 ${escapeHtml(policy.tracked_raw_trade_days ?? '-')} 个交易日，当前约 ${escapeHtml(tracked.approx_rows ?? 0)} 行。</span>
     </div>
+    ${issueRows ? `<div class="system-error-summary-list">${issueRows}</div>` : ''}
     <div class="system-error-summary-list">${manifestRows}</div>
   `;
 }

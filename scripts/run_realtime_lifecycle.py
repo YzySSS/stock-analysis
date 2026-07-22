@@ -42,13 +42,20 @@ def main() -> None:
     logger.start(TASK_NAME, run_id, {"policy": policy.__dict__})
     try:
         result = run_lifecycle(policy)
-        partial_count = sum(1 for item in result.get("rollups", []) if item.get("status") != "success")
-        task_status = "partial" if partial_count else result.get("status", "success")
+        processed_count = sum(1 for item in result.get("rollups", []) if item.get("status") in {"success", "partial"})
+        skipped_count = sum(1 for item in result.get("rollups", []) if item.get("status") == "skipped")
+        problem_count = sum(1 for item in result.get("rollups", []) if item.get("status") in {"partial", "failed"})
+        failure_count = len(result.get("failures", []))
+        task_status = result.get("status", "success")
         logger.finish(
             TASK_NAME,
             run_id,
             task_status,
-            f"realtime lifecycle finished, rollups={len(result.get('rollups', []))}, partial={partial_count}",
+            (
+                "realtime lifecycle finished, "
+                f"processed={processed_count}, skipped={skipped_count}, "
+                f"rollup_problems={problem_count}, failures={failure_count}"
+            ),
             result,
         )
         print(json.dumps({"run_id": run_id, **result}, ensure_ascii=False, default=str))

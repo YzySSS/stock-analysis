@@ -6,8 +6,11 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import date, datetime
 from unittest.mock import patch
 
+from app.data_ingestion import realtime_lifecycle
 from app.data_ingestion.realtime_lifecycle import (
     RealtimeLifecyclePolicy,
+    _chunks,
+    _manifest_matches_legacy_source,
     _rollup_sql,
     expired_trade_dates,
     partition_name_for_date,
@@ -51,6 +54,98 @@ class RealtimeLifecyclePolicyTests(unittest.TestCase):
         self.assertNotIn("MAX(high_price)", sql)
         with self.assertRaises(ValueError):
             _rollup_sql(30)
+
+    def test_rollup_supports_small_code_batches(self):
+        sql = " ".join(_rollup_sql(5, 2).split())
+        self.assertIn("code IN (%s,%s)", sql)
+        self.assertEqual(list(_chunks(["a", "b", "c"], 2)), [["a", "b"], ["c"]])
+
+    def test_legacy_manifest_backfill_requires_matching_complete_source(self):
+        source = {
+            "source_rows": 100,
+            "source_codes": 2,
+            "first_quote_minute": datetime(2026, 7, 22, 9, 15),
+            "last_quote_minute": datetime(2026, 7, 22, 15, 0),
+        }
+        manifest = {
+            **source,
+            "status": "success",
+            "rollup_rows": 20,
+            "rollup_codes": 2,
+        }
+        self.assertTrue(_manifest_matches_legacy_source(manifest, source))
+        self.assertFalse(_manifest_matches_legacy_source({**manifest, "status": "failed"}, source))
+        self.assertFalse(_manifest_matches_legacy_source({**manifest, "source_rows": 99}, source))
+
+
+class RealtimeLifecycleExecutionTests(unittest.TestCase):
+    def test_latest_date_runs_first_and_one_interval_failure_does_not_abort_later_work(self):
+        dates = [date(2026, 7, 20), date(2026, 7, 22), date(2026, 7, 21)]
+        aggregate_calls = []
+
+        def aggregate(target, interval, **_kwargs):
+            aggregate_calls.append((target, interval))
+            if target == date(2026, 7, 22) and interval == 5:
+                raise RuntimeError("bounded batch failed")
+            return {"trade_date": target.isoformat(), "interval_minutes": interval, "status": "success"}
+
+        source = {
+            "source_rows": 10,
+            "source_codes": 1,
+            "first_quote_minute": datetime(2026, 7, 22, 9, 15),
+            "last_quote_minute": datetime(2026, 7, 22, 15, 0),
+        }
+        with patch.object(realtime_lifecycle, "acquire_mysql_advisory_lock", side_effect=["lifecycle", "writer"]), patch.object(
+            realtime_lifecycle, "release_mysql_advisory_lock"
+        ) as release_lock, patch.object(realtime_lifecycle, "_date_rows", return_value=dates), patch.object(
+            realtime_lifecycle, "ensure_daily_partition", return_value=False
+        ), patch.object(realtime_lifecycle, "_source_revision", side_effect=lambda value: {"source_fingerprint": f"fp-{value}"}), patch.object(
+            realtime_lifecycle, "_manifest_rows_for_date", return_value={}
+        ), patch.object(realtime_lifecycle, "_source_stats", return_value=source), patch.object(
+            realtime_lifecycle, "_source_codes", return_value=["sh.600000"]
+        ), patch.object(realtime_lifecycle, "aggregate_trade_date", side_effect=aggregate), patch.object(
+            realtime_lifecycle,
+            "copy_tracked_trade_date",
+            side_effect=lambda value: {"trade_date": value.isoformat(), "rows": 1, "codes": 1},
+        ), patch.object(realtime_lifecycle, "apply_retention", return_value={"raw": [], "rollup": [], "tracked": []}), patch.object(
+            realtime_lifecycle, "build_lifecycle_plan", return_value={"status": "bounded"}
+        ):
+            result = realtime_lifecycle.run_lifecycle()
+
+        self.assertEqual(result["processing_order"], ["2026-07-22", "2026-07-21", "2026-07-20"])
+        self.assertEqual(aggregate_calls[0], (date(2026, 7, 22), 5))
+        self.assertIn((date(2026, 7, 22), 15), aggregate_calls)
+        self.assertIn((date(2026, 7, 20), 15), aggregate_calls)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["failures"][0]["stage"], "rollup_5m")
+        self.assertEqual(release_lock.call_count, 2)
+
+    def test_matching_fingerprint_skips_rollup_without_rescanning_source(self):
+        target = date(2026, 7, 22)
+        manifest = {
+            "status": "success",
+            "source_fingerprint": "same",
+            "source_rows": 100,
+            "source_codes": 2,
+            "rollup_rows": 20,
+            "rollup_codes": 2,
+        }
+        with patch.object(realtime_lifecycle, "acquire_mysql_advisory_lock", side_effect=["lifecycle", "writer"]), patch.object(
+            realtime_lifecycle, "release_mysql_advisory_lock"
+        ), patch.object(realtime_lifecycle, "_date_rows", return_value=[target]), patch.object(
+            realtime_lifecycle, "ensure_daily_partition", return_value=False
+        ), patch.object(realtime_lifecycle, "_source_revision", return_value={"source_fingerprint": "same"}), patch.object(
+            realtime_lifecycle, "_manifest_rows_for_date", return_value={5: manifest, 15: manifest}
+        ), patch.object(realtime_lifecycle, "_source_stats") as source_stats, patch.object(
+            realtime_lifecycle, "aggregate_trade_date"
+        ) as aggregate, patch.object(realtime_lifecycle, "copy_tracked_trade_date", return_value={"rows": 1}), patch.object(
+            realtime_lifecycle, "apply_retention", return_value={}
+        ), patch.object(realtime_lifecycle, "build_lifecycle_plan", return_value={}):
+            result = realtime_lifecycle.run_lifecycle()
+
+        self.assertEqual([item["status"] for item in result["rollups"]], ["skipped", "skipped"])
+        source_stats.assert_not_called()
+        aggregate.assert_not_called()
 
 
 class RealtimeWriterTests(unittest.TestCase):
@@ -135,10 +230,15 @@ class RealtimeWriterTests(unittest.TestCase):
             freshness_seconds=2,
             is_stale=0,
         )
-        with patch("scripts.run_realtime_snapshot_update.mysql_conn", fake_mysql_conn):
+        with patch("scripts.run_realtime_snapshot_update.mysql_conn", fake_mysql_conn), patch(
+            "scripts.run_realtime_snapshot_update.ensure_intraday_hot_partition",
+            return_value=["p20260716"],
+        ) as ensure_partition:
             result = save_rows([row], batch_id="realtime_snapshot_test")
 
         self.assertEqual(len(statements), 2)
+        ensure_partition.assert_called_once_with("2026-07-16")
+        self.assertEqual(result["created_partitions"], ["p20260716"])
         self.assertTrue(result["retention_deferred"])
         self.assertFalse(any("DELETE FROM stock_realtime_intraday" in sql for sql, _ in statements))
 

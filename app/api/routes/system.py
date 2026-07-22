@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import date, datetime, time as datetime_time
 from fastapi import APIRouter
 
 from app.jobs.readiness import build_operational_readiness, recent_error_summaries
@@ -13,7 +14,7 @@ from app.shared.instrument_policy import STOCK_DAILY_COMPLETENESS_RATIO, STOCK_I
 router = APIRouter(tags=["system"])
 
 SYSTEM_STATUS_CACHE_TTL_SECONDS = 60
-SYSTEM_STATUS_CACHE_KEY = "system:status:v2"
+SYSTEM_STATUS_CACHE_KEY = "system:status:v3"
 
 
 TASK_SCHEDULES = [
@@ -955,37 +956,155 @@ def _realtime_lifecycle_summary() -> dict:
             }
             cursor.execute(
                 """
-                SELECT MIN(trade_date) AS min_trade_date,
-                       MAX(trade_date) AS max_trade_date
-                FROM stock_realtime_intraday
-                """
-            )
-            raw_range = cursor.fetchone() or {}
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS daily_partitions
+                SELECT partition_name, table_rows, data_length, index_length
                 FROM information_schema.partitions
                 WHERE table_schema=DATABASE() AND table_name='stock_realtime_intraday'
-                  AND partition_name IS NOT NULL AND partition_name <> 'p_future'
+                  AND partition_name IS NOT NULL
+                ORDER BY partition_ordinal_position
                 """
             )
-            partition_count = int((cursor.fetchone() or {}).get("daily_partitions") or 0)
+            raw_partitions = cursor.fetchall() or []
+            daily_partition_dates: set[date] = set()
+            p_future_approx_rows = 0
+            raw_partition_approx_rows = 0
+            raw_partition_allocated_bytes = 0
+            for row in raw_partitions:
+                partition_name = str(row.get("partition_name") or row.get("PARTITION_NAME") or "")
+                raw_partition_approx_rows += int(row.get("table_rows") or row.get("TABLE_ROWS") or 0)
+                raw_partition_allocated_bytes += int(row.get("data_length") or row.get("DATA_LENGTH") or 0)
+                raw_partition_allocated_bytes += int(row.get("index_length") or row.get("INDEX_LENGTH") or 0)
+                if partition_name == "p_future":
+                    p_future_approx_rows = int(row.get("table_rows") or row.get("TABLE_ROWS") or 0)
+                    continue
+                if len(partition_name) == 9 and partition_name.startswith("p") and partition_name[1:].isdigit():
+                    try:
+                        daily_partition_dates.add(datetime.strptime(partition_name[1:], "%Y%m%d").date())
+                    except ValueError:
+                        pass
+
+            p_future_dates: set[date] = set()
+            has_p_future = any(
+                str(row.get("partition_name") or row.get("PARTITION_NAME") or "") == "p_future"
+                for row in raw_partitions
+            )
+            first_future_date = None
+            last_future_date = None
+            if has_p_future:
+                cursor.execute(
+                    """
+                    SELECT trade_date
+                    FROM stock_realtime_intraday PARTITION (p_future)
+                    ORDER BY trade_date ASC
+                    LIMIT 1
+                    """
+                )
+                first_future_date = (cursor.fetchone() or {}).get("trade_date")
+                cursor.execute(
+                    """
+                    SELECT trade_date
+                    FROM stock_realtime_intraday PARTITION (p_future)
+                    ORDER BY trade_date DESC
+                    LIMIT 1
+                    """
+                )
+                last_future_date = (cursor.fetchone() or {}).get("trade_date")
+            for value in (first_future_date, last_future_date):
+                if isinstance(value, datetime):
+                    p_future_dates.add(value.date())
+                elif isinstance(value, date):
+                    p_future_dates.add(value)
+                elif value:
+                    p_future_dates.add(date.fromisoformat(str(value)))
+
+            raw_dates = sorted(daily_partition_dates | p_future_dates, reverse=True)
             cursor.execute(
                 """
-                SELECT m.trade_date, m.interval_minutes, m.status, m.source_rows, m.source_codes,
-                       m.rollup_rows, m.rollup_codes, m.last_quote_minute, m.finished_at
-                FROM stock_realtime_rollup_manifest m
-                INNER JOIN (
-                    SELECT interval_minutes, MAX(trade_date) AS max_trade_date
-                    FROM stock_realtime_rollup_manifest
-                    GROUP BY interval_minutes
-                ) latest
-                  ON latest.interval_minutes=m.interval_minutes AND latest.max_trade_date=m.trade_date
-                ORDER BY m.interval_minutes
+                SELECT trade_date, interval_minutes, status, source_rows, source_codes,
+                       rollup_rows, rollup_codes, first_quote_minute, last_quote_minute,
+                       source_fingerprint, error_code, error_message, started_at, finished_at
+                FROM stock_realtime_rollup_manifest
+                ORDER BY trade_date DESC, interval_minutes ASC
+                LIMIT 40
                 """
             )
-            manifests = cursor.fetchall() or []
+            manifest_rows = cursor.fetchall() or []
+
+    def normalize_manifest(row: dict) -> dict:
+        return {
+            **row,
+            "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
+            "first_quote_minute": str(row.get("first_quote_minute")) if row.get("first_quote_minute") else None,
+            "last_quote_minute": str(row.get("last_quote_minute")) if row.get("last_quote_minute") else None,
+            "started_at": str(row.get("started_at")) if row.get("started_at") else None,
+            "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
+        }
+
+    normalized_manifests = [normalize_manifest(row) for row in manifest_rows]
+    manifest_map = {
+        (item.get("trade_date"), int(item.get("interval_minutes") or 0)): item
+        for item in normalized_manifests
+    }
+    latest_by_interval: dict[int, dict] = {}
+    for item in normalized_manifests:
+        interval = int(item.get("interval_minutes") or 0)
+        if interval in {5, 15} and interval not in latest_by_interval:
+            latest_by_interval[interval] = item
+
+    now = datetime.now()
+    lifecycle_due = datetime_time(15, 20)
+    missing_manifests: list[dict] = []
+    pending_manifests: list[dict] = []
+    for raw_date in raw_dates:
+        for interval in (5, 15):
+            if (raw_date.isoformat(), interval) in manifest_map:
+                continue
+            entry = {"trade_date": raw_date.isoformat(), "interval_minutes": interval, "status": "missing"}
+            if raw_date == now.date() and now.time() < lifecycle_due:
+                entry["status"] = "pending"
+                pending_manifests.append(entry)
+            else:
+                missing_manifests.append(entry)
+
+    raw_date_strings = {item.isoformat() for item in raw_dates}
+    raw_valid_rows_by_date: dict[str, int] = {}
+    for item in normalized_manifests:
+        trade_date = str(item.get("trade_date") or "")
+        if trade_date in raw_date_strings:
+            raw_valid_rows_by_date[trade_date] = max(
+                raw_valid_rows_by_date.get(trade_date, 0),
+                int(item.get("source_rows") or 0),
+            )
+    raw_valid_source_rows = sum(raw_valid_rows_by_date.values())
+    raw_allocated_mb: float | None = max(
+        float(table_rows.get("stock_realtime_intraday", {}).get("allocated_mb") or 0),
+        round(raw_partition_allocated_bytes / 1024 / 1024, 2),
+    )
+    if raw_valid_source_rows > 0 and raw_allocated_mb < 1:
+        # InnoDB can leave partition statistics at their empty-table defaults
+        # after REORGANIZE PARTITION even while millions of rows remain present.
+        raw_allocated_mb = None
+    failed_manifests = [
+        item
+        for item in normalized_manifests
+        if item.get("trade_date") in raw_date_strings and item.get("status") in {"failed", "running"}
+    ]
+    partial_manifests = [
+        item
+        for item in normalized_manifests
+        if item.get("trade_date") in raw_date_strings and item.get("status") == "partial"
+    ]
+    if failed_manifests or missing_manifests or p_future_dates:
+        health = "error"
+        message = "分钟行情生命周期存在失败、缺失或未归档分区"
+    elif partial_manifests or pending_manifests:
+        health = "pending" if pending_manifests and not partial_manifests else "warn"
+        message = "分钟行情生命周期尚未到收盘执行时间或数据不完整"
+    else:
+        health = "ok"
+        message = "分钟行情分区与 5m/15m 汇总完整"
     return {
+        "health": health,
+        "message": message,
         "policy": {
             "full_market_raw_trade_days": 2,
             "rollup_trade_days": 90,
@@ -994,23 +1113,28 @@ def _realtime_lifecycle_summary() -> dict:
         },
         "raw": {
             **table_rows.get("stock_realtime_intraday", {}),
-            "trade_days": partition_count,
-            "min_trade_date": str(raw_range.get("min_trade_date")) if raw_range.get("min_trade_date") else None,
-            "max_trade_date": str(raw_range.get("max_trade_date")) if raw_range.get("max_trade_date") else None,
-            "daily_partitions": partition_count,
-            "partitioned": partition_count > 0,
+            "approx_rows": max(
+                int(table_rows.get("stock_realtime_intraday", {}).get("approx_rows") or 0),
+                raw_partition_approx_rows,
+                raw_valid_source_rows,
+            ),
+            "valid_source_rows": raw_valid_source_rows,
+            "allocated_mb": raw_allocated_mb,
+            "trade_days": len(raw_dates),
+            "min_trade_date": min(raw_dates).isoformat() if raw_dates else None,
+            "max_trade_date": max(raw_dates).isoformat() if raw_dates else None,
+            "daily_partitions": len(daily_partition_dates),
+            "partitioned": bool(raw_partitions),
+            "p_future_dates": [item.isoformat() for item in sorted(p_future_dates)],
+            "p_future_approx_rows": p_future_approx_rows,
         },
         "rollup": table_rows.get("stock_realtime_bar_rollup", {}),
         "tracked": table_rows.get("stock_realtime_intraday_tracked", {}),
-        "latest_manifests": [
-            {
-                **row,
-                "trade_date": str(row.get("trade_date")) if row.get("trade_date") else None,
-                "last_quote_minute": str(row.get("last_quote_minute")) if row.get("last_quote_minute") else None,
-                "finished_at": str(row.get("finished_at")) if row.get("finished_at") else None,
-            }
-            for row in manifests
-        ],
+        "latest_manifests": [latest_by_interval[item] for item in sorted(latest_by_interval)],
+        "failed_manifests": failed_manifests,
+        "partial_manifests": partial_manifests,
+        "missing_manifests": missing_manifests,
+        "pending_manifests": pending_manifests,
     }
 
 

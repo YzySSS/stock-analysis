@@ -160,6 +160,22 @@ class SharedDatabaseTests(unittest.TestCase):
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.closes, 1)
 
+    def test_maintenance_context_uses_dedicated_long_timeouts(self):
+        connection = FakeConnection()
+        with patch.object(db, "mysql_settings", settings()), patch.object(
+            db.pymysql,
+            "connect",
+            return_value=connection,
+        ) as connect:
+            with db.mysql_maintenance_conn(dict_cursor=False, timeout_seconds=90):
+                pass
+
+        connect.assert_called_once()
+        self.assertEqual(connect.call_args.kwargs["read_timeout"], 90)
+        self.assertEqual(connect.call_args.kwargs["write_timeout"], 90)
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.closes, 1)
+
     def test_cursor_view_selects_dict_or_tuple_cursor_without_new_connections(self):
         connection = CursorRecordingConnection()
 

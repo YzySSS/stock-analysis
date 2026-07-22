@@ -179,6 +179,53 @@ def mysql_conn(dict_cursor: bool = True) -> Iterator[Any]:
 
 
 @contextmanager
+def mysql_maintenance_conn(
+    dict_cursor: bool = True,
+    *,
+    timeout_seconds: int = 120,
+) -> Iterator[Any]:
+    """Use one non-pooled connection for bounded DDL/maintenance that may exceed API timeouts."""
+
+    started = time.perf_counter()
+    timeout = max(1, int(timeout_seconds))
+    config = mysql_settings.to_pymysql_dict()
+    config["read_timeout"] = max(int(config.get("read_timeout") or 0), timeout)
+    config["write_timeout"] = max(int(config.get("write_timeout") or 0), timeout)
+    try:
+        raw_connection = pymysql.connect(**config)
+    except BaseException:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        database_metrics.observe(
+            checkout_ms=elapsed_ms,
+            transaction_ms=elapsed_ms,
+            success=False,
+        )
+        raise
+    connection = _CursorModeConnection(raw_connection, dict_cursor=dict_cursor)
+    success = False
+    try:
+        yield connection
+        raw_connection.commit()
+        success = True
+    except BaseException:
+        try:
+            raw_connection.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            raw_connection.close()
+        finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            database_metrics.observe(
+                checkout_ms=0.0,
+                transaction_ms=elapsed_ms,
+                success=success,
+            )
+
+
+@contextmanager
 def mysql_read_conn(dict_cursor: bool = True) -> Iterator[Any]:
     """Yield a read transaction and roll it back instead of issuing a commit."""
 

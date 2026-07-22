@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator, Sequence
 
 from app.orchestration.realtime_schema import intraday_table_ddl
-from app.shared.db import mysql_conn, mysql_read_conn
+from app.shared.db import mysql_conn, mysql_maintenance_conn, mysql_read_conn
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 
 
@@ -13,6 +14,7 @@ ROLLUP_INTERVALS = (5, 15)
 FULL_MARKET_RAW_TRADE_DAYS = 2
 ROLLUP_TRADE_DAYS = 90
 TRACKED_RAW_TRADE_DAYS = 90
+ROLLUP_CODE_BATCH_SIZE = 200
 LIFECYCLE_LOCK_NAME = "stock_realtime_lifecycle_lock"
 WRITER_LOCK_NAME = "stock_realtime_snapshot_update_lock"
 
@@ -145,7 +147,7 @@ def ensure_daily_partition(table_name: str, trade_date: str | date | datetime) -
     if "p_future" not in names:
         raise RuntimeError(f"{table_name} has no p_future partition")
     boundary = (target + timedelta(days=1)).isoformat()
-    with mysql_conn(dict_cursor=False) as conn:
+    with mysql_maintenance_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -159,18 +161,113 @@ def ensure_daily_partition(table_name: str, trade_date: str | date | datetime) -
     return True
 
 
+def _partition_date(partition_name: Any) -> date | None:
+    text = str(partition_name or "")
+    if len(text) != 9 or not text.startswith("p") or not text[1:].isdigit():
+        return None
+    try:
+        return datetime.strptime(text[1:], "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _p_future_trade_dates(table_name: str) -> list[date]:
+    if table_name not in PARTITIONED_TABLES:
+        raise ValueError(f"unsupported partitioned table: {table_name}")
+    partitions = table_partitions(table_name)
+    names = {str(row.get("partition_name")) for row in partitions if row.get("partition_name")}
+    if "p_future" not in names:
+        return []
+    with mysql_read_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT trade_date FROM {table_name} PARTITION (p_future) "
+                "ORDER BY trade_date ASC LIMIT 1"
+            )
+            first_value = (cursor.fetchone() or {}).get("trade_date")
+            cursor.execute(
+                f"SELECT trade_date FROM {table_name} PARTITION (p_future) "
+                "ORDER BY trade_date DESC LIMIT 1"
+            )
+            last_value = (cursor.fetchone() or {}).get("trade_date")
+            if not first_value:
+                return []
+            first_date = normalize_trade_date(first_value)
+            last_date = normalize_trade_date(last_value or first_value)
+            if first_date == last_date:
+                return [first_date]
+            cursor.execute(
+                f"SELECT DISTINCT trade_date FROM {table_name} PARTITION (p_future) "
+                "ORDER BY trade_date ASC"
+            )
+            return [
+                normalize_trade_date(row["trade_date"])
+                for row in (cursor.fetchall() or [])
+                if row.get("trade_date")
+            ]
+
+
+def ensure_intraday_hot_partition(trade_date: str | date | datetime) -> list[str]:
+    """Ensure p_future is drained oldest-first before the minute writer inserts today."""
+
+    target = normalize_trade_date(trade_date)
+    partitions = table_partitions("stock_realtime_intraday")
+    names = {str(row.get("partition_name")) for row in partitions if row.get("partition_name")}
+    target_name = partition_name_for_date(target)
+    if target_name in names:
+        return []
+    pending_dates = set(_p_future_trade_dates("stock_realtime_intraday"))
+    pending_dates.add(target)
+    created: list[str] = []
+    for pending_date in sorted(item for item in pending_dates if item <= target):
+        if ensure_daily_partition("stock_realtime_intraday", pending_date):
+            created.append(partition_name_for_date(pending_date))
+    return created
+
+
 def _date_rows(table_name: str) -> list[date]:
     if not table_exists(table_name):
         return []
+    if table_name in PARTITIONED_TABLES:
+        partitions = table_partitions(table_name)
+        if any(row.get("partition_name") for row in partitions):
+            values = {
+                parsed
+                for row in partitions
+                if (parsed := _partition_date(row.get("partition_name"))) is not None
+            }
+            values.update(_p_future_trade_dates(table_name))
+            return sorted(values, reverse=True)
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(f"SELECT DISTINCT trade_date FROM {table_name} ORDER BY trade_date DESC")
             return [normalize_trade_date(row["trade_date"]) for row in cursor.fetchall() if row.get("trade_date")]
 
 
-def _table_summary(table_name: str) -> dict[str, Any]:
+def _table_summary(table_name: str, *, exact: bool = True) -> dict[str, Any]:
     if not table_exists(table_name):
         return {"exists": False, "rows": 0, "trade_dates": []}
+    if not exact:
+        dates = _date_rows(table_name)
+        with mysql_read_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT SUM(table_rows) AS table_rows
+                    FROM information_schema.partitions
+                    WHERE table_schema=DATABASE() AND table_name=%s
+                    """,
+                    (table_name,),
+                )
+                row = cursor.fetchone() or {}
+        return {
+            "exists": True,
+            "rows": int(row.get("table_rows") or 0),
+            "rows_are_approximate": True,
+            "trade_days": len(dates),
+            "min_trade_date": min(dates).isoformat() if dates else None,
+            "max_trade_date": max(dates).isoformat() if dates else None,
+        }
     with mysql_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -203,14 +300,14 @@ def build_lifecycle_plan(policy: RealtimeLifecyclePolicy | None = None) -> dict[
         "policy": asdict(final_policy),
         "raw_partitioned": is_partitioned("stock_realtime_intraday") if table_exists("stock_realtime_intraday") else False,
         "raw_trade_dates": [item.isoformat() for item in raw_dates],
-        "aggregate_trade_dates": [item.isoformat() for item in sorted(raw_dates)],
+        "aggregate_trade_dates": [item.isoformat() for item in sorted(raw_dates, reverse=True)],
         "raw_expired_candidates": [item.isoformat() for item in expired_trade_dates(raw_dates, final_policy.raw_trade_days)],
         "rollup_expired_candidates": [item.isoformat() for item in expired_trade_dates(rollup_dates, final_policy.rollup_trade_days)],
         "tracked_expired_candidates": [item.isoformat() for item in expired_trade_dates(tracked_dates, final_policy.tracked_trade_days)],
         "tables": {
-            "raw": _table_summary("stock_realtime_intraday"),
-            "rollup": _table_summary("stock_realtime_bar_rollup"),
-            "tracked": _table_summary("stock_realtime_intraday_tracked"),
+            "raw": _table_summary("stock_realtime_intraday", exact=False),
+            "rollup": _table_summary("stock_realtime_bar_rollup", exact=False),
+            "tracked": _table_summary("stock_realtime_intraday_tracked", exact=False),
         },
     }
 
@@ -310,6 +407,158 @@ def _source_stats(trade_date: date) -> dict[str, Any]:
     }
 
 
+def _source_revision(trade_date: date) -> dict[str, Any]:
+    with mysql_read_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT batch_id, quote_minute, received_at
+                FROM stock_realtime_intraday FORCE INDEX (uniq_realtime_intraday_minute)
+                WHERE trade_date=%s AND latest_price IS NOT NULL AND latest_price > 0
+                ORDER BY quote_minute DESC, code DESC
+                LIMIT 1
+                """,
+                (trade_date,),
+            )
+            row = cursor.fetchone() or {}
+    batch_id = str(row.get("batch_id") or "")
+    quote_minute = str(row.get("quote_minute") or "")
+    received_at = str(row.get("received_at") or "")
+    payload = f"{trade_date.isoformat()}|{batch_id}|{quote_minute}|{received_at}"
+    return {
+        "source_fingerprint": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        "source_batch_id": batch_id or None,
+        "source_revision_quote_minute": row.get("quote_minute"),
+        "source_revision_received_at": row.get("received_at"),
+    }
+
+
+def _source_codes(trade_date: date, expected_count: int) -> list[str]:
+    codes: set[str] = set()
+    with mysql_read_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT code
+                FROM stock_realtime_snapshot
+                WHERE trade_date=%s AND latest_price IS NOT NULL AND latest_price > 0
+                ORDER BY code
+                """,
+                (trade_date,),
+            )
+            codes.update(str(row["code"]) for row in (cursor.fetchall() or []) if row.get("code"))
+            if len(codes) == expected_count:
+                return sorted(codes)
+
+            cursor.execute(
+                """
+                SELECT interval_minutes
+                FROM stock_realtime_rollup_manifest
+                WHERE trade_date=%s AND status IN ('success','partial') AND rollup_codes > 0
+                ORDER BY rollup_codes DESC, interval_minutes DESC
+                LIMIT 1
+                """,
+                (trade_date,),
+            )
+            preferred = (cursor.fetchone() or {}).get("interval_minutes")
+            if preferred is not None:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT code
+                    FROM stock_realtime_bar_rollup
+                    WHERE trade_date=%s AND interval_minutes=%s
+                    ORDER BY code
+                    """,
+                    (trade_date, preferred),
+                )
+                codes.update(str(row["code"]) for row in (cursor.fetchall() or []) if row.get("code"))
+            if len(codes) == expected_count:
+                return sorted(codes)
+
+            cursor.execute(
+                """
+                SELECT DISTINCT code
+                FROM stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)
+                WHERE trade_date=%s AND latest_price IS NOT NULL AND latest_price > 0
+                ORDER BY code
+                """,
+                (trade_date,),
+            )
+            return [str(row["code"]) for row in (cursor.fetchall() or []) if row.get("code")]
+
+
+def _chunks(values: Sequence[str], size: int = ROLLUP_CODE_BATCH_SIZE) -> Iterator[list[str]]:
+    final_size = max(1, int(size))
+    for offset in range(0, len(values), final_size):
+        yield list(values[offset : offset + final_size])
+
+
+def _manifest_rows_for_date(trade_date: date) -> dict[int, dict[str, Any]]:
+    with mysql_read_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT trade_date, interval_minutes, status, source_rows, source_codes,
+                       rollup_rows, rollup_codes, first_quote_minute, last_quote_minute,
+                       source_fingerprint, error_code, error_message, started_at, finished_at
+                FROM stock_realtime_rollup_manifest
+                WHERE trade_date=%s
+                """,
+                (trade_date,),
+            )
+            return {
+                int(row["interval_minutes"]): row
+                for row in (cursor.fetchall() or [])
+                if row.get("interval_minutes") is not None
+            }
+
+
+def _manifest_matches_legacy_source(manifest: dict[str, Any], source: dict[str, Any]) -> bool:
+    return bool(
+        manifest.get("status") == "success"
+        and int(manifest.get("source_rows") or 0) == int(source.get("source_rows") or 0)
+        and int(manifest.get("source_codes") or 0) == int(source.get("source_codes") or 0)
+        and manifest.get("first_quote_minute") == source.get("first_quote_minute")
+        and manifest.get("last_quote_minute") == source.get("last_quote_minute")
+        and int(manifest.get("rollup_rows") or 0) > 0
+        and int(manifest.get("rollup_codes") or 0) == int(source.get("source_codes") or 0)
+    )
+
+
+def _set_manifest_source_fingerprint(trade_date: date, interval: int, fingerprint: str) -> None:
+    with mysql_conn(dict_cursor=False) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE stock_realtime_rollup_manifest
+                SET source_fingerprint=%s
+                WHERE trade_date=%s AND interval_minutes=%s
+                """,
+                (fingerprint, trade_date, interval),
+            )
+
+
+def _skipped_rollup_result(
+    trade_date: date,
+    interval: int,
+    manifest: dict[str, Any],
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "trade_date": trade_date.isoformat(),
+        "interval_minutes": interval,
+        "status": "skipped",
+        "reason": reason,
+        "manifest_status": manifest.get("status"),
+        "source_rows": int(manifest.get("source_rows") or 0),
+        "source_codes": int(manifest.get("source_codes") or 0),
+        "rollup_rows": int(manifest.get("rollup_rows") or 0),
+        "rollup_codes": int(manifest.get("rollup_codes") or 0),
+        "source_fingerprint": manifest.get("source_fingerprint"),
+    }
+
+
 def _start_manifest(trade_date: date, interval: int, source: dict[str, Any]) -> None:
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
@@ -317,12 +566,14 @@ def _start_manifest(trade_date: date, interval: int, source: dict[str, Any]) -> 
                 """
                 INSERT INTO stock_realtime_rollup_manifest (
                     trade_date, interval_minutes, status, source_rows, source_codes,
-                    first_quote_minute, last_quote_minute, started_at, finished_at,
+                    first_quote_minute, last_quote_minute, source_fingerprint,
+                    started_at, finished_at,
                     error_code, error_message
-                ) VALUES (%s,%s,'running',%s,%s,%s,%s,NOW(),NULL,NULL,NULL)
+                ) VALUES (%s,%s,'running',%s,%s,%s,%s,%s,NOW(),NULL,NULL,NULL)
                 ON DUPLICATE KEY UPDATE
                     status='running', source_rows=VALUES(source_rows), source_codes=VALUES(source_codes),
                     first_quote_minute=VALUES(first_quote_minute), last_quote_minute=VALUES(last_quote_minute),
+                    source_fingerprint=VALUES(source_fingerprint),
                     started_at=NOW(), finished_at=NULL, error_code=NULL, error_message=NULL
                 """,
                 (
@@ -332,6 +583,7 @@ def _start_manifest(trade_date: date, interval: int, source: dict[str, Any]) -> 
                     source["source_codes"],
                     source["first_quote_minute"],
                     source["last_quote_minute"],
+                    source["source_fingerprint"],
                 ),
             )
 
@@ -359,9 +611,14 @@ def _finish_manifest(
             )
 
 
-def _rollup_sql(interval: int) -> str:
+def _rollup_sql(interval: int, code_count: int | None = None) -> str:
     if interval not in ROLLUP_INTERVALS:
         raise ValueError(f"unsupported rollup interval: {interval}")
+    if code_count is not None and code_count <= 0:
+        raise ValueError("code_count must be positive when a code filter is requested")
+    code_filter = ""
+    if code_count is not None:
+        code_filter = f" AND code IN ({','.join(['%s'] * code_count)})"
     return f"""
     INSERT INTO stock_realtime_bar_rollup (
         code, source_code, name, trade_date, interval_minutes, bucket_start, bucket_end,
@@ -378,7 +635,7 @@ def _rollup_sql(interval: int) -> str:
                 MAKETIME(HOUR(quote_minute), FLOOR(MINUTE(quote_minute) / {interval}) * {interval}, 0)
             ) AS bucket_start
         FROM stock_realtime_intraday
-        WHERE trade_date = %s AND latest_price IS NOT NULL AND latest_price > 0
+        WHERE trade_date = %s AND latest_price IS NOT NULL AND latest_price > 0{code_filter}
     ),
     ranked AS (
         SELECT
@@ -467,17 +724,35 @@ def _rollup_sql(interval: int) -> str:
     """
 
 
-def aggregate_trade_date(trade_date: str | date | datetime, interval: int) -> dict[str, Any]:
+def aggregate_trade_date(
+    trade_date: str | date | datetime,
+    interval: int,
+    *,
+    source: dict[str, Any] | None = None,
+    source_codes: Sequence[str] | None = None,
+) -> dict[str, Any]:
     target = normalize_trade_date(trade_date)
     if interval not in ROLLUP_INTERVALS:
         raise ValueError(f"unsupported rollup interval: {interval}")
     ensure_daily_partition("stock_realtime_bar_rollup", target)
-    source = _source_stats(target)
-    _start_manifest(target, interval, source)
+    final_source = dict(source or _source_stats(target))
+    if not final_source.get("source_fingerprint"):
+        final_source.update(_source_revision(target))
+    final_codes = list(source_codes) if source_codes is not None else _source_codes(
+        target,
+        int(final_source.get("source_codes") or 0),
+    )
+    _start_manifest(target, interval, final_source)
     try:
-        with mysql_conn(dict_cursor=False) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(_rollup_sql(interval), (target,))
+        code_batches = 0
+        for code_batch in _chunks(final_codes):
+            with mysql_conn(dict_cursor=False) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        _rollup_sql(interval, len(code_batch)),
+                        (target, *code_batch),
+                    )
+            code_batches += 1
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -491,12 +766,21 @@ def aggregate_trade_date(trade_date: str | date | datetime, interval: int) -> di
                 row = cursor.fetchone() or {}
         rollup_rows = int(row.get("rows_count") or 0)
         rollup_codes = int(row.get("code_count") or 0)
-        last_quote = source.get("last_quote_minute")
+        last_quote = final_source.get("last_quote_minute")
         session_complete = bool(last_quote and last_quote.time() >= datetime.strptime("14:55", "%H:%M").time())
-        coverage_complete = source["source_codes"] > 0 and rollup_codes == source["source_codes"] and rollup_rows > 0
+        coverage_complete = (
+            int(final_source.get("source_codes") or 0) > 0
+            and len(final_codes) == int(final_source.get("source_codes") or 0)
+            and rollup_codes == int(final_source.get("source_codes") or 0)
+            and rollup_rows > 0
+        )
         status = "success" if session_complete and coverage_complete else "partial"
         error_code = None if status == "success" else "incomplete_source_session"
-        error_message = None if status == "success" else "source session has not reached 14:55 or rollup coverage is incomplete"
+        error_message = (
+            None
+            if status == "success"
+            else "source session has not reached 14:55, source code enumeration differs, or rollup coverage is incomplete"
+        )
         _finish_manifest(
             target,
             interval,
@@ -510,11 +794,13 @@ def aggregate_trade_date(trade_date: str | date | datetime, interval: int) -> di
             "trade_date": target.isoformat(),
             "interval_minutes": interval,
             "status": status,
-            **source,
-            "first_quote_minute": str(source["first_quote_minute"]) if source["first_quote_minute"] else None,
-            "last_quote_minute": str(source["last_quote_minute"]) if source["last_quote_minute"] else None,
+            **final_source,
+            "first_quote_minute": str(final_source["first_quote_minute"]) if final_source["first_quote_minute"] else None,
+            "last_quote_minute": str(final_source["last_quote_minute"]) if final_source["last_quote_minute"] else None,
             "rollup_rows": rollup_rows,
             "rollup_codes": rollup_codes,
+            "code_batches": code_batches,
+            "enumerated_source_codes": len(final_codes),
         }
     except Exception as exc:
         _finish_manifest(
@@ -592,7 +878,7 @@ def _delete_trade_date(table_name: str, trade_date: date) -> dict[str, Any]:
     partitions = table_partitions(table_name)
     names = {str(row.get("partition_name")) for row in partitions if row.get("partition_name")}
     if partition_name in names:
-        with mysql_conn(dict_cursor=False) as conn:
+        with mysql_maintenance_conn(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(f"ALTER TABLE {table_name} DROP PARTITION {partition_name}")
         return {"trade_date": trade_date.isoformat(), "method": "drop_partition", "deleted_rows": None}
@@ -628,25 +914,164 @@ def run_lifecycle(policy: RealtimeLifecyclePolicy | None = None) -> dict[str, An
     lock_handle = acquire_mysql_advisory_lock(LIFECYCLE_LOCK_NAME)
     if lock_handle is None:
         return {"status": "skipped", "reason": "previous_lifecycle_run_still_running"}
+    writer_lock = None
     try:
-        raw_dates = sorted(_date_rows("stock_realtime_intraday"))
-        rollups = []
-        tracked = []
+        writer_lock = acquire_mysql_advisory_lock(WRITER_LOCK_NAME)
+        if writer_lock is None:
+            return {"status": "skipped", "reason": "realtime_writer_is_active"}
+
+        raw_dates = sorted(_date_rows("stock_realtime_intraday"), reverse=True)
+        created_raw_partitions = []
+        partition_failures: list[dict[str, Any]] = []
+        for target in sorted(raw_dates):
+            try:
+                if ensure_daily_partition("stock_realtime_intraday", target):
+                    created_raw_partitions.append(partition_name_for_date(target))
+            except Exception as exc:
+                partition_failures.append(
+                    {
+                        "trade_date": target.isoformat(),
+                        "stage": "raw_partition",
+                        "status": "failed",
+                        "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+                    }
+                )
+                break
+
+        rollups: list[dict[str, Any]] = []
+        tracked: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = list(partition_failures)
         for target in raw_dates:
-            ensure_daily_partition("stock_realtime_intraday", target)
+            try:
+                revision = _source_revision(target)
+                manifests = _manifest_rows_for_date(target)
+            except Exception as exc:
+                failure = {
+                    "trade_date": target.isoformat(),
+                    "stage": "source_inspection",
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+                }
+                failures.append(failure)
+                rollups.extend(
+                    {**failure, "interval_minutes": interval}
+                    for interval in final_policy.intervals
+                )
+                try:
+                    tracked.append(copy_tracked_trade_date(target))
+                except Exception as tracked_exc:
+                    tracked_failure = {
+                        "trade_date": target.isoformat(),
+                        "stage": "tracked_copy",
+                        "status": "failed",
+                        "error": f"{type(tracked_exc).__name__}: {str(tracked_exc)[:400]}",
+                    }
+                    failures.append(tracked_failure)
+                    tracked.append(tracked_failure)
+                continue
+
+            source: dict[str, Any] | None = None
+            enumerated_codes: list[str] | None = None
             for interval in final_policy.intervals:
-                rollups.append(aggregate_trade_date(target, interval))
-            tracked.append(copy_tracked_trade_date(target))
-        retention = apply_retention(final_policy)
+                try:
+                    manifest = manifests.get(interval)
+                    fingerprint = str(revision["source_fingerprint"])
+                    if (
+                        manifest
+                        and manifest.get("status") in {"success", "partial"}
+                        and manifest.get("source_fingerprint") == fingerprint
+                        and int(manifest.get("rollup_rows") or 0) > 0
+                    ):
+                        rollups.append(
+                            _skipped_rollup_result(
+                                target,
+                                interval,
+                                manifest,
+                                reason="source_fingerprint_unchanged",
+                            )
+                        )
+                        continue
+
+                    if source is None:
+                        source = {**_source_stats(target), **revision}
+                    if manifest and not manifest.get("source_fingerprint") and _manifest_matches_legacy_source(manifest, source):
+                        _set_manifest_source_fingerprint(target, interval, fingerprint)
+                        manifest = {**manifest, "source_fingerprint": fingerprint}
+                        rollups.append(
+                            _skipped_rollup_result(
+                                target,
+                                interval,
+                                manifest,
+                                reason="legacy_manifest_fingerprint_backfilled",
+                            )
+                        )
+                        continue
+
+                    if enumerated_codes is None:
+                        enumerated_codes = _source_codes(target, int(source.get("source_codes") or 0))
+                    rollups.append(
+                        aggregate_trade_date(
+                            target,
+                            interval,
+                            source=source,
+                            source_codes=enumerated_codes,
+                        )
+                    )
+                except Exception as exc:
+                    failure = {
+                        "trade_date": target.isoformat(),
+                        "stage": f"rollup_{interval}m",
+                        "status": "failed",
+                        "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+                    }
+                    failures.append(failure)
+                    rollups.append({**failure, "interval_minutes": interval})
+            try:
+                tracked.append(copy_tracked_trade_date(target))
+            except Exception as exc:
+                failure = {
+                    "trade_date": target.isoformat(),
+                    "stage": "tracked_copy",
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+                }
+                failures.append(failure)
+                tracked.append(failure)
+
+        try:
+            retention = apply_retention(final_policy)
+        except Exception as exc:
+            retention = {
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+            }
+            failures.append({"stage": "retention", **retention})
+
+        try:
+            final_plan = build_lifecycle_plan(final_policy)
+        except Exception as exc:
+            final_plan = {
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+            }
+            failures.append({"stage": "final_plan", **final_plan})
+
+        has_partial = any(item.get("status") == "partial" for item in rollups)
+        status = "partial" if failures or has_partial else "success"
         return {
-            "status": "success",
+            "status": status,
             "policy": asdict(final_policy),
+            "processing_order": [item.isoformat() for item in raw_dates],
+            "created_raw_partitions": created_raw_partitions,
             "rollups": rollups,
             "tracked": tracked,
+            "failures": failures,
             "retention": retention,
-            "final_plan": build_lifecycle_plan(final_policy),
+            "final_plan": final_plan,
         }
     finally:
+        if writer_lock is not None:
+            release_mysql_advisory_lock(writer_lock)
         release_mysql_advisory_lock(lock_handle)
 
 
