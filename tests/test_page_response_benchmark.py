@@ -102,9 +102,13 @@ class PageResponseBenchmarkTests(unittest.TestCase):
     def test_dashboard_cache_miss_probe_only_uses_cold_budget(self):
         from scripts.benchmark_page_responses import measure_dashboard_local_cache_miss
 
+        cache_backend = Mock()
         with patch(
             "app.api.routes.dashboard.dashboard_summary",
             return_value={"status": "ok"},
+        ), patch(
+            "app.api.routes.dashboard.get_cache_backend",
+            return_value=cache_backend,
         ), patch(
             "scripts.benchmark_page_responses.time.perf_counter",
             side_effect=[0.0, 0.4, 1.0, 1.45],
@@ -115,6 +119,8 @@ class PageResponseBenchmarkTests(unittest.TestCase):
         self.assertIsNone(result["warm_budget_ms"])
         self.assertIsNone(result["warm_budget_pass"])
         self.assertEqual(result["cache_miss_median_ms"], 425.0)
+        self.assertEqual(cache_backend.delete.call_count, 2)
+        cache_backend.delete.assert_called_with("dashboard:summary:v3:compact:8")
 
 
 if __name__ == "__main__":

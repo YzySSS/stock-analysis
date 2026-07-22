@@ -36,7 +36,7 @@ class ScriptedCursor:
             self._rows = []
         elif "r.latest_price < ROUND" in normalized:
             self._rows = []
-        elif normalized == "SELECT MAX(trade_date) AS latest_trade_date FROM daily_kline":
+        elif "SELECT k.trade_date AS latest_trade_date FROM daily_kline k" in normalized:
             self._row = {"latest_trade_date": "2026-07-15"}
         elif "COUNT(*) AS total" in normalized:
             self._row = {"total": 0, "trade_date": "2026-07-16"}
@@ -56,19 +56,15 @@ class ScriptedCursor:
             self._rows = [
                 {
                     "code": "sh.600000",
-                    "trade_date": "2026-07-16",
                     "quote_minute": "2026-07-16 09:31:00",
                     "latest_price": 11.0,
                     "pre_close": 10.0,
-                    "name": "浦发银行",
                 },
                 {
                     "code": "sh.600000",
-                    "trade_date": "2026-07-16",
                     "quote_minute": "2026-07-16 10:02:00",
                     "latest_price": 10.8,
                     "pre_close": 10.0,
-                    "name": "浦发银行",
                 },
             ]
         elif "FROM daily_kline FORCE INDEX (uniq_code_date)" in normalized:
@@ -182,9 +178,15 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(len(result["history_by_code"]["sh.600000"]), 2)
         self.assertEqual(result["open_board_rows"][0]["open_board_count"], 1)
         self.assertNotIn("LAG(is_sealed)", factory.executions[-2][0])
+        self.assertIn(
+            "SELECT code, quote_minute, latest_price, pre_close",
+            factory.executions[-2][0],
+        )
+        self.assertNotIn("SELECT code, trade_date", factory.executions[-2][0])
         self.assertIn("ORDER BY code, quote_minute", factory.executions[-2][0])
         self.assertIn("FORCE INDEX (idx_realtime_intraday_code_time)", factory.executions[-2][0])
-        self.assertIn("quote_minute >= %s", factory.executions[-2][0])
+        self.assertIn("quote_minute >= TIMESTAMP(%s, '09:25:00')", factory.executions[-2][0])
+        self.assertIn("quote_minute < TIMESTAMP(%s, '15:06:00')", factory.executions[-2][0])
         self.assertEqual(
             factory.executions[-2][1][-3:],
             ["2026-07-16", "2026-07-16", "2026-07-16"],
@@ -193,6 +195,32 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertIn("FORCE INDEX (uniq_code_date)", factory.executions[-1][0])
         self.assertEqual(result["open_board_rows"][0]["first_limit_time"], "2026-07-16 09:31:00")
         self.assertEqual(result["open_board_rows"][0]["last_open_time"], "2026-07-16 10:02:00")
+        self.assertEqual(result["open_board_rows"][0]["trade_date"], "2026-07-16")
+
+    def test_open_board_summary_uses_snapshot_name_for_st_limit_rate(self):
+        rows = [
+            {
+                "code": "sh.600001",
+                "quote_minute": "2026-07-16 09:31:00",
+                "latest_price": 10.5,
+                "pre_close": 10.0,
+            },
+            {
+                "code": "sh.600001",
+                "quote_minute": "2026-07-16 10:02:00",
+                "latest_price": 10.4,
+                "pre_close": 10.0,
+            },
+        ]
+
+        result = DashboardRepository._summarize_open_board_rows(
+            rows,
+            trade_date="2026-07-16",
+            names_by_code={"sh.600001": "ST示例"},
+        )
+
+        self.assertEqual(result[0]["open_board_count"], 1)
+        self.assertEqual(result[0]["trade_date"], "2026-07-16")
 
     def test_emotion_board_calls_repository_once_without_per_stock_sql(self):
         repository = StubDashboardRepository()

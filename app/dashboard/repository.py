@@ -5,6 +5,11 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
 
 from app.shared.db import mysql_read_conn
+from app.shared.instrument_policy import (
+    STOCK_DAILY_COMPLETENESS_LOOKBACK_DAYS,
+    STOCK_DAILY_COMPLETENESS_RATIO,
+    STOCK_INSTRUMENT_TYPE,
+)
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
@@ -40,7 +45,11 @@ class DashboardRepository:
     def _summarize_open_board_rows(
         cls,
         rows: list[dict[str, Any]],
+        *,
+        trade_date: Any = None,
+        names_by_code: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        names_by_code = names_by_code or {}
         summaries: dict[str, dict[str, Any]] = {}
         previous_by_code: dict[str, bool] = {}
         for row in rows:
@@ -51,15 +60,16 @@ class DashboardRepository:
                 continue
             price = Decimal(str(latest_price))
             previous_close = Decimal(str(pre_close))
-            limit_price = (previous_close * (Decimal("1") + cls._limit_rate(code, row.get("name")))).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
+            limit_price = (
+                previous_close
+                * (Decimal("1") + cls._limit_rate(code, names_by_code.get(code)))
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             is_sealed = price >= limit_price
             summary = summaries.setdefault(
                 code,
                 {
                     "code": code,
-                    "trade_date": row.get("trade_date"),
+                    "trade_date": trade_date,
                     "open_board_count": 0,
                     "first_limit_time": None,
                     "last_open_time": None,
@@ -193,7 +203,28 @@ class DashboardRepository:
                 )
                 hot_limit_rows = cursor.fetchall() or []
 
-                cursor.execute("SELECT MAX(trade_date) AS latest_trade_date FROM daily_kline")
+                cursor.execute(
+                    f"""
+                    SELECT k.trade_date AS latest_trade_date
+                    FROM daily_kline k
+                    INNER JOIN stock_basic complete_sb ON complete_sb.code = k.code
+                    WHERE complete_sb.instrument_type = '{STOCK_INSTRUMENT_TYPE}'
+                      AND COALESCE(complete_sb.is_delisted, 0) = 0
+                      AND k.trade_date >= DATE_SUB(
+                          (SELECT MAX(trade_date) FROM daily_kline),
+                          INTERVAL {STOCK_DAILY_COMPLETENESS_LOOKBACK_DAYS} DAY
+                      )
+                    GROUP BY k.trade_date
+                    HAVING COUNT(DISTINCT k.code) >= (
+                        SELECT COUNT(*) * {STOCK_DAILY_COMPLETENESS_RATIO}
+                        FROM stock_basic
+                        WHERE instrument_type = '{STOCK_INSTRUMENT_TYPE}'
+                          AND COALESCE(is_delisted, 0) = 0
+                    )
+                    ORDER BY k.trade_date DESC
+                    LIMIT 1
+                    """
+                )
                 latest_kline_date = (cursor.fetchone() or {}).get("latest_trade_date")
 
                 reversal_rows: list[dict[str, Any]] = []
@@ -247,6 +278,11 @@ class DashboardRepository:
                     reversal_rows = cursor.fetchall() or []
 
                 limit_codes = list(dict.fromkeys(str(row.get("code")) for row in limit_rows if row.get("code")))
+                limit_names_by_code = {
+                    str(row.get("code")): row.get("name")
+                    for row in limit_rows
+                    if row.get("code")
+                }
                 intraday_trade_date = max(
                     (row.get("trade_date") for row in limit_rows if row.get("trade_date")),
                     default=None,
@@ -262,12 +298,12 @@ class DashboardRepository:
                     placeholders = self._placeholders(limit_codes)
                     cursor.execute(
                         f"""
-                        SELECT code, trade_date, quote_minute, latest_price, pre_close, name
+                        SELECT code, quote_minute, latest_price, pre_close
                         FROM stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)
                         WHERE code IN ({placeholders})
                           AND trade_date = %s
-                          AND quote_minute >= %s
-                          AND quote_minute < DATE_ADD(%s, INTERVAL 1 DAY)
+                          AND quote_minute >= TIMESTAMP(%s, '09:25:00')
+                          AND quote_minute < TIMESTAMP(%s, '15:06:00')
                           AND latest_price IS NOT NULL
                           AND pre_close IS NOT NULL
                         ORDER BY code, quote_minute
@@ -279,7 +315,11 @@ class DashboardRepository:
                             intraday_trade_date,
                         ],
                     )
-                    open_board_rows = self._summarize_open_board_rows(cursor.fetchall() or [])
+                    open_board_rows = self._summarize_open_board_rows(
+                        cursor.fetchall() or [],
+                        trade_date=intraday_trade_date,
+                        names_by_code=limit_names_by_code,
+                    )
 
                 history_by_code: dict[str, list[dict[str, Any]]] = {}
                 if history_codes:
