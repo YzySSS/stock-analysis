@@ -204,6 +204,23 @@ async function waitForSelectionRun(runId) {
   return waitForSelectionRunByPolling(runId, deadline);
 }
 
+async function fetchSelectionRunDetail(runId, allowMissing = false) {
+  const response = await fetch(`/api/selection/runs/${encodeURIComponent(runId)}`);
+  if (allowMissing && response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}${text ? `: ${text}` : ''}`);
+  }
+  return response.json();
+}
+
+async function resolveSelectionRunResult(completed) {
+  if (completed?.result) return completed.result;
+  if (!completed?.run_id) return null;
+  const detailed = await fetchSelectionRunDetail(completed.run_id);
+  return detailed?.result || null;
+}
+
 function setSelectionInputsDisabled(disabled) {
   qsa('#selection-form input, #selection-form select, #selection-form button, #refresh-results, #refresh-selection-page').forEach((element) => {
     element.disabled = disabled;
@@ -1150,6 +1167,33 @@ async function loadSelectionResults(runIdOverride = null) {
     return;
   }
 
+  if (runId) {
+    const taskRun = await fetchSelectionRunDetail(runId, true);
+    if (taskRun) {
+      if (!applySelectionRunStatus(taskRun)) {
+        const summaryLine = qs('#selection-summary-line');
+        if (summaryLine) {
+          summaryLine.textContent = `任务 ${runId} 当前状态：${selectionRunStatusLabel(taskRun.status)}，请稍后刷新结果。`;
+        }
+        return;
+      }
+      const taskResult = await resolveSelectionRunResult(taskRun);
+      if (!taskResult) {
+        throw new Error('选股任务已完成，但任务详情中没有结果');
+      }
+      const normalized = normalizeRunResponse(taskResult);
+      lastSelectionResponse = normalized;
+      (normalized.items || []).forEach((item) => {
+        if (item.persisted_key) savedSelectionKeys.add(item.persisted_key);
+      });
+      renderSelectionResults(normalized);
+      if (normalized.strategy) {
+        renderStrategySummary(normalized.strategy);
+      }
+      return;
+    }
+  }
+
   const query = new URLSearchParams({ instrument_type: instrumentType, limit: String(limit) });
   const marketBoard = getMarketBoardValue();
   if (marketBoard !== 'all') query.set('market_board', marketBoard);
@@ -1209,7 +1253,7 @@ async function runSelection(event) {
     if (submitted.status && submitted.run_id && !submitted.results && !submitted.result) {
       renderSelectionTaskStatus(submitted);
       const completed = await waitForSelectionRun(submitted.run_id);
-      finalResult = completed.result;
+      finalResult = await resolveSelectionRunResult(completed);
     } else {
       finalResult = submitted.result || submitted;
     }

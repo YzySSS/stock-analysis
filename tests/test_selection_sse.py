@@ -99,7 +99,6 @@ class SelectionSseTests(unittest.TestCase):
             "run_id": "run-1",
             "status": "success",
             "progress_pct": 100,
-            "result": {"items": []},
         }
 
         async def exercise() -> tuple[StreamingResponse, str]:
@@ -117,6 +116,7 @@ class SelectionSseTests(unittest.TestCase):
         self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
         self.assertIn("event: status", body)
         self.assertIn('"status":"success"', body)
+        self.assertNotIn('"result"', body)
         service.get_run.assert_called_once_with("run-1", False)
 
     def test_stream_reads_redis_status_without_per_second_mysql_queries(self):
@@ -186,6 +186,9 @@ class SelectionSseTests(unittest.TestCase):
         self.assertIn("new EventSource", script)
         self.assertIn("error.selectionSseFallback = true", script)
         self.assertIn("return waitForSelectionRunByPolling(runId, deadline)", script)
+        self.assertIn("finalResult = await resolveSelectionRunResult(completed)", script)
+        self.assertIn("const taskRun = await fetchSelectionRunDetail(runId, true)", script)
+        self.assertIn("const normalized = normalizeRunResponse(taskResult)", script)
 
 
 if __name__ == "__main__":
