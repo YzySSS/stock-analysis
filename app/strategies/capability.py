@@ -6,6 +6,11 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, Optional
 
 from app.shared.db import mysql_conn
+from app.shared.instrument_policy import (
+    STOCK_DAILY_COMPLETENESS_LOOKBACK_DAYS,
+    STOCK_DAILY_COMPLETENESS_RATIO,
+    STOCK_INSTRUMENT_TYPE,
+)
 from app.shared.strategy_loader import StrategyLoader
 from app.stock_selection.dataset_scope import (
     required_dataset_code_prefixes,
@@ -55,10 +60,29 @@ class StrategyCapabilityService:
         with mysql_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    """
+                    f"""
                     SELECT
                         (SELECT COUNT(*) FROM stock_basic WHERE instrument_type='stock' AND COALESCE(is_delisted, 0)=0) AS stock_count,
-                        (SELECT MAX(trade_date) FROM daily_kline) AS reference_trade_date,
+                        (
+                            SELECT k.trade_date
+                            FROM daily_kline k
+                            INNER JOIN stock_basic daily_sb ON daily_sb.code=k.code
+                            WHERE daily_sb.instrument_type='{STOCK_INSTRUMENT_TYPE}'
+                              AND COALESCE(daily_sb.is_delisted, 0)=0
+                              AND k.trade_date >= DATE_SUB(
+                                  (SELECT MAX(trade_date) FROM daily_kline),
+                                  INTERVAL {STOCK_DAILY_COMPLETENESS_LOOKBACK_DAYS} DAY
+                              )
+                            GROUP BY k.trade_date
+                            HAVING COUNT(DISTINCT k.code) >= (
+                                SELECT COUNT(*) * {STOCK_DAILY_COMPLETENESS_RATIO}
+                                FROM stock_basic
+                                WHERE instrument_type='{STOCK_INSTRUMENT_TYPE}'
+                                  AND COALESCE(is_delisted, 0)=0
+                            )
+                            ORDER BY k.trade_date DESC
+                            LIMIT 1
+                        ) AS reference_trade_date,
                         (SELECT MAX(trade_date) FROM factor_input_daily) AS factor_input_date,
                         (SELECT MAX(trade_date) FROM stock_moneyflow_daily) AS moneyflow_date,
                         (SELECT MAX(trade_date) FROM stock_chip_daily) AS chip_date,

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.backtest.service import BacktestRequest, BacktestService
 from app.stock_selection.run_tasks import SelectionRunService
 from app.strategies.service import StrategyService
+from app.strategies.capability import StrategyCapabilityService
 from scripts.run_strategy_factor_ci_daily_update import runtime_strategy_ids
 
 
@@ -32,6 +33,41 @@ def ready_snapshot(
 
 
 class StrategyCapabilityContractTests(unittest.TestCase):
+    def test_live_snapshot_uses_latest_complete_stock_day_not_global_kline_max(self):
+        connection_context = MagicMock()
+        connection = MagicMock()
+        cursor = MagicMock()
+        connection_context.__enter__.return_value = connection
+        connection.cursor.return_value.__enter__.return_value = cursor
+        cursor.fetchone.side_effect = [
+            {
+                "stock_count": 100,
+                "reference_trade_date": "2026-07-21",
+                "factor_input_date": "2026-07-21",
+                "moneyflow_date": "2026-07-21",
+                "chip_date": "2026-07-21",
+                "sector_opinion_at": "2026-07-22 14:45:00",
+            },
+            {"count": 99},
+            {"count": 100},
+            {"count": 90},
+            {"count": 90},
+            {"count": 99},
+            {"count": 12},
+        ]
+
+        with patch(
+            "app.strategies.capability.mysql_conn",
+            return_value=connection_context,
+        ):
+            snapshot = StrategyCapabilityService._query_dataset_snapshot()
+
+        first_sql = cursor.execute.call_args_list[0].args[0]
+        self.assertIn("HAVING COUNT(DISTINCT k.code)", first_sql)
+        self.assertIn("daily_sb.instrument_type='stock'", first_sql)
+        self.assertEqual(snapshot["reference_trade_date"], "2026-07-21")
+        self.assertEqual(snapshot["datasets"]["daily_kline"]["covered_codes"], 99)
+
     def test_registry_exposes_only_frozen_and_shadow_sentiment_versions(self):
         service = StrategyService(dataset_snapshot=ready_snapshot())
         items = service.list_strategies()
