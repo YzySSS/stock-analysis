@@ -20,29 +20,83 @@ function formatMoneyWan(value) {
   return `${num.toFixed(2)}万`;
 }
 
-const requestedIntradayRefreshes = new Set();
+const intradayRefreshRequestedAt = new Map();
+const INTRADAY_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
+function intradayMinuteKey(value) {
+  const text = String(value || '').trim().replace('T', ' ');
+  const fullMatch = text.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})/);
+  if (fullMatch) return `${fullMatch[1]} ${fullMatch[2]}:${fullMatch[3]}`;
+  const timeMatch = text.match(/(\d{2}):(\d{2})/);
+  return timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : null;
+}
+
+function intradayPointMinuteKey(item) {
+  return intradayMinuteKey(item?.minute_time || item?.quote_minute);
+}
+
+function latestIntradayMinuteKey(items = []) {
+  return (items || []).reduce((latest, item) => {
+    const key = intradayPointMinuteKey(item);
+    return key && (!latest || key > latest) ? key : latest;
+  }, null);
+}
+
+function isIntradayCacheStale(cachedBars = [], realtimePoints = []) {
+  if ((cachedBars || []).length < 2) return true;
+  const latestRealtime = latestIntradayMinuteKey(realtimePoints);
+  if (!latestRealtime) return false;
+  const latestCached = latestIntradayMinuteKey(cachedBars);
+  return !latestCached || latestCached < latestRealtime;
+}
+
+function mergeIntradayChartPoints(cachedBars = [], realtimePoints = [], meta = {}) {
+  const merged = new Map();
+  (realtimePoints || []).forEach((item) => {
+    const key = intradayPointMinuteKey(item);
+    if (key) merged.set(key, { ...item, quote_minute: item.quote_minute || item.minute_time });
+  });
+  normalizeIntradayBars(cachedBars || [], meta).forEach((item) => {
+    const key = intradayPointMinuteKey(item);
+    if (key) merged.set(key, item);
+  });
+  return [...merged.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, item]) => item);
+}
 
 function waitFor(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function refreshAndLoadIntradayBars(code, tradeDate) {
+async function refreshAndLoadIntradayBars(code, tradeDate, expectedLatestMinute = null) {
   const encodedCode = encodeURIComponent(code);
   const encodedDate = encodeURIComponent(tradeDate || '');
   const refreshKey = `${code}:${tradeDate || ''}`;
-  if (!requestedIntradayRefreshes.has(refreshKey)) {
-    requestedIntradayRefreshes.add(refreshKey);
-    await fetchJson(
-      `/api/stocks/${encodedCode}/intraday-bars/refresh?trade_date=${encodedDate}`,
-      { method: 'POST' },
-    );
+  const now = Date.now();
+  const lastRequestedAt = intradayRefreshRequestedAt.get(refreshKey) || 0;
+  const shouldQueueRefresh = now - lastRequestedAt >= INTRADAY_REFRESH_COOLDOWN_MS;
+  if (shouldQueueRefresh) {
+    intradayRefreshRequestedAt.set(refreshKey, now);
+    try {
+      await fetchJson(
+        `/api/stocks/${encodedCode}/intraday-bars/refresh?trade_date=${encodedDate}`,
+        { method: 'POST' },
+      );
+    } catch (error) {
+      intradayRefreshRequestedAt.delete(refreshKey);
+      throw error;
+    }
   }
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const bars = await fetchJson(`/api/stocks/${encodedCode}/intraday-bars?trade_date=${encodedDate}`);
-    if ((bars.items || []).length >= 2) return bars;
-    if (attempt < 7) await waitFor(1500);
+  const expectedPoints = expectedLatestMinute ? [{ quote_minute: expectedLatestMinute }] : [];
+  const maxAttempts = shouldQueueRefresh ? 8 : 1;
+  let latest = { items: [], count: 0, source_status: 'empty' };
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    latest = await fetchJson(`/api/stocks/${encodedCode}/intraday-bars?trade_date=${encodedDate}`);
+    if (!isIntradayCacheStale(latest.items || [], expectedPoints)) return latest;
+    if (attempt < maxAttempts - 1) await waitFor(1500);
   }
-  return { items: [], count: 0, source_status: 'empty' };
+  return latest;
 }
 
 function formatRank(rank, percentile) {
@@ -1076,31 +1130,53 @@ async function loadStockDetail() {
       prevClose: realtime.pre_close || data.latest_kline?.prev_close || null,
     };
     const cachedIntradayBars = data.intraday_bars || {};
-    if ((cachedIntradayBars.items || []).length >= 2) {
-      renderIntradayChart(normalizeIntradayBars(cachedIntradayBars.items || [], intradayChartMeta), {
+    const cachedIntradayItems = cachedIntradayBars.items || [];
+    const realtimeIntradayItems = data.realtime_intraday || [];
+    const cacheIsStale = isIntradayCacheStale(cachedIntradayItems, realtimeIntradayItems);
+    const mergedIntradayItems = mergeIntradayChartPoints(
+      cachedIntradayItems,
+      realtimeIntradayItems,
+      intradayChartMeta,
+    );
+    const latestRealtimeMinute = latestIntradayMinuteKey(realtimeIntradayItems);
+
+    if (cachedIntradayItems.length >= 2 && !cacheIsStale) {
+      renderIntradayChart(normalizeIntradayBars(cachedIntradayItems, intradayChartMeta), {
         ...intradayChartMeta,
         label: `完整分钟线 · ${cachedIntradayBars.count || 0} 点 · 数据库缓存`,
       });
     } else {
-      renderIntradayChart(data.realtime_intraday || [], {
+      renderIntradayChart(mergedIntradayItems, {
         ...intradayChartMeta,
-        label: '实时采样线 · 正在按需补全完整分钟线',
+        label: cachedIntradayItems.length >= 2
+          ? `分钟线 · 缓存 ${cachedIntradayItems.length} 点 + 实时尾段`
+          : '实时采样线 · 正在按需补全完整分钟线',
       });
       refreshAndLoadIntradayBars(
         code,
         realtime.trade_date || data.latest_kline?.trade_date || '',
+        latestRealtimeMinute,
       )
         .then((intradayBars) => {
-          if ((intradayBars.items || []).length >= 2) {
-            renderIntradayChart(normalizeIntradayBars(intradayBars.items || [], intradayChartMeta), {
+          const refreshedItems = intradayBars.items || [];
+          const refreshedIsStale = isIntradayCacheStale(refreshedItems, realtimeIntradayItems);
+          const refreshedChartItems = mergeIntradayChartPoints(
+            refreshedItems,
+            realtimeIntradayItems,
+            intradayChartMeta,
+          );
+          if (refreshedChartItems.length >= 2) {
+            renderIntradayChart(refreshedChartItems, {
               ...intradayChartMeta,
-              label: `完整分钟线 · ${intradayBars.count || 0} 点 · ${intradayBars.source_status === 'cached' ? '数据库缓存' : '已补全并缓存'}`,
+              label: refreshedIsStale
+                ? `分钟线 · 缓存 ${refreshedItems.length} 点 + 实时尾段 · 缓存暂未追平`
+                : `完整分钟线 · ${intradayBars.count || refreshedItems.length} 点 · 数据库缓存`,
             });
           } else {
-            renderIntradayChart(data.realtime_intraday || [], { ...intradayChartMeta, label: '完整分钟线暂无数据，展示实时采样线' });
+            renderIntradayChart(realtimeIntradayItems, { ...intradayChartMeta, label: '完整分钟线暂无数据，展示实时采样线' });
           }
         })
-        .catch(() => renderIntradayChart(data.realtime_intraday || [], { ...intradayChartMeta, label: '完整分钟线补全失败，展示实时采样线' }));
+        .catch(() => renderIntradayChart(mergedIntradayItems, { ...intradayChartMeta, label: '完整分钟线补全失败，已展示实时尾段' }));
     }
     renderRecentNews(data.recent_news || [], latestSelection);
     renderSelectionHistory(data.selection_history || []);
