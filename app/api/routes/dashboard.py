@@ -19,7 +19,7 @@ _DASHBOARD_REPOSITORY = DashboardRepository()
 
 
 _DASHBOARD_CACHE_FRESH_SECONDS = 30.0
-_DASHBOARD_CACHE_STORAGE_SECONDS = 300.0
+_DASHBOARD_CACHE_STORAGE_SECONDS = 900.0
 _DASHBOARD_CACHE_LOCKS = {limit: threading.Lock() for limit in range(1, 21)}
 
 
@@ -262,6 +262,20 @@ def _cache_dashboard(limit: int, payload: dict[str, Any]) -> None:
         {"payload": payload, "cached_at": time.time()},
         ttl_seconds=_DASHBOARD_CACHE_STORAGE_SECONDS,
     )
+
+
+def warm_dashboard_compact_cache(limit: int = 8) -> dict[str, Any]:
+    """Build the homepage payload once and publish it to the shared cache."""
+    normalized_limit = int(limit)
+    if normalized_limit < 1 or normalized_limit > 20:
+        raise ValueError("dashboard cache limit must be between 1 and 20")
+    payload = _build_dashboard_summary(normalized_limit, compact=True)
+    _cache_dashboard(normalized_limit, payload)
+    return {
+        "status": "success",
+        "limit": normalized_limit,
+        "cache_key": _dashboard_cache_key(normalized_limit),
+    }
 
 
 def _clean_industry_name(name: str | None) -> str:

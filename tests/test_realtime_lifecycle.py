@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from io import StringIO
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 from app.data_ingestion.realtime_lifecycle import (
@@ -18,6 +18,7 @@ from scripts.run_realtime_snapshot_update import (
     RealtimeRow,
     fetch_deadline,
     fetch_spot_rows,
+    is_trading_time,
     save_rows,
 )
 
@@ -53,6 +54,12 @@ class RealtimeLifecyclePolicyTests(unittest.TestCase):
 
 
 class RealtimeWriterTests(unittest.TestCase):
+    def test_realtime_window_preserves_morning_close_through_lunch_recess(self):
+        self.assertTrue(is_trading_time(datetime(2026, 7, 22, 11, 30)))
+        self.assertFalse(is_trading_time(datetime(2026, 7, 22, 11, 31)))
+        self.assertFalse(is_trading_time(datetime(2026, 7, 22, 12, 59)))
+        self.assertTrue(is_trading_time(datetime(2026, 7, 22, 13, 0)))
+
     def test_source_progress_is_quiet_by_default(self):
         class FakeAkshare:
             @staticmethod

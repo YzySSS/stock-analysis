@@ -37,6 +37,19 @@ SUPPORTED_JOB_TYPES = frozenset(
 DEFAULT_STALE_SECONDS = 5 * 60
 JOB_HEARTBEAT_SECONDS = 10.0
 DEFAULT_INTRADAY_TIMEOUT_SECONDS = 120.0
+_RETRYABLE_DATABASE_ERROR_CODES = frozenset({1205, 1213, 2006, 2013})
+_RETRYABLE_ERROR_CODES = frozenset({"upstream_timeout", "upstream_connection_error"})
+_RETRYABLE_MESSAGE_TOKENS = (
+    "temporarily unavailable",
+    "service unavailable",
+    "gateway timeout",
+    "too many requests",
+    "rate limit",
+    "remote end closed",
+    "connection closed",
+    "empty response",
+    "exited without a result",
+)
 
 
 class _IntradayTaskPayload(BaseModel):
@@ -77,6 +90,18 @@ def _intraday_timeout_seconds() -> float:
     except (TypeError, ValueError):
         value = DEFAULT_INTRADAY_TIMEOUT_SECONDS
     return max(10.0, min(value, 10 * 60.0))
+
+
+def _is_retryable_task_error(exc: Exception, error_code: str, message: str) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    if error_code in _RETRYABLE_ERROR_CODES:
+        return True
+    first_arg = exc.args[0] if getattr(exc, "args", ()) else None
+    if isinstance(first_arg, int) and first_arg in _RETRYABLE_DATABASE_ERROR_CODES:
+        return True
+    normalized = str(message or "").lower()
+    return any(token in normalized for token in _RETRYABLE_MESSAGE_TOKENS)
 
 
 def _intraday_subprocess_entry(
@@ -325,6 +350,29 @@ class DurableTaskRepository:
                 )
                 return cursor.rowcount == 1
 
+    def requeue_retryable(
+        self,
+        task_id: str,
+        worker_id: str,
+        error_code: str,
+        error_message: str,
+    ) -> bool:
+        with self._connect(dict_cursor=False) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE durable_task
+                    SET status='queued', worker_id=NULL, locked_at=NULL,
+                        worker_heartbeat_at=NULL, started_at=NULL, finished_at=NULL,
+                        phase='瞬态故障，等待重试', progress_pct=0,
+                        estimated_seconds_left=NULL, error_code=%s, error_message=%s
+                    WHERE task_id=%s AND status='running' AND worker_id=%s
+                      AND cancel_requested=0 AND attempt_count < max_attempts
+                    """,
+                    ("transient_retry", error_message[:500], task_id, worker_id),
+                )
+                return cursor.rowcount == 1
+
     def reconcile_tracking_review_states(self) -> None:
         """Keep the deep-review projection aligned with stale queue recovery."""
 
@@ -339,7 +387,7 @@ class DurableTaskRepository:
                     SET advice.status='queued', advice.completed_at=NULL,
                         advice.error_code=NULL, advice.error_message=NULL
                     WHERE task.status='queued'
-                      AND task.error_code='stale_worker_recovered'
+                      AND task.error_code IN ('stale_worker_recovered', 'transient_retry')
                       AND advice.status<>'success'
                     """
                 )
@@ -406,7 +454,7 @@ class DurableTaskService:
         self.repository.reconcile_tracking_review_states()
         return result
 
-    def run_claimed(self, task_id: str, worker_id: str) -> None:
+    def run_claimed(self, task_id: str, worker_id: str) -> str:
         if not self.job_states.owns_running_job(task_id, worker_id):
             raise RuntimeError("worker does not own this running durable task")
         task = self.repository.get_claimed(task_id, worker_id)
@@ -433,9 +481,37 @@ class DurableTaskService:
             if not self.repository.finish_success(task_id, worker_id, result):
                 raise RuntimeError("durable task lost worker ownership before success persistence")
             self._log_finish(task_id, job_type, "success", metadata=result)
+            return "success"
         except Exception as exc:
             safe_message = sanitize_error_message(exc)
             error_code = infer_error_code(safe_message, default=type(exc).__name__)
+            attempt_count = int(task.get("attempt_count") or 1)
+            max_attempts = int(task.get("max_attempts") or 1)
+            if (
+                attempt_count < max_attempts
+                and _is_retryable_task_error(exc, error_code, safe_message)
+            ):
+                persisted = self.repository.requeue_retryable(
+                    task_id,
+                    worker_id,
+                    error_code,
+                    safe_message,
+                )
+                if persisted:
+                    self.repository.reconcile_tracking_review_states()
+                    self._log_finish(
+                        task_id,
+                        job_type,
+                        "retrying",
+                        message=safe_message,
+                        metadata={
+                            "attempt_count": attempt_count,
+                            "max_attempts": max_attempts,
+                            "original_error_code": error_code,
+                        },
+                        error_code="transient_retry",
+                    )
+                    return "requeued"
             persisted = self.repository.finish_failed(task_id, worker_id, error_code, safe_message)
             if persisted:
                 self._log_finish(task_id, job_type, "failed", message=safe_message, error_code=error_code)

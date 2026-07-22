@@ -47,11 +47,14 @@ def run_worker(poll_seconds: float = 3.0, once: bool = False) -> None:
             runtime.set_running(task_id)
             logger.info("claimed durable task %s", task_id)
             try:
-                service.run_claimed(task_id, worker_id)
+                outcome = service.run_claimed(task_id, worker_id)
             except Exception:
                 logger.exception("unhandled failure while processing durable task %s", task_id)
             else:
-                logger.info("finished durable task %s", task_id)
+                if outcome == "requeued":
+                    logger.warning("durable task %s requeued after transient failure", task_id)
+                else:
+                    logger.info("finished durable task %s", task_id)
             finally:
                 runtime.set_idle()
             if once:

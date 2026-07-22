@@ -16,6 +16,7 @@ from app.read_models.materialization import (
     SUPPORTED_MODELS,
     LocalReadModelMaterializer,
 )
+from app.api.routes.dashboard import warm_dashboard_compact_cache
 from app.shared.task_log import TaskRunLogger
 
 
@@ -48,6 +49,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rank-limit", type=int, default=DEFAULT_RANK_LIMIT)
     parser.add_argument("--summary-date", help="tracking summary date (YYYY-MM-DD)")
     parser.add_argument("--captured-at", help="operational snapshot time (ISO-8601)")
+    parser.add_argument(
+        "--dashboard-cache-limit",
+        type=int,
+        default=8,
+        help="compact dashboard result limit to prewarm in the shared cache",
+    )
+    parser.add_argument(
+        "--skip-dashboard-cache",
+        action="store_true",
+        help="refresh read models without prewarming the compact dashboard cache",
+    )
     args = parser.parse_args(argv)
 
     run_id = f"{TASK_NAME}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
@@ -58,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         "captured_at": args.captured_at,
         "input_source": "local_mysql",
         "external_provider_calls": False,
+        "dashboard_cache_limit": args.dashboard_cache_limit,
+        "dashboard_cache_enabled": not args.skip_dashboard_cache,
     }
     logger = TaskRunLogger()
     logger.start(TASK_NAME, run_id, metadata)
@@ -68,6 +82,22 @@ def main(argv: list[str] | None = None) -> int:
             summary_date=args.summary_date,
             captured_at=args.captured_at,
         )
+        if args.skip_dashboard_cache:
+            result["dashboard_cache"] = {"status": "skipped"}
+        else:
+            try:
+                result["dashboard_cache"] = warm_dashboard_compact_cache(
+                    args.dashboard_cache_limit
+                )
+            except Exception as exc:
+                # The operational read models remain usable if Redis or one of the
+                # homepage projections is temporarily unavailable. The next cron
+                # cycle, or the API's stale-while-refresh path, can warm it again.
+                result["dashboard_cache"] = {
+                    "status": "failed",
+                    "error_code": type(exc).__name__,
+                    "error": str(exc)[:500],
+                }
         payload = {**metadata, **result}
         logger.finish(
             TASK_NAME,

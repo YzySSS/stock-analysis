@@ -82,7 +82,12 @@ def is_trading_time(now: datetime) -> bool:
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (dtime(9, 15) <= t <= dtime(11, 35)) or (dtime(12, 55) <= t <= dtime(15, 5))
+    # Do not publish post-session rows during the lunch recess.  Upstream quote
+    # timestamps stop around 11:30; repeatedly writing them until 11:35 marks
+    # the otherwise valid morning-close snapshot stale and breaks lunch-time
+    # materialization.  The final in-session snapshot remains valid through the
+    # recess and is replaced after continuous trading resumes.
+    return (dtime(9, 15) <= t <= dtime(11, 30)) or (dtime(13, 0) <= t <= dtime(15, 5))
 
 
 def should_skip_for_degrade(now: datetime, state: dict) -> tuple[bool, str | None]:

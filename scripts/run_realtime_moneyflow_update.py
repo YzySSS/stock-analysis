@@ -46,7 +46,7 @@ def is_trading_time(now: datetime) -> bool:
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (dtime(9, 25) <= t <= dtime(11, 35)) or (dtime(12, 55) <= t <= dtime(15, 8))
+    return (dtime(9, 25) <= t <= dtime(11, 30)) or (dtime(13, 0) <= t <= dtime(15, 8))
 
 
 def minute_floor(dt: datetime) -> datetime:

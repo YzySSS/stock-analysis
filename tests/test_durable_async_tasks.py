@@ -8,6 +8,7 @@ from app.jobs.durable_tasks import (
     INTRADAY_REFRESH_JOB,
     TRACKING_DEEP_REVIEW_JOB,
     DurableTaskService,
+    _is_retryable_task_error,
     _run_intraday_isolated,
 )
 from app.jobs.durable_worker import run_worker
@@ -36,6 +37,7 @@ class FakeTaskRepository:
         self.task = task
         self.succeeded: list[tuple] = []
         self.failed: list[tuple] = []
+        self.requeued: list[tuple] = []
         self.reconciled = 0
 
     def get_claimed(self, task_id: str, worker_id: str):
@@ -47,6 +49,16 @@ class FakeTaskRepository:
 
     def finish_failed(self, task_id: str, worker_id: str, error_code: str, error_message: str) -> bool:
         self.failed.append((task_id, worker_id, error_code, error_message))
+        return True
+
+    def requeue_retryable(
+        self,
+        task_id: str,
+        worker_id: str,
+        error_code: str,
+        error_message: str,
+    ) -> bool:
+        self.requeued.append((task_id, worker_id, error_code, error_message))
         return True
 
     def reconcile_tracking_review_states(self) -> None:
@@ -153,6 +165,74 @@ class DurableTaskServiceTests(unittest.TestCase):
 
         self.assertFalse(repository.succeeded)
         self.assertEqual(repository.failed[0][0], "task-invalid")
+        self.assertFalse(repository.requeued)
+
+    def test_transient_upstream_failure_is_requeued_before_attempt_limit(self):
+        service, repository, _states = self._service(
+            {
+                "job_type": INTRADAY_REFRESH_JOB,
+                "related_entity_id": "sh.600000",
+                "attempt_count": 1,
+                "max_attempts": 3,
+                "payload": {
+                    "schema_version": 1,
+                    "code": "sh.600000",
+                    "trade_date": "2026-07-21",
+                    "refresh": True,
+                },
+            }
+        )
+        with patch(
+            "app.jobs.durable_tasks._run_intraday_isolated",
+            side_effect=TimeoutError("provider timed out"),
+        ):
+            outcome = service.run_claimed("task-retry", "worker-1")
+
+        self.assertEqual(outcome, "requeued")
+        self.assertEqual(repository.requeued[0][:2], ("task-retry", "worker-1"))
+        self.assertFalse(repository.failed)
+        self.assertEqual(repository.reconciled, 1)
+
+    def test_transient_failure_is_terminal_after_attempt_limit(self):
+        service, repository, _states = self._service(
+            {
+                "job_type": INTRADAY_REFRESH_JOB,
+                "related_entity_id": "sh.600000",
+                "attempt_count": 3,
+                "max_attempts": 3,
+                "payload": {
+                    "schema_version": 1,
+                    "code": "sh.600000",
+                    "trade_date": "2026-07-21",
+                    "refresh": True,
+                },
+            }
+        )
+        with patch(
+            "app.jobs.durable_tasks._run_intraday_isolated",
+            side_effect=ConnectionError("connection reset"),
+        ):
+            with self.assertRaises(ConnectionError):
+                service.run_claimed("task-exhausted", "worker-1")
+
+        self.assertFalse(repository.requeued)
+        self.assertEqual(repository.failed[0][0], "task-exhausted")
+
+    def test_retry_classifier_keeps_validation_errors_terminal(self):
+        self.assertFalse(
+            _is_retryable_task_error(
+                ValueError("invalid durable task payload"),
+                "invalid_request",
+                "invalid durable task payload",
+            )
+        )
+        self.assertTrue(
+            _is_retryable_task_error(
+                RuntimeError("service temporarily unavailable"),
+                "RuntimeError",
+                "service temporarily unavailable",
+            )
+        )
 
     def test_tracking_dispatch_uses_persisted_review_and_owner_fence(self):
         service, repository, states = self._service(

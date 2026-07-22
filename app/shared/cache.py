@@ -193,6 +193,7 @@ class RedisCacheBackend(CacheBackend):
         self._clock = clock
         self._client = client
         self._client_initialized = client is not None
+        self._connection_verified = False
         self._client_lock = Lock()
         self._stats_lock = Lock()
         self._hits = 0
@@ -208,6 +209,7 @@ class RedisCacheBackend(CacheBackend):
 
     def _record_error(self, exc: BaseException | str) -> None:
         message = str(exc)
+        self._connection_verified = False
         with self._stats_lock:
             self._errors += 1
             self._last_error = message[:200]
@@ -241,9 +243,15 @@ class RedisCacheBackend(CacheBackend):
                         decode_responses=False,
                         socket_connect_timeout=self.socket_connect_timeout_seconds,
                         socket_timeout=self.socket_timeout_seconds,
+                        # Redis 7.0 does not implement CLIENT SETINFO. Explicitly
+                        # disabling driver metadata avoids harmless error replies
+                        # whenever redis-py opens a new connection.
+                        driver_info=None,
                     )
-                self._client.ping()
-                self._record_success()
+                if not self._connection_verified:
+                    self._client.ping()
+                    self._connection_verified = True
+                    self._record_success()
             except Exception as exc:
                 self._record_error(exc)
                 # A redis-py client can reconnect after the circuit interval;
@@ -325,10 +333,11 @@ class RedisCacheBackend(CacheBackend):
                     "fallback"
                     if self._fallback_active
                     else "ready"
-                    if self._client is not None
+                    if self._connection_verified
                     else "uninitialized"
                 ),
                 "client_initialized": self._client_initialized,
+                "connection_verified": self._connection_verified,
                 "fallback_active": self._fallback_active,
                 "hits": self._hits,
                 "misses": self._misses,

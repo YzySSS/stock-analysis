@@ -38,6 +38,7 @@ ranked AS (
     FROM daily_kline dk
     WHERE dk.trade_date >= (SELECT MIN(trade_date) FROM recent_dates)
       AND dk.trade_date <= %s
+      /* code_scope */
 ),
 aggregated AS (
     SELECT
@@ -168,8 +169,16 @@ def _normalize_trade_date(value: str | date | datetime) -> str:
 class TechnicalFeatureDailyRefreshService:
     """Build the reusable technical snapshot using only local daily bars."""
 
-    def __init__(self, connection_factory: ConnectionFactory | None = None) -> None:
+    def __init__(
+        self,
+        connection_factory: ConnectionFactory | None = None,
+        *,
+        batch_size: int = 500,
+    ) -> None:
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
         self._connection_factory = connection_factory or mysql_conn
+        self.batch_size = int(batch_size)
 
     def _connect(self):
         return self._connection_factory(dict_cursor=True)
@@ -187,12 +196,50 @@ class TechnicalFeatureDailyRefreshService:
                     }
 
                 cursor.execute(
-                    REFRESH_STOCK_TECHNICAL_FEATURE_SQL,
-                    (resolved_trade_date, resolved_trade_date, resolved_trade_date),
+                    """
+                    SELECT code
+                    FROM stock_basic
+                    WHERE instrument_type='stock' AND COALESCE(is_delisted, 0)=0
+                    ORDER BY code
+                    """
                 )
-                affected_rows = max(0, int(cursor.rowcount or 0))
+                codes = [str(row["code"]) for row in (cursor.fetchall() or []) if row.get("code")]
+                if not codes:
+                    return {
+                        "status": "no_data",
+                        "trade_date": resolved_trade_date,
+                        "published_rows": 0,
+                        "source": "daily_kline",
+                    }
+
+                affected_rows = 0
+                batches = 0
+                for offset in range(0, len(codes), self.batch_size):
+                    batch_codes = codes[offset : offset + self.batch_size]
+                    placeholders = ",".join(["%s"] * len(batch_codes))
+                    refresh_sql = REFRESH_STOCK_TECHNICAL_FEATURE_SQL.replace(
+                        "/* code_scope */",
+                        f"AND dk.code IN ({placeholders})",
+                    )
+                    cursor.execute(
+                        refresh_sql,
+                        (
+                            resolved_trade_date,
+                            resolved_trade_date,
+                            *batch_codes,
+                            resolved_trade_date,
+                        ),
+                    )
+                    affected_rows += max(0, int(cursor.rowcount or 0))
+                    batches += 1
                 cursor.execute(
-                    "SELECT COUNT(*) AS count FROM stock_technical_feature_daily WHERE trade_date = %s",
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM stock_technical_feature_daily feature
+                    INNER JOIN stock_basic sb ON sb.code=feature.code
+                    WHERE feature.trade_date=%s
+                      AND sb.instrument_type='stock' AND COALESCE(sb.is_delisted, 0)=0
+                    """,
                     (resolved_trade_date,),
                 )
                 published_rows = int((cursor.fetchone() or {}).get("count") or 0)
@@ -202,6 +249,8 @@ class TechnicalFeatureDailyRefreshService:
             "trade_date": resolved_trade_date,
             "published_rows": published_rows,
             "affected_rows": affected_rows,
+            "batches": batches,
+            "batch_size": self.batch_size,
             "source": "daily_kline",
         }
 

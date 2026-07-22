@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
 
 from app.shared.db import mysql_read_conn
@@ -23,6 +24,55 @@ class DashboardRepository:
         if not items:
             raise ValueError("at least one item is required")
         return ", ".join(["%s"] * len(items))
+
+    @staticmethod
+    def _limit_rate(code: str, name: str | None) -> Decimal:
+        if code.startswith("bj."):
+            return Decimal("0.30")
+        if code.startswith(("sz.300", "sz.301", "sh.688")):
+            return Decimal("0.20")
+        normalized_name = str(name or "")
+        if normalized_name.startswith(("*ST", "ST", "退市")):
+            return Decimal("0.05")
+        return Decimal("0.10")
+
+    @classmethod
+    def _summarize_open_board_rows(
+        cls,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        summaries: dict[str, dict[str, Any]] = {}
+        previous_by_code: dict[str, bool] = {}
+        for row in rows:
+            code = str(row.get("code") or "")
+            latest_price = row.get("latest_price")
+            pre_close = row.get("pre_close")
+            if not code or latest_price is None or pre_close is None:
+                continue
+            price = Decimal(str(latest_price))
+            previous_close = Decimal(str(pre_close))
+            limit_price = (previous_close * (Decimal("1") + cls._limit_rate(code, row.get("name")))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            is_sealed = price >= limit_price
+            summary = summaries.setdefault(
+                code,
+                {
+                    "code": code,
+                    "trade_date": row.get("trade_date"),
+                    "open_board_count": 0,
+                    "first_limit_time": None,
+                    "last_open_time": None,
+                },
+            )
+            previous = previous_by_code.get(code)
+            if is_sealed and summary["first_limit_time"] is None:
+                summary["first_limit_time"] = row.get("quote_minute")
+            if previous is True and not is_sealed:
+                summary["open_board_count"] += 1
+                summary["last_open_time"] = row.get("quote_minute")
+            previous_by_code[code] = is_sealed
+        return list(summaries.values())
 
     def load_emotion_board_inputs(self, limit: int) -> dict[str, Any]:
         final_limit = max(1, int(limit))
@@ -212,65 +262,15 @@ class DashboardRepository:
                     placeholders = self._placeholders(limit_codes)
                     cursor.execute(
                         f"""
-                        WITH intraday_state AS (
-                            SELECT
-                                code,
-                                trade_date,
-                                quote_minute,
-                                CASE
-                                    WHEN latest_price >= ROUND(
-                                        pre_close * (
-                                            1 + CASE
-                                                WHEN code LIKE 'bj.%%' THEN 0.30
-                                                WHEN code LIKE 'sz.300%%'
-                                                  OR code LIKE 'sz.301%%'
-                                                  OR code LIKE 'sh.688%%' THEN 0.20
-                                                WHEN name LIKE '*ST%%'
-                                                  OR name LIKE 'ST%%'
-                                                  OR name LIKE '退市%%' THEN 0.05
-                                                ELSE 0.10
-                                            END
-                                        ),
-                                        2
-                                    ) THEN 1
-                                    ELSE 0
-                                END AS is_sealed
-                            FROM stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)
-                            WHERE code IN ({placeholders})
-                              AND trade_date = %s
-                              AND quote_minute >= %s
-                              AND quote_minute < DATE_ADD(%s, INTERVAL 1 DAY)
-                              AND latest_price IS NOT NULL
-                              AND pre_close IS NOT NULL
-                        ), intraday_transition AS (
-                            SELECT
-                                code,
-                                trade_date,
-                                quote_minute,
-                                is_sealed,
-                                LAG(is_sealed) OVER (
-                                    PARTITION BY code
-                                    ORDER BY quote_minute
-                                ) AS previous_is_sealed
-                            FROM intraday_state
-                        )
-                        SELECT
-                            code,
-                            MAX(trade_date) AS trade_date,
-                            SUM(
-                                CASE
-                                    WHEN previous_is_sealed = 1 AND is_sealed = 0 THEN 1
-                                    ELSE 0
-                                END
-                            ) AS open_board_count,
-                            MIN(CASE WHEN is_sealed = 1 THEN quote_minute END) AS first_limit_time,
-                            MAX(
-                                CASE
-                                    WHEN previous_is_sealed = 1 AND is_sealed = 0 THEN quote_minute
-                                END
-                            ) AS last_open_time
-                        FROM intraday_transition
-                        GROUP BY code
+                        SELECT code, trade_date, quote_minute, latest_price, pre_close, name
+                        FROM stock_realtime_intraday FORCE INDEX (idx_realtime_intraday_code_time)
+                        WHERE code IN ({placeholders})
+                          AND trade_date = %s
+                          AND quote_minute >= %s
+                          AND quote_minute < DATE_ADD(%s, INTERVAL 1 DAY)
+                          AND latest_price IS NOT NULL
+                          AND pre_close IS NOT NULL
+                        ORDER BY code, quote_minute
                         """,
                         [
                             *limit_codes,
@@ -279,7 +279,7 @@ class DashboardRepository:
                             intraday_trade_date,
                         ],
                     )
-                    open_board_rows = cursor.fetchall() or []
+                    open_board_rows = self._summarize_open_board_rows(cursor.fetchall() or [])
 
                 history_by_code: dict[str, list[dict[str, Any]]] = {}
                 if history_codes:
@@ -287,19 +287,20 @@ class DashboardRepository:
                     cursor.execute(
                         f"""
                         SELECT code, trade_date, close
-                        FROM (
-                            SELECT code, trade_date, close,
-                                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS row_no
-                            FROM daily_kline
-                            WHERE code IN ({placeholders})
-                        ) ranked
-                        WHERE row_no <= 9
-                        ORDER BY code, trade_date
+                        FROM daily_kline FORCE INDEX (uniq_code_date)
+                        WHERE code IN ({placeholders})
+                          AND trade_date <= %s
+                          AND trade_date >= DATE_SUB(%s, INTERVAL 90 DAY)
+                        ORDER BY code, trade_date DESC
                         """,
-                        history_codes,
+                        [*history_codes, latest_kline_date, latest_kline_date],
                     )
                     for row in cursor.fetchall() or []:
-                        history_by_code.setdefault(str(row["code"]), []).append(row)
+                        values = history_by_code.setdefault(str(row["code"]), [])
+                        if len(values) < 9:
+                            values.append(row)
+                    for values in history_by_code.values():
+                        values.reverse()
 
         return {
             "limit_rows": limit_rows,

@@ -20,12 +20,14 @@ class FakeRedisClient:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.data: dict[str, bytes] = {}
+        self.ping_count = 0
 
     def _check(self) -> None:
         if self.fail:
             raise ConnectionError("redis unavailable")
 
     def ping(self) -> bool:
+        self.ping_count += 1
         self._check()
         return True
 
@@ -89,6 +91,8 @@ class SharedCacheTests(unittest.TestCase):
         self.assertEqual(backend.get("dashboard"), {"ok": True})
         self.assertTrue(backend.delete("dashboard"))
         self.assertIsNone(backend.get("dashboard"))
+        self.assertEqual(client.ping_count, 1)
+        self.assertTrue(backend.diagnostics()["connection_verified"])
 
     def test_redis_failure_automatically_uses_write_through_memory_fallback(self):
         fallback = InMemoryCacheBackend(default_ttl_seconds=30)

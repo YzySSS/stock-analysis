@@ -52,20 +52,29 @@ class ScriptedCursor:
             self._rows = []
         elif "INNER JOIN daily_kline dk" in normalized:
             self._rows = [{"code": "sh.600000", "name": "浦发银行"}]
-        elif "FROM intraday_transition" in normalized:
+        elif "FROM stock_realtime_intraday FORCE INDEX" in normalized:
             self._rows = [
                 {
                     "code": "sh.600000",
                     "trade_date": "2026-07-16",
-                    "open_board_count": 1,
-                    "first_limit_time": "2026-07-16 09:31:00",
-                    "last_open_time": "2026-07-16 10:02:00",
-                }
+                    "quote_minute": "2026-07-16 09:31:00",
+                    "latest_price": 11.0,
+                    "pre_close": 10.0,
+                    "name": "浦发银行",
+                },
+                {
+                    "code": "sh.600000",
+                    "trade_date": "2026-07-16",
+                    "quote_minute": "2026-07-16 10:02:00",
+                    "latest_price": 10.8,
+                    "pre_close": 10.0,
+                    "name": "浦发银行",
+                },
             ]
-        elif "ROW_NUMBER() OVER" in normalized:
+        elif "FROM daily_kline FORCE INDEX (uniq_code_date)" in normalized:
             self._rows = [
-                {"code": "sh.600000", "trade_date": "2026-07-14", "close": 9.0},
                 {"code": "sh.600000", "trade_date": "2026-07-15", "close": 9.9},
+                {"code": "sh.600000", "trade_date": "2026-07-14", "close": 9.0},
                 {"code": "sz.000001", "trade_date": "2026-07-15", "close": 11.0},
             ]
         else:
@@ -135,6 +144,23 @@ class StubDashboardRepository:
 
 
 class DashboardRepositoryTests(unittest.TestCase):
+    def test_dashboard_cache_warmer_builds_compact_shared_payload(self):
+        with patch.object(
+            dashboard,
+            "_build_dashboard_summary",
+            return_value={"latest_trade_date": "2026-07-21"},
+        ) as build, patch.object(dashboard, "_cache_dashboard") as cache:
+            result = dashboard.warm_dashboard_compact_cache(8)
+
+        build.assert_called_once_with(8, compact=True)
+        cache.assert_called_once_with(8, {"latest_trade_date": "2026-07-21"})
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["cache_key"], "dashboard:summary:v3:compact:8")
+
+    def test_dashboard_cache_warmer_rejects_invalid_limit(self):
+        with self.assertRaises(ValueError):
+            dashboard.warm_dashboard_compact_cache(21)
+
     def test_compact_dashboard_uses_stale_while_refresh_cache(self):
         self.assertGreater(
             dashboard._DASHBOARD_CACHE_STORAGE_SECONDS,
@@ -155,15 +181,18 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(len(result["reversal_rows"]), 1)
         self.assertEqual(len(result["history_by_code"]["sh.600000"]), 2)
         self.assertEqual(result["open_board_rows"][0]["open_board_count"], 1)
-        self.assertIn("LAG(is_sealed)", factory.executions[-2][0])
-        self.assertIn("GROUP BY code", factory.executions[-2][0])
+        self.assertNotIn("LAG(is_sealed)", factory.executions[-2][0])
+        self.assertIn("ORDER BY code, quote_minute", factory.executions[-2][0])
         self.assertIn("FORCE INDEX (idx_realtime_intraday_code_time)", factory.executions[-2][0])
         self.assertIn("quote_minute >= %s", factory.executions[-2][0])
         self.assertEqual(
             factory.executions[-2][1][-3:],
             ["2026-07-16", "2026-07-16", "2026-07-16"],
         )
-        self.assertIn("ROW_NUMBER() OVER", factory.executions[-1][0])
+        self.assertNotIn("ROW_NUMBER() OVER", factory.executions[-1][0])
+        self.assertIn("FORCE INDEX (uniq_code_date)", factory.executions[-1][0])
+        self.assertEqual(result["open_board_rows"][0]["first_limit_time"], "2026-07-16 09:31:00")
+        self.assertEqual(result["open_board_rows"][0]["last_open_time"], "2026-07-16 10:02:00")
 
     def test_emotion_board_calls_repository_once_without_per_stock_sql(self):
         repository = StubDashboardRepository()

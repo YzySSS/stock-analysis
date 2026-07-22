@@ -28,7 +28,7 @@ PyMySQL>=1.1.0
 SQLAlchemy>=2.0.0,<3.0.0
 
 # 共享缓存（Redis 服务可选；连接失败时自动回落内存）
-redis>=5.0.0
+redis>=8.0.0,<9.0.0
 
 # 工具
 python-dateutil>=2.8.0
