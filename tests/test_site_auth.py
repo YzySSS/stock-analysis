@@ -73,7 +73,10 @@ class SessionTests(unittest.TestCase):
         self.assertIsNotNone(restored)
         self.assertEqual(restored.username, "dax")
         self.assertEqual(restored.csrf_token, issued.csrf_token)
-        self.assertIsNone(authenticator.read_session(f"{token[:-1]}x"))
+        payload, signature = token.rsplit(".", 1)
+        replacement = "A" if signature[0] != "A" else "B"
+        tampered_token = f"{payload}.{replacement}{signature[1:]}"
+        self.assertIsNone(authenticator.read_session(tampered_token))
 
         now[0] = issued.expires_at
         self.assertIsNone(authenticator.read_session(token))
@@ -170,6 +173,9 @@ class AuthBoundaryTests(unittest.TestCase):
         common_js = (
             PROJECT_ROOT / "app" / "api" / "web" / "js" / "common.js"
         ).read_text(encoding="utf-8")
+        layout_css = (
+            PROJECT_ROOT / "app" / "api" / "web" / "css" / "layout.css"
+        ).read_text(encoding="utf-8")
 
         self.assertIn('autocomplete="username"', login_page)
         self.assertIn('autocomplete="current-password"', login_page)
@@ -179,6 +185,8 @@ class AuthBoundaryTests(unittest.TestCase):
         self.assertIn('aria-label="退出登录"', common_js)
         self.assertIn("session-logout", common_js)
         self.assertIn("window.location.replace(currentLoginUrl())", common_js)
+        self.assertIn(".session-dock {", layout_css)
+        self.assertIn("left: 18px;", layout_css)
 
     def test_all_product_pages_pin_the_authenticated_common_script(self):
         pages_dir = PROJECT_ROOT / "app" / "api" / "web" / "pages"
@@ -195,7 +203,7 @@ class AuthBoundaryTests(unittest.TestCase):
         }
         for filename in product_pages:
             source = (pages_dir / filename).read_text(encoding="utf-8")
-            self.assertIn("/static/js/common.js?v=20260723auth2", source)
+            self.assertIn("/static/js/common.js?v=20260723auth3", source)
 
 
 class AuthHttpIntegrationTests(unittest.IsolatedAsyncioTestCase):
