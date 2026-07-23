@@ -1216,7 +1216,9 @@ def _build_indicators(
         )
 
     primary_trend = _trend_component(index_rows, trade_date)
+    primary_trend_status = "待数据"
     if latest_index and primary_trend:
+        primary_trend_status = "已接入" if primary_trend["trade_date"] == trade_date else "沿用最近收盘"
         add(
             "technical",
             "index_bollinger",
@@ -1232,7 +1234,7 @@ def _build_indicators(
                 "source_trade_date": primary_trend["trade_date"],
                 "target_trade_date": trade_date,
             },
-            "已接入" if primary_trend["trade_date"] == trade_date else "沿用最近收盘",
+            primary_trend_status,
         )
     else:
         add("technical", "index_bollinger", "指数布林带", None, "-", None, "tushare.index_daily", {"reason": "指数日线不足 20 条"}, "待数据")
@@ -1242,11 +1244,13 @@ def _build_indicators(
         component = _trend_component(trend_index_rows.get(trend_code, []), trade_date)
         if component:
             multi_components.append({"index_code": trend_code, **component})
+    multi_index_status = "待数据"
     if len(multi_components) >= 2:
         multi_score = mean(component["score"] for component in multi_components)
         multi_band_pos = mean(component["band_pos"] for component in multi_components)
         component_dates = [str(component["trade_date"]) for component in multi_components]
         oldest_component_date = min(component_dates)
+        multi_index_status = "已接入" if all(item == trade_date for item in component_dates) else "沿用最近收盘"
         add(
             "technical",
             "multi_index_trend",
@@ -1263,7 +1267,7 @@ def _build_indicators(
                 "source_trade_date": oldest_component_date,
                 "target_trade_date": trade_date,
             },
-            "已接入" if all(item == trade_date for item in component_dates) else "沿用最近收盘",
+            multi_index_status,
         )
     else:
         add(
@@ -1373,6 +1377,7 @@ def _build_indicators(
     else:
         add("sentiment", "option_pcr", "期权 PCR", None, "-", None, "tushare.opt_daily+opt_basic", {"reason": "期权行情为空"}, "待数据")
 
+    qvix_status = "待数据"
     if qvix_valid:
         qvix_scores = []
         qvix_meta = []
@@ -1401,6 +1406,7 @@ def _build_indicators(
                 (_iso_date(row.get("trade_date")) or "")
                 for row in qvix_valid
             ) or None
+            qvix_status = "已接入" if qvix_source_date == trade_date else "沿用最近收盘"
             add(
                 "sentiment",
                 "qvix_volatility",
@@ -1414,7 +1420,7 @@ def _build_indicators(
                     "source_trade_date": qvix_source_date,
                     "target_trade_date": trade_date,
                 },
-                "已接入" if qvix_source_date == trade_date else "沿用最近收盘",
+                qvix_status,
             )
         else:
             add("sentiment", "qvix_volatility", "QVIX 波动率", None, "-", None, "akshare.qvix", {"reason": "QVIX 分数为空"}, "待数据")
@@ -1492,12 +1498,12 @@ def _build_indicators(
         add("sentiment", "up_down_amount_pressure", "上涨/下跌成交额差", None, "-", None, "daily_kline", amount_meta, "待数据")
 
     coverage = {
-        "index_daily": "已接入" if latest_index else "待数据",
-        "multi_index_trend": "已接入" if len(multi_components) >= 2 else "待数据",
-        "index_dailybasic": "已接入" if latest_val else "待数据",
-        "margin": "已接入" if latest_margin else "待数据",
+        "index_daily": primary_trend_status,
+        "multi_index_trend": multi_index_status,
+        "index_dailybasic": _source_status_for_row(latest_val, trade_date),
+        "margin": _source_status_for_row(latest_margin, trade_date),
         "option_pcr": _source_status_for_row(latest_option_pcr, trade_date),
-        "qvix": "已接入" if qvix_valid else "待数据",
+        "qvix": qvix_status,
         "iv_skew": _source_status_for_row(latest_iv_skew, trade_date),
         "fut_holding": _source_status_for_row(latest_futures_holding, trade_date),
         "yc_cb": "已接入" if bond_yield is not None else "待权限",
