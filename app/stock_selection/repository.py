@@ -770,10 +770,12 @@ class SelectionRepository:
             return
         insert_sql = """
         INSERT INTO selection_result (
-            run_id, trade_date, strategy_id, code, score, rank_no, metadata_json
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            run_id, trade_date, strategy_id, strategy_version, code,
+            score, rank_no, metadata_json
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             run_id = VALUES(run_id),
+            strategy_version = VALUES(strategy_version),
             score = VALUES(score),
             rank_no = VALUES(rank_no),
             metadata_json = VALUES(metadata_json)
@@ -803,5 +805,5 @@ class SelectionRepository:
             with conn.cursor() as cursor:
                 cursor.executemany(insert_sql, payload)
                 cursor.execute(run_dedupe_sql, (run_id,))
-                for _, trade_date, strategy_id, code, *_ in payload:
+                for _, trade_date, strategy_id, _strategy_version, code, *_ in payload:
                     cursor.execute(tracking_dedupe_sql, (trade_date, strategy_id, code))

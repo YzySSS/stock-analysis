@@ -166,7 +166,7 @@ DB_NAME=stock_migration_smoke \
   --database stock_migration_smoke
 ```
 
-当前生产数据库位于远端，应用账号不能自行创建数据库，独立 smoke 库仍需由数据库侧 provision。空库 smoke 应验证到 25/25，第二遍始终要求 `applied_now=0`。该工具要求首次零表；再次完整演练应重新 provision 空库或使用新的安全后缀库名，不会自动清表或删库。
+当前生产数据库位于远端，应用账号不能自行创建数据库，独立 smoke 库仍需由数据库侧 provision。空库 smoke 应验证到 27/27，第二遍始终要求 `applied_now=0`。该工具要求首次零表；再次完整演练应重新 provision 空库或使用新的安全后缀库名，不会自动清表或删库。
 
 Tushare 实时分钟权限可在部署前用只读探针检查。探针没有显式 `--token-env` 时不会导入 SDK 或访问网络，也不接受/输出命令行 token：
 

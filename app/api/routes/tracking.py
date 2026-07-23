@@ -21,7 +21,7 @@ _DEEP_REVIEW_SERVICE = DeepReviewJobService()
 
 
 _TRACKING_SUMMARY_CACHE_TTL_SECONDS = 60.0
-_TRACKING_SUMMARY_CACHE_PREFIX = "tracking:summary:v1"
+_TRACKING_SUMMARY_CACHE_PREFIX = "tracking:summary:v2"
 _TRACKING_SUMMARY_CACHE_GENERATION_KEY = f"{_TRACKING_SUMMARY_CACHE_PREFIX}:generation"
 
 
@@ -195,6 +195,13 @@ def _build_strategy_summaries(items: list[dict]) -> list[dict]:
             {
                 "strategy_id": key,
                 "strategy_display_name": group_items[0].get("strategy_display_name") or key,
+                "strategy_versions": sorted(
+                    {
+                        str(item.get("strategy_version"))
+                        for item in group_items
+                        if item.get("strategy_version")
+                    }
+                ),
                 "selection_dates": sorted({item.get("selection_date") for item in group_items if item.get("selection_date")}, reverse=True),
             }
         )
@@ -230,6 +237,7 @@ def _compact_tracking_item(item: dict[str, Any]) -> dict[str, Any]:
         "rank_no": item.get("rank_no"),
         "score": item.get("score"),
         "strategy_id": item.get("strategy_id"),
+        "strategy_version": item.get("strategy_version"),
         "strategy_display_name": item.get("strategy_display_name"),
         "selection_date": item.get("selection_date"),
         "selection_datetime": item.get("selection_datetime"),
@@ -341,6 +349,7 @@ def _tracking_payload(
         "stats_retention": {
             "max_age_days": TRACKING_STATS_MAX_AGE_DAYS,
             "basis": "selection_datetime",
+            "version_scope": "all_versions",
             "auto_excluded_count": auto_excluded_count,
         },
         "pagination": {
@@ -649,6 +658,11 @@ def get_tracking_filters(
         {
             "strategy_id": str(row.get("strategy_id") or ""),
             "strategy_display_name": str(row.get("strategy_display_name") or row.get("strategy_id") or ""),
+            "strategy_versions": [
+                version
+                for version in str(row.get("strategy_versions") or "").split(",")
+                if version
+            ],
             "item_count": int(row.get("item_count") or 0),
         }
         for row in strategy_rows

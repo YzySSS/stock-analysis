@@ -431,7 +431,7 @@ class SelectionResultTracker:
             selection_datetime=str(row["selection_datetime"]) if row.get("selection_datetime") else None,
             strategy_id=row.get("strategy_id") or "",
             strategy_display_name=metadata.get("strategy_display_name"),
-            strategy_version=metadata.get("strategy_version"),
+            strategy_version=row.get("strategy_version") or metadata.get("strategy_version"),
             industry=row.get("industry"),
             score=self._to_float(row.get("score")),
             include_in_stats=bool(row.get("include_in_stats", 1)),

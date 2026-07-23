@@ -87,6 +87,8 @@ def audit_legacy_results(conn: Any) -> dict[str, Any]:
 
 
 def invalidate_legacy_results(conn: Any, invalidated_at: str) -> int:
+    """Mark legacy evidence without excluding it from the 14-day statistics."""
+
     with conn.cursor() as cursor:
         cursor.execute(
             f"""
@@ -109,8 +111,7 @@ def invalidate_legacy_results(conn: Any, invalidated_at: str) -> int:
                         ),
                         COALESCE(include_in_stats, 1)
                     )
-                ),
-                include_in_stats = 0
+                )
             WHERE {LEGACY_WHERE_SQL}
             """,
             (
@@ -126,11 +127,12 @@ def invalidate_legacy_results(conn: Any, invalidated_at: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Preserve legacy A-share sentiment selections but remove pre-v0.4.4 "
-            "rows from effective statistics. Dry-run is the default."
+            "Preserve and label legacy A-share sentiment selections. Statistical "
+            "inclusion is governed only by the 14-day window and manual controls. "
+            "Dry-run is the default."
         )
     )
-    parser.add_argument("--apply", action="store_true", help="apply the recoverable metadata/statistics invalidation")
+    parser.add_argument("--apply", action="store_true", help="apply the recoverable evidence label")
     return parser
 
 

@@ -267,14 +267,15 @@ class SelectionRepositoryTests(unittest.TestCase):
         cursor = FakeCursor()
         repository = SelectionRepository(connection_factory(cursor))
         payload = [
-            ("run-1", "2026-07-16", "test_strategy", "sh.600000", 80, 1, "{}"),
-            ("run-1", "2026-07-16", "test_strategy", "sz.000001", 79, 2, "{}"),
+            ("run-1", "2026-07-16", "test_strategy", "2.0.0", "sh.600000", 80, 1, "{}"),
+            ("run-1", "2026-07-16", "test_strategy", "2.0.0", "sz.000001", 79, 2, "{}"),
         ]
 
         repository.save_result_rows(payload=payload, run_id="run-1")
 
         self.assertEqual(len(cursor.executed_many), 1)
         self.assertEqual(cursor.executed_many[0][1], payload)
+        self.assertIn("strategy_version", cursor.executed_many[0][0])
         self.assertEqual(cursor.executed[0][1], ("run-1",))
         self.assertEqual(
             [params for _, params in cursor.executed[1:]],

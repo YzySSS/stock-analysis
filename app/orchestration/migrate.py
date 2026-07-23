@@ -27,6 +27,7 @@ from app.orchestration.portfolio_schema import ensure_portfolio_schema
 from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflow_schema
 from app.orchestration.realtime_lifecycle_schema import ensure_realtime_lifecycle_schema
 from app.orchestration.realtime_schema import ensure_realtime_schema
+from app.orchestration.selection_result_schema import ensure_selection_result_version_schema
 from app.orchestration.selection_run_schema import ensure_selection_run_schema
 from app.orchestration.sentiment_consistency_schema import ensure_sentiment_consistency_schema
 from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
@@ -110,6 +111,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0024", "neutral daily stock technical feature read model", ensure_stock_technical_feature_schema),
     Migration("0025", "durable API asynchronous task queue", ensure_durable_task_schema),
     Migration("0026", "realtime lifecycle source fingerprint schema", ensure_realtime_lifecycle_schema),
+    Migration("0027", "selection result strategy lineage and cross-version 14-day statistics", ensure_selection_result_version_schema),
 )
 
 

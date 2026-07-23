@@ -103,6 +103,7 @@ CORE_TABLE_DDL = [
         run_id VARCHAR(64) NOT NULL,
         trade_date DATE NOT NULL,
         strategy_id VARCHAR(64) NOT NULL,
+        strategy_version VARCHAR(32) NOT NULL,
         code VARCHAR(16) NOT NULL,
         score DECIMAL(20,8) DEFAULT NULL,
         rank_no INT DEFAULT NULL,

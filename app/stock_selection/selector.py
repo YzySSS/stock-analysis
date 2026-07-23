@@ -1729,6 +1729,7 @@ class StockSelector:
                     final_run_id,
                     final_trade_date,
                     item.get("strategy_id") or self.strategy_id,
+                    item.get("strategy_version") or self.strategy_meta.get("version"),
                     item.get("code"),
                     item.get("score"),
                     item.get("rank_no") or index,

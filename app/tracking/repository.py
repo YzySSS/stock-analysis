@@ -194,6 +194,7 @@ class TrackingRepository:
             sr.trade_date AS selection_date,
             sr.created_at AS selection_datetime,
             sr.strategy_id,
+            sr.strategy_version,
             sr.code,
             sr.score,
             COALESCE(sr.include_in_stats, 1) AS include_in_stats,
@@ -290,6 +291,7 @@ class TrackingRepository:
             sr.run_id,
             sr.trade_date,
             sr.strategy_id,
+            sr.strategy_version,
             MAX(sr.created_at) AS created_at,
             COUNT(*) AS item_count
         FROM selection_result sr
@@ -303,7 +305,10 @@ class TrackingRepository:
         if selection_date:
             sql += " AND sr.trade_date = %s"
             params.append(selection_date)
-        sql += " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id ORDER BY sr.trade_date DESC, created_at DESC LIMIT %s"
+        sql += (
+            " GROUP BY sr.run_id, sr.trade_date, sr.strategy_id, sr.strategy_version"
+            " ORDER BY sr.trade_date DESC, created_at DESC LIMIT %s"
+        )
         params.append(max(1, int(limit)))
         with self._read_connect() as conn:
             with conn.cursor() as cursor:
@@ -434,6 +439,7 @@ class TrackingRepository:
                     SELECT
                         sr.strategy_id,
                         MAX(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(sr.metadata_json, '$.strategy_display_name')), ''), sr.strategy_id)) AS strategy_display_name,
+                        GROUP_CONCAT(DISTINCT sr.strategy_version ORDER BY sr.strategy_version SEPARATOR ',') AS strategy_versions,
                         COUNT(*) AS item_count,
                         MAX(sr.created_at) AS last_created_at
                     FROM selection_result sr

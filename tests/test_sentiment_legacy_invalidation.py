@@ -68,7 +68,7 @@ class SentimentLegacyInvalidationTests(unittest.TestCase):
         for _, params in cursor.executed:
             self.assertEqual(params, ("a_share_sentiment", CURRENT_STRATEGY_VERSION))
 
-    def test_invalidation_is_recoverable_and_never_deletes_history(self):
+    def test_invalidation_labels_evidence_without_excluding_statistics(self):
         cursor = FakeCursor()
         cursor.rowcount = 136
 
@@ -78,7 +78,7 @@ class SentimentLegacyInvalidationTests(unittest.TestCase):
         sql, params = cursor.executed[0]
         self.assertIn("JSON_SET", sql)
         self.assertIn("legacy_include_in_stats_before_invalidation", sql)
-        self.assertIn("include_in_stats = 0", sql)
+        self.assertNotIn("include_in_stats = 0", sql)
         self.assertNotIn("DELETE", sql.upper())
         self.assertEqual(
             params,

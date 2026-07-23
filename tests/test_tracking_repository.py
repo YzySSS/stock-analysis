@@ -99,6 +99,43 @@ class FakeTracker:
 
 
 class TrackingRepositoryTests(unittest.TestCase):
+    def test_compact_tracking_record_keeps_strategy_version(self):
+        item = {
+            "code": "sh.600000",
+            "name": "浦发银行",
+            "strategy_id": "a_share_sentiment",
+            "strategy_version": "0.3.1",
+            "strategy_display_name": "A股舆情",
+        }
+
+        compact = tracking_route._compact_tracking_item(item)
+
+        self.assertEqual(compact["strategy_version"], "0.3.1")
+
+    def test_cross_version_strategy_summary_keeps_one_aggregate_and_lineage(self):
+        items = [
+            {
+                "code": "sh.600000",
+                "strategy_id": "a_share_sentiment",
+                "strategy_version": "0.3.1",
+                "strategy_display_name": "A股舆情",
+                "selection_date": "2026-07-21",
+            },
+            {
+                "code": "sz.000001",
+                "strategy_id": "a_share_sentiment",
+                "strategy_version": "0.4.4",
+                "strategy_display_name": "A股舆情",
+                "selection_date": "2026-07-22",
+            },
+        ]
+
+        summaries = tracking_route._build_strategy_summaries(items)
+
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["count"], 2)
+        self.assertEqual(summaries[0]["strategy_versions"], ["0.3.1", "0.4.4"])
+
     def test_expired_stats_update_uses_strict_fourteen_day_cutoff(self):
         factory = RecordingConnectionFactory()
         repository = TrackingRepository(connection_factory=factory)

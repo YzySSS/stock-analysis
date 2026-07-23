@@ -41,7 +41,9 @@ function statsToggleLabel(includeInStats, statsWindowExpired = false) {
 }
 
 function getStrategyLabel(item) {
-  return item?.strategy_display_name || item?.strategy_id || '-';
+  const label = item?.strategy_display_name || item?.strategy_id || '-';
+  const version = item?.strategy_version;
+  return version ? `${label} · ${version}` : label;
 }
 
 function summarizeStrategies(items = []) {
@@ -93,13 +95,14 @@ function getTradePlanBadgeClass(status = null) {
 function renderSummaryCard({ title, summary, strategyText, dateText }) {
   const best = summary.best_item;
   const worst = summary.worst_item;
+  const versionText = (summary.strategy_versions || []).join(' / ') || '-';
   return `
     <article class="strategy-item">
       <div class="strategy-item-head">
         <strong>${escapeHtml(title)}</strong>
         <span class="badge status-ok">${summary.count ?? 0} 条</span>
       </div>
-      <div class="muted">覆盖日期：${escapeHtml(dateText)} · 覆盖策略：${escapeHtml(strategyText)} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
+      <div class="muted">覆盖日期：${escapeHtml(dateText)} · 覆盖策略：${escapeHtml(strategyText)} · 策略版本：${escapeHtml(versionText)} · 仍在跟踪：${summary.tracking_count ?? 0} 条</div>
       <div class="muted">平均收益：${formatPercent(summary.avg_return_pct)} · 胜率：${formatPercent(summary.win_rate_pct)} · 超额收益：${formatPercent(summary.excess_return_pct)}</div>
       <div class="muted">最大浮盈：${formatPercent(summary.max_gain_pct)} · 最大回撤：${formatPercent(summary.max_drawdown_pct)}</div>
       <div class="muted">表现最好：${best ? `${escapeHtml(best.name || best.code || '-')} (${formatPercent(best.price_change_pct)})` : '暂无'}</div>
@@ -344,7 +347,8 @@ function renderStrategyOptions(options = [], selectedValue = '') {
   options.forEach((item) => {
     const option = document.createElement('option');
     option.value = item.strategy_id || '';
-    option.textContent = item.strategy_display_name || item.strategy_id || '';
+    const versions = (item.strategy_versions || []).join(' / ');
+    option.textContent = `${item.strategy_display_name || item.strategy_id || ''}${versions ? `（${versions}）` : ''}`;
     if (option.value === selectedValue) option.selected = true;
     select.appendChild(option);
   });
@@ -450,7 +454,7 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
         ? '当前显示该策略全部历史复盘列表'
         : '当前显示全部策略历史复盘列表';
   const excludedText = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
-  const retentionText = `；统计窗口为入选后 ${statsRetention.max_age_days || 14} 个自然日`;
+  const retentionText = `；统计窗口为入选后 ${statsRetention.max_age_days || 14} 个自然日，覆盖窗口内全部策略版本`;
   const autoExcludedText = statsRetention.auto_excluded_count
     ? `，本次自动排除 ${statsRetention.auto_excluded_count} 条到期记录`
     : '';
