@@ -7144,6 +7144,11 @@ body[data-page="home"] .home-market-timing-main.risk_on {
   background: linear-gradient(135deg, rgba(127, 29, 29, 0.18), rgba(6, 18, 32, 0.58));
 }
 
+body[data-page="home"] .home-market-timing-main.strong_risk_on {
+  border-color: rgba(251, 113, 133, 0.52);
+  background: linear-gradient(135deg, rgba(159, 18, 57, 0.25), rgba(6, 18, 32, 0.58));
+}
+
 body[data-page="home"] .home-market-timing-main.cautious {
   border-color: rgba(251, 191, 36, 0.34);
   background: linear-gradient(135deg, rgba(113, 63, 18, 0.16), rgba(6, 18, 32, 0.58));

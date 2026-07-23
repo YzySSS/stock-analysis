@@ -22,14 +22,23 @@ import akshare as ak
 import pandas as pd
 import tushare as ts
 
+from app.market_timing.calibration import (
+    DAILY_WEIGHTS,
+    MODEL_ID,
+    MODEL_NAME,
+    MODEL_VERSION,
+    calibrate_indicator_score,
+    compose_timing_state,
+    score_signal,
+    signal_label,
+)
 from app.shared.db import mysql_conn
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
 from app.shared.task_log import TaskRunLogger
 
 TASK_NAME = "market_timing_daily_update"
 LOCK_NAME = "market_timing_daily_update_lock"
-MODEL_ID = "huatai_multidim_v18"
-MODEL_NAME = "华泰四维择时 V1.8"
+TREND_INDEX_CODES = ("000300.SH", "000852.SH", "000688.SH")
 
 INDEX_OPTION_UNDERLYINGS = {
     "OP000300.SH": {"code": "000300.SH", "name": "沪深300"},
@@ -198,17 +207,11 @@ def _clamp(value: float, low: float = 0, high: float = 100) -> float:
 
 
 def _signal(score: float | None) -> int:
-    if score is None:
-        return 0
-    if score >= 65:
-        return 1
-    if score <= 40:
-        return -1
-    return 0
+    return score_signal(score)
 
 
 def _signal_label(signal: int) -> str:
-    return {1: "偏多", 0: "中性", -1: "偏空"}.get(signal, "未知")
+    return signal_label(signal)
 
 
 def _norm_cdf(value: float) -> float:
@@ -1075,10 +1078,75 @@ def _source_date_meta(row: dict[str, Any] | None, trade_date: str) -> dict[str, 
     return {"source_trade_date": source_date, "target_trade_date": trade_date, "fallback": "latest_close"}
 
 
+def _load_calibration_history(trade_date: str, limit: int = 120) -> dict[str, list[float]]:
+    queries = {
+        "iv_skew": (
+            """
+            SELECT skew_value AS value
+            FROM market_option_iv_skew_daily
+            WHERE underlying_code = 'ALL' AND trade_date <= %s AND skew_value IS NOT NULL
+            ORDER BY trade_date DESC
+            LIMIT %s
+            """,
+            (trade_date, limit),
+        ),
+        "futures_holding_net": (
+            """
+            SELECT net_holding_ratio AS value
+            FROM market_futures_holding_daily
+            WHERE symbol_family = 'ALL' AND trade_date <= %s AND net_holding_ratio IS NOT NULL
+            ORDER BY trade_date DESC
+            LIMIT %s
+            """,
+            (trade_date, limit),
+        ),
+    }
+    history: dict[str, list[float]] = {}
+    with mysql_conn() as conn:
+        with conn.cursor() as cursor:
+            for indicator_id, (sql, params) in queries.items():
+                cursor.execute(sql, params)
+                values = [
+                    float(row["value"])
+                    for row in reversed(cursor.fetchall() or [])
+                    if row.get("value") is not None
+                ]
+                history[indicator_id] = values
+    return history
+
+
+def _trend_component(rows: list[dict[str, Any]], trade_date: str) -> dict[str, Any] | None:
+    eligible = [
+        row
+        for row in rows
+        if (_iso_date(row.get("trade_date")) or "") <= trade_date and _float(row.get("close")) is not None
+    ]
+    if len(eligible) < 20:
+        return None
+    closes = [_float(row.get("close")) for row in eligible]
+    closes = [value for value in closes if value is not None]
+    if len(closes) < 20:
+        return None
+    close = closes[-1]
+    ma20 = mean(closes[-20:])
+    std20 = pstdev(closes[-20:]) if len(closes[-20:]) > 1 else 0
+    band_pos = ((close - ma20) / (2 * std20)) if std20 else 0.0
+    score = _clamp(50 + band_pos * 22 + (8 if close >= ma20 else -8))
+    return {
+        "trade_date": _iso_date(eligible[-1].get("trade_date")),
+        "close": close,
+        "ma20": ma20,
+        "std20": std20,
+        "band_pos": band_pos,
+        "score": score,
+    }
+
+
 def _build_indicators(
     trade_date: str,
     index_code: str,
     index_rows: list[dict[str, Any]],
+    trend_index_rows: dict[str, list[dict[str, Any]]],
     valuation_rows: list[dict[str, Any]],
     margin_rows: list[dict[str, Any]],
     option_pcr_rows: list[dict[str, Any]],
@@ -1088,6 +1156,7 @@ def _build_indicators(
     bond_yield: float | None,
     bond_meta: dict[str, Any],
     fetch_errors: list[str],
+    calibration_history: dict[str, list[float]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     indicators: list[dict[str, Any]] = []
     latest_index = _latest_by_date(index_rows, trade_date)
@@ -1097,7 +1166,6 @@ def _build_indicators(
     latest_futures_holding = next((row for row in futures_holding_rows if row.get("symbol_family") == "ALL"), None)
     latest_iv_skew = next((row for row in iv_skew_rows if row.get("underlying_code") == "ALL"), None)
     qvix_valid = [row for row in qvix_rows if _float(row.get("close")) is not None]
-    closes = [_float(row.get("close")) for row in index_rows if _float(row.get("close")) is not None]
     pe_values = [_float(row.get("pe_ttm") if row.get("pe_ttm") is not None else row.get("pe")) for row in valuation_rows]
     pe_values = [item for item in pe_values if item is not None and item > 0]
     margin_buy_values = [_float(row.get("rzmre")) for row in margin_rows]
@@ -1114,47 +1182,143 @@ def _build_indicators(
         meta: dict[str, Any] | None = None,
         status: str = "已接入",
     ) -> None:
-        sig = _signal(score)
+        metadata = dict(meta or {})
+        source_trade_date = _iso_date(metadata.get("source_trade_date"))
+        effective_score, calibration = calibrate_indicator_score(
+            indicator_id,
+            score,
+            value,
+            history_values=calibration_history.get(indicator_id, []),
+            source_status=status,
+            source_trade_date=source_trade_date,
+            target_trade_date=trade_date,
+        )
+        metadata["calibration"] = calibration
+        sig = _signal(effective_score)
         indicators.append(
             {
                 "trade_date": trade_date,
                 "index_code": index_code,
+                "model_id": MODEL_ID,
+                "version": MODEL_VERSION,
                 "dimension": dimension,
                 "indicator_id": indicator_id,
                 "indicator_name": name,
                 "value": _round(value, 6),
                 "value_label": value_label,
-                "score": _round(score, 4),
+                "score": _round(effective_score, 4),
                 "signal": sig,
                 "signal_label": _signal_label(sig),
                 "source_status": status,
                 "source": source,
-                "metadata_json": meta or {},
+                "metadata_json": metadata,
             }
         )
 
-    if latest_index and len(closes) >= 20:
-        close = _float(latest_index.get("close"))
-        ma20 = mean(closes[-20:])
-        std20 = pstdev(closes[-20:]) if len(closes[-20:]) > 1 else 0
-        band_pos = ((close - ma20) / (2 * std20)) if close is not None and std20 else 0
-        score = _clamp(50 + band_pos * 22 + (8 if close is not None and close >= ma20 else -8))
-        add("technical", "index_bollinger", "指数布林带", band_pos, f"{band_pos:.2f}σ", score, "tushare.index_daily", {"close": close, "ma20": ma20, "std20": std20})
+    primary_trend = _trend_component(index_rows, trade_date)
+    if latest_index and primary_trend:
+        add(
+            "technical",
+            "index_bollinger",
+            "沪深300布林带",
+            primary_trend["band_pos"],
+            f"{primary_trend['band_pos']:.2f}σ",
+            primary_trend["score"],
+            "tushare.index_daily",
+            {
+                "close": primary_trend["close"],
+                "ma20": primary_trend["ma20"],
+                "std20": primary_trend["std20"],
+                "source_trade_date": primary_trend["trade_date"],
+                "target_trade_date": trade_date,
+            },
+            "已接入" if primary_trend["trade_date"] == trade_date else "沿用最近收盘",
+        )
     else:
         add("technical", "index_bollinger", "指数布林带", None, "-", None, "tushare.index_daily", {"reason": "指数日线不足 20 条"}, "待数据")
 
+    multi_components: list[dict[str, Any]] = []
+    for trend_code in TREND_INDEX_CODES:
+        component = _trend_component(trend_index_rows.get(trend_code, []), trade_date)
+        if component:
+            multi_components.append({"index_code": trend_code, **component})
+    if len(multi_components) >= 2:
+        multi_score = mean(component["score"] for component in multi_components)
+        multi_band_pos = mean(component["band_pos"] for component in multi_components)
+        component_dates = [str(component["trade_date"]) for component in multi_components]
+        oldest_component_date = min(component_dates)
+        add(
+            "technical",
+            "multi_index_trend",
+            "多指数趋势确认",
+            multi_band_pos,
+            " / ".join(
+                f"{component['index_code']} {component['score']:.1f}"
+                for component in multi_components
+            ),
+            multi_score,
+            "tushare.index_daily",
+            {
+                "components": multi_components,
+                "source_trade_date": oldest_component_date,
+                "target_trade_date": trade_date,
+            },
+            "已接入" if all(item == trade_date for item in component_dates) else "沿用最近收盘",
+        )
+    else:
+        add(
+            "technical",
+            "multi_index_trend",
+            "多指数趋势确认",
+            None,
+            "-",
+            None,
+            "tushare.index_daily",
+            {"reason": "沪深300、中证1000、科创50中可用指数少于两个"},
+            "待数据",
+        )
+
     pe_ttm = _float((latest_val or {}).get("pe_ttm")) or _float((latest_val or {}).get("pe"))
-    pe_pct = _percentile(pe_values, pe_ttm)
+    pe_pct = _percentile(pe_values[-252:], pe_ttm)
     if pe_ttm is not None and pe_pct is not None:
         score = _clamp(100 - pe_pct * 100)
-        add("valuation", "index_pe_percentile", "指数估值分位", pe_pct, f"PE_TTM {pe_ttm:.2f} / 分位 {pe_pct * 100:.1f}%", score, "tushare.index_dailybasic", {"pe_ttm": pe_ttm, "sample_count": len(pe_values)})
+        add(
+            "valuation",
+            "index_pe_percentile",
+            "指数估值分位",
+            pe_pct,
+            f"PE_TTM {pe_ttm:.2f} / 分位 {pe_pct * 100:.1f}%",
+            score,
+            "tushare.index_dailybasic",
+            {
+                "pe_ttm": pe_ttm,
+                "sample_count": min(len(pe_values), 252),
+                **_source_date_meta(latest_val, trade_date),
+            },
+            _source_status_for_row(latest_val, trade_date),
+        )
     else:
         add("valuation", "index_pe_percentile", "指数估值分位", None, "-", None, "tushare.index_dailybasic", {"reason": "指数估值数据为空"}, "待数据")
 
     if pe_ttm and bond_yield is not None and pe_ttm > 0:
         erp = 100 / pe_ttm - bond_yield
         score = _clamp(50 + (erp - 2.5) * 18)
-        add("valuation", "erp", "ERP/风险溢价", erp, f"{erp:.2f}%", score, "tushare.index_dailybasic+tushare.yc_cb+akshare.bond_china_yield", {"pe_ttm": pe_ttm, "bond_yield": bond_yield, "bond_meta": bond_meta})
+        add(
+            "valuation",
+            "erp",
+            "ERP/风险溢价",
+            erp,
+            f"{erp:.2f}%",
+            score,
+            "tushare.index_dailybasic+tushare.yc_cb+akshare.bond_china_yield",
+            {
+                "pe_ttm": pe_ttm,
+                "bond_yield": bond_yield,
+                "bond_meta": bond_meta,
+                **_source_date_meta(latest_val, trade_date),
+            },
+            _source_status_for_row(latest_val, trade_date),
+        )
     else:
         add("valuation", "erp", "ERP/风险溢价", None, "-", None, "tushare.index_dailybasic+tushare.yc_cb+akshare.bond_china_yield", {"reason": "缺 PE_TTM 或十年国债收益率", "bond_meta": bond_meta}, "待数据")
 
@@ -1163,7 +1327,17 @@ def _build_indicators(
         avg20 = mean(margin_buy_values[-20:]) if margin_buy_values else None
         ratio = (rzmre / avg20 - 1) if rzmre is not None and avg20 else None
         score = _clamp(50 + (ratio or 0) * 80)
-        add("capital", "margin_buy_ratio", "融资买入额", ratio, f"较20日均值 {(ratio or 0) * 100:.1f}%", score, "tushare.margin", {"rzmre": rzmre, "avg20": avg20})
+        add(
+            "capital",
+            "margin_buy_ratio",
+            "融资买入额",
+            ratio,
+            f"较20日均值 {(ratio or 0) * 100:.1f}%",
+            score,
+            "tushare.margin",
+            {"rzmre": rzmre, "avg20": avg20, **_source_date_meta(latest_margin, trade_date)},
+            _source_status_for_row(latest_margin, trade_date),
+        )
     else:
         add("capital", "margin_buy_ratio", "融资买入额", None, "-", None, "tushare.margin", {"reason": "两融数据为空"}, "待数据")
 
@@ -1223,6 +1397,10 @@ def _build_indicators(
             avg_qvix = mean([_float(row.get("close")) or 0 for row in qvix_valid])
             avg_pct = mean([item["percentile_252"] for item in qvix_meta if item.get("percentile_252") is not None]) if any(item.get("percentile_252") is not None for item in qvix_meta) else None
             score = mean(qvix_scores)
+            qvix_source_date = max(
+                (_iso_date(row.get("trade_date")) or "")
+                for row in qvix_valid
+            ) or None
             add(
                 "sentiment",
                 "qvix_volatility",
@@ -1231,7 +1409,12 @@ def _build_indicators(
                 f"均值 {avg_qvix:.2f}" + (f" / 分位 {avg_pct * 100:.1f}%" if avg_pct is not None else ""),
                 score,
                 "akshare.qvix",
-                {"items": qvix_meta},
+                {
+                    "items": qvix_meta,
+                    "source_trade_date": qvix_source_date,
+                    "target_trade_date": trade_date,
+                },
+                "已接入" if qvix_source_date == trade_date else "沿用最近收盘",
             )
         else:
             add("sentiment", "qvix_volatility", "QVIX 波动率", None, "-", None, "akshare.qvix", {"reason": "QVIX 分数为空"}, "待数据")
@@ -1310,6 +1493,7 @@ def _build_indicators(
 
     coverage = {
         "index_daily": "已接入" if latest_index else "待数据",
+        "multi_index_trend": "已接入" if len(multi_components) >= 2 else "待数据",
         "index_dailybasic": "已接入" if latest_val else "待数据",
         "margin": "已接入" if latest_margin else "待数据",
         "option_pcr": _source_status_for_row(latest_option_pcr, trade_date),
@@ -1327,11 +1511,11 @@ def _build_indicators(
 def _save_indicators(indicators: list[dict[str, Any]]) -> None:
     sql = """
     INSERT INTO market_timing_indicator_daily (
-        trade_date, index_code, dimension, indicator_id, indicator_name, value, value_label,
+        trade_date, index_code, model_id, version, dimension, indicator_id, indicator_name, value, value_label,
         score, signal_value, signal_label, source_status, source, metadata_json
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON DUPLICATE KEY UPDATE
-        dimension=VALUES(dimension), indicator_name=VALUES(indicator_name), value=VALUES(value),
+        version=VALUES(version), dimension=VALUES(dimension), indicator_name=VALUES(indicator_name), value=VALUES(value),
         value_label=VALUES(value_label), score=VALUES(score), signal_value=VALUES(signal_value),
         signal_label=VALUES(signal_label), source_status=VALUES(source_status),
         source=VALUES(source), metadata_json=VALUES(metadata_json)
@@ -1340,6 +1524,8 @@ def _save_indicators(indicators: list[dict[str, Any]]) -> None:
         (
             item["trade_date"],
             item["index_code"],
+            item.get("model_id") or MODEL_ID,
+            item.get("version") or MODEL_VERSION,
             item["dimension"],
             item["indicator_id"],
             item["indicator_name"],
@@ -1360,45 +1546,40 @@ def _save_indicators(indicators: list[dict[str, Any]]) -> None:
 
 
 def _save_signal(trade_date: str, index_code: str, indicators: list[dict[str, Any]], coverage: dict[str, Any]) -> dict[str, Any]:
+    composition = compose_timing_state(indicators, weights=DAILY_WEIGHTS)
     valid = [item for item in indicators if item.get("score") is not None]
-    weights = {
-        "index_bollinger": 0.16,
-        "index_pe_percentile": 0.14,
-        "erp": 0.14,
-        "margin_buy_ratio": 0.14,
-        "option_pcr": 0.08,
-        "qvix_volatility": 0.08,
-        "iv_skew": 0.08,
-        "futures_holding_net": 0.08,
-        "up_down_amount_pressure": 0.10,
-    }
-    total_weight = sum(weights.get(item["indicator_id"], 0) for item in valid)
-    score = (
-        sum((item["score"] or 50) * weights.get(item["indicator_id"], 0) for item in valid) / total_weight
-        if total_weight
-        else 50
-    )
-    signals = [int(item.get("signal") or 0) for item in valid]
-    vote_sum = sum(signals)
-    if score >= 63 and vote_sum >= 1:
-        state = "risk_on"
-        state_label = "正常开仓"
-        position_upper = 0.8
-    elif score <= 42 or vote_sum <= -2:
-        state = "defensive"
-        state_label = "防守观望"
-        position_upper = 0.15
-    else:
-        state = "cautious"
-        state_label = "谨慎试探"
-        position_upper = 0.45
-    confidence = min(1.0, total_weight)
-    reasons = [f"{item['indicator_name']} {item['score']:.1f}分，{item['signal_label']}" for item in valid[:8]]
+    reasons = [
+        f"{item['dimension_label']} {item['score']:.1f}分，{item['signal_label']}"
+        for item in composition["dimensions"]
+    ]
     risk_notes = []
     if coverage.get("bond_yield_10y") != "已接入":
         risk_notes.append("十年国债收益率未接入，ERP 暂不参与总分")
-    if confidence < 0.75:
+    if coverage.get("multi_index_trend") != "已接入":
+        risk_notes.append("多指数趋势覆盖不足，趋势维度按现有宽基降级")
+    if composition["confidence"] < 0.75:
         risk_notes.append("部分因子缺数据，择时置信度降低")
+    stale_count = sum(1 for item in valid if item.get("source_status") == "沿用最近收盘")
+    if stale_count:
+        risk_notes.append(f"{stale_count} 个因子沿用最近收盘，已进行时效衰减")
+    limited_calibration = []
+    for item in valid:
+        calibration = (item.get("metadata_json") or {}).get("calibration") or {}
+        if item.get("indicator_id") in {"iv_skew", "futures_holding_net"} and int(calibration.get("history_count") or 0) < 40:
+            limited_calibration.append(str(item.get("indicator_name") or item.get("indicator_id")))
+    if limited_calibration:
+        risk_notes.append(f"{'、'.join(limited_calibration)}历史不足40日，滚动校准仍采用渐进置信度")
+
+    coverage_payload = dict(coverage)
+    coverage_payload.update(
+        {
+            "model_id": MODEL_ID,
+            "version": MODEL_VERSION,
+            "dimension_vote_sum": composition["dimension_vote_sum"],
+            "dimension_scores": composition["dimension_scores"],
+            "dimension_signals": composition["dimension_signals"],
+        }
+    )
 
     sql = """
     INSERT INTO market_timing_signal_daily (
@@ -1418,16 +1599,18 @@ def _save_signal(trade_date: str, index_code: str, indicators: list[dict[str, An
         "index_code": index_code,
         "model_id": MODEL_ID,
         "model_name": MODEL_NAME,
-        "version": "v1.8",
-        "combined_signal": 1 if state == "risk_on" else -1 if state == "defensive" else 0,
-        "timing_score": round(score, 2),
-        "state": state,
-        "state_label": state_label,
-        "position_upper": position_upper,
-        "confidence": round(confidence, 4),
+        "version": MODEL_VERSION,
+        "combined_signal": composition["combined_signal"],
+        "timing_score": composition["timing_score"],
+        "state": composition["state"],
+        "state_label": composition["state_label"],
+        "position_upper": composition["position_upper"],
+        "confidence": composition["confidence"],
         "reasons": reasons,
         "risk_notes": risk_notes,
-        "coverage": coverage,
+        "coverage": coverage_payload,
+        "dimensions": composition["dimensions"],
+        "dimension_vote_sum": composition["dimension_vote_sum"],
     }
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
@@ -1438,17 +1621,17 @@ def _save_signal(trade_date: str, index_code: str, indicators: list[dict[str, An
                     index_code,
                     MODEL_ID,
                     MODEL_NAME,
-                    "v1.8",
+                    MODEL_VERSION,
                     payload["combined_signal"],
                     payload["timing_score"],
-                    state,
-                    state_label,
-                    position_upper,
+                    payload["state"],
+                    payload["state_label"],
+                    payload["position_upper"],
                     payload["confidence"],
                     json.dumps(reasons, ensure_ascii=False),
                     json.dumps(risk_notes, ensure_ascii=False),
-                    json.dumps(coverage, ensure_ascii=False, default=str),
-                    "market_timing_v18_sources",
+                    json.dumps(coverage_payload, ensure_ascii=False, default=str),
+                    "market_timing_v19_calibrated_sources",
                 ),
             )
     return payload
@@ -1489,6 +1672,9 @@ def main() -> None:
         run_metadata = {
             "trade_date": trade_date,
             "index_code": args.index_code,
+            "trend_index_codes": list(dict.fromkeys((args.index_code, *TREND_INDEX_CODES))),
+            "model_id": MODEL_ID,
+            "version": MODEL_VERSION,
             "lookback_days": args.lookback_days,
             "source_timeout_seconds": args.source_timeout_seconds,
             "total_timeout_seconds": args.total_timeout_seconds,
@@ -1505,10 +1691,18 @@ def main() -> None:
                 total_deadline=total_deadline,
             )
 
-        index_rows, error = safe_call("index_daily", lambda: _fetch_index_daily(pro, args.index_code, start_date, trade_date))
-        if error:
-            fetch_errors.append(error)
-            index_rows = []
+        trend_index_rows: dict[str, list[dict[str, Any]]] = {}
+        trend_codes = tuple(dict.fromkeys((args.index_code, *TREND_INDEX_CODES)))
+        for trend_code in trend_codes:
+            rows, error = safe_call(
+                f"index_daily:{trend_code}",
+                lambda code=trend_code: _fetch_index_daily(pro, code, start_date, trade_date),
+            )
+            if error:
+                fetch_errors.append(error)
+                rows = []
+            trend_index_rows[trend_code] = rows or []
+        index_rows = trend_index_rows.get(args.index_code, [])
         valuation_rows, error = safe_call("index_dailybasic", lambda: _fetch_index_valuation(pro, args.index_code, start_date, trade_date))
         if error:
             fetch_errors.append(error)
@@ -1545,7 +1739,13 @@ def main() -> None:
             bond_yield, bond_meta = bond_result or (None, {})
 
         _ensure_total_deadline(total_deadline)
-        _save_index_daily(index_rows)
+        _save_index_daily(
+            [
+                row
+                for rows in trend_index_rows.values()
+                for row in rows
+            ]
+        )
         _save_index_valuation(valuation_rows)
         margin_rows = _save_margin(margin_source_rows)
         option_pcr_rows = _save_option_pcr(trade_date, option_rows, option_basic)
@@ -1568,11 +1768,13 @@ def main() -> None:
             futures_holding_rows = _load_recent_futures_holding_rows(trade_date)
         if not iv_skew_rows:
             iv_skew_rows = _load_recent_iv_skew_rows(trade_date)
+        calibration_history = _load_calibration_history(trade_date)
         _ensure_total_deadline(total_deadline)
         indicators, coverage = _build_indicators(
             trade_date,
             args.index_code,
             index_rows,
+            trend_index_rows,
             valuation_rows,
             margin_rows,
             option_pcr_rows,
@@ -1582,6 +1784,7 @@ def main() -> None:
             bond_yield,
             bond_meta,
             fetch_errors,
+            calibration_history,
         )
         _save_indicators(indicators)
         payload = _save_signal(trade_date, args.index_code, indicators, coverage)

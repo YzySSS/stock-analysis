@@ -161,6 +161,8 @@ DDL = [
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         trade_date DATE NOT NULL,
         index_code VARCHAR(16) NOT NULL DEFAULT '000300.SH',
+        model_id VARCHAR(64) NOT NULL DEFAULT 'huatai_multidim_v18',
+        version VARCHAR(32) NOT NULL DEFAULT 'v1.8',
         dimension VARCHAR(32) NOT NULL,
         indicator_id VARCHAR(64) NOT NULL,
         indicator_name VARCHAR(128) NOT NULL,
@@ -174,8 +176,9 @@ DDL = [
         metadata_json JSON DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_market_timing_indicator (trade_date, index_code, indicator_id),
+        UNIQUE KEY uniq_market_timing_indicator (trade_date, index_code, model_id, indicator_id),
         KEY idx_market_timing_indicator_date (trade_date),
+        KEY idx_market_timing_indicator_model_date (model_id, index_code, trade_date),
         KEY idx_market_timing_indicator_dimension (dimension)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,

@@ -24,6 +24,7 @@ from app.orchestration.market_fund_flow_schema import ensure_market_fund_flow_sc
 from app.orchestration.market_opinion_schema import ensure_market_opinion_schema
 from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 from app.orchestration.market_timing_schema import ensure_market_timing_schema
+from app.orchestration.market_timing_v19_schema import ensure_market_timing_v19_schema
 from app.orchestration.portfolio_schema import ensure_portfolio_schema
 from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflow_schema
 from app.orchestration.realtime_lifecycle_schema import ensure_realtime_lifecycle_schema
@@ -114,6 +115,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0026", "realtime lifecycle source fingerprint schema", ensure_realtime_lifecycle_schema),
     Migration("0027", "selection result strategy lineage and cross-version 14-day statistics", ensure_selection_result_version_schema),
     Migration("0028", "automatic paired strategy observation campaign schema", ensure_automatic_observation_schema),
+    Migration("0029", "market timing V1.9 versioned indicator schema", ensure_market_timing_v19_schema),
 )
 
 

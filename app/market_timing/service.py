@@ -3,6 +3,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.market_timing.calibration import (
+    ACTION_LABELS,
+    MODEL_ID,
+    MODEL_NAME,
+    MODEL_VERSION,
+    REALTIME_WEIGHTS,
+    compose_timing_state,
+)
 from app.shared.db import mysql_conn
 
 
@@ -102,8 +110,10 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
                     """
                     SELECT *
                     FROM market_timing_signal_daily
-                    WHERE index_code = %s AND model_id = 'huatai_multidim_v18'
-                    ORDER BY trade_date DESC
+                    WHERE index_code = %s
+                      AND model_id IN ('huatai_multidim_v19', 'huatai_multidim_v18')
+                    ORDER BY trade_date DESC,
+                             FIELD(model_id, 'huatai_multidim_v19', 'huatai_multidim_v18')
                     LIMIT 1
                     """,
                     (index_code,),
@@ -115,9 +125,10 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
                     """
                     SELECT *
                     FROM market_timing_indicator_daily
-                    WHERE trade_date = %s AND index_code = %s
+                    WHERE trade_date = %s AND index_code = %s AND model_id = %s
                     ORDER BY FIELD(indicator_id,
                         'index_bollinger',
+                        'multi_index_trend',
                         'index_pe_percentile',
                         'erp',
                         'margin_buy_ratio',
@@ -128,7 +139,7 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
                         'up_down_amount_pressure'
                     ), indicator_id
                     """,
-                    (signal_row.get("trade_date"), index_code),
+                    (signal_row.get("trade_date"), index_code, signal_row.get("model_id")),
                 )
                 indicator_rows = cursor.fetchall() or []
     except Exception:
@@ -140,6 +151,7 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
     signals = []
     article_dimensions = {
         "index_bollinger": "技术/指数布林带",
+        "multi_index_trend": "技术/多指数趋势",
         "index_pe_percentile": "估值/指数 PE 分位",
         "erp": "估值/ERP 风险溢价",
         "margin_buy_ratio": "资金/融资买入额",
@@ -174,13 +186,12 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
     state = signal_row.get("state") or "cautious"
     state_label = signal_row.get("state_label") or "谨慎试探"
     action_label = {
-        "risk_on": "选股可正常执行，回测可按标准仓位观察",
-        "defensive": "不建议新增重仓，选股结果以观察为主",
-        "cautious": "可小仓验证，等待市场扩散或回踩确认",
+        **ACTION_LABELS,
     }.get(state, "等待更多择时因子确认")
 
     coverage_items = [
         {"dimension": "技术", "factor": "指数布林带", "status": coverage.get("index_daily", "待数据"), "reason": "Tushare index_daily"},
+        {"dimension": "技术", "factor": "多指数趋势确认", "status": coverage.get("multi_index_trend", "待数据"), "reason": "沪深300 + 中证1000 + 科创50"},
         {"dimension": "估值", "factor": "指数 PE 分位", "status": coverage.get("index_dailybasic", "待数据"), "reason": "Tushare index_dailybasic"},
         {"dimension": "估值", "factor": "ERP/风险溢价", "status": coverage.get("bond_yield_10y", coverage.get("yc_cb", "待数据")), "reason": "Tushare yc_cb 或 AkShare 中债 10 年收益率"},
         {"dimension": "资金", "factor": "融资买入额", "status": coverage.get("margin", "待数据"), "reason": "Tushare margin"},
@@ -193,8 +204,8 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
 
     return {
         "model_id": signal_row.get("model_id"),
-        "model_name": signal_row.get("model_name") or "华泰四维择时 V1.8",
-        "version": signal_row.get("version") or "v1.8",
+        "model_name": signal_row.get("model_name") or MODEL_NAME,
+        "version": signal_row.get("version") or MODEL_VERSION,
         "source": signal_row.get("source"),
         "as_of": str(signal_row.get("trade_date")) if signal_row.get("trade_date") else None,
         "trade_date": str(signal_row.get("trade_date")) if signal_row.get("trade_date") else None,
@@ -205,14 +216,17 @@ def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any
         "position_upper": position_upper,
         "position_upper_pct": round(position_upper * 100, 0) if position_upper is not None else None,
         "confidence": _to_float(signal_row.get("confidence")),
+        "dimension_scores": coverage.get("dimension_scores") or {},
+        "dimension_signals": coverage.get("dimension_signals") or {},
+        "dimension_vote_sum": coverage.get("dimension_vote_sum"),
         "action_label": action_label,
         "signals": signals,
         "article_factor_coverage": coverage_items,
         "reasons": reasons,
         "risk_notes": risk_notes,
         "limitations": [
-            "V1.8 已接入指数、估值、ERP、两融、期权 PCR、QVIX、自算 IV 偏斜、股指期货持仓和本地微观成交额因子",
-            "IV 偏斜当前为 CFFEX 指数期权研究口径，后续可扩 ETF 期权和更严格 delta skew",
+            "V1.9 已对结构性期货净持仓和 IV 偏斜做滚动基准校准，并按趋势、估值、资金、衍生品情绪和市场宽度五个维度合成",
+            "多指数趋势使用沪深300、中证1000和科创50；衍生品因子历史仍在自然扩充",
             "该信号用于研究和仓位约束，不代表实盘买卖建议",
         ],
     }
@@ -365,46 +379,11 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
             },
         )
 
-    weights = {
-        "index_bollinger": 0.12,
-        "index_pe_percentile": 0.12,
-        "erp": 0.12,
-        "margin_buy_ratio": 0.10,
-        "option_pcr": 0.06,
-        "qvix_volatility": 0.07,
-        "iv_skew": 0.07,
-        "futures_holding_net": 0.07,
-        "up_down_amount_pressure": 0.09,
-        "intraday_market_strength": 0.10,
-        "intraday_breadth": 0.06,
-        "intraday_limit_emotion": 0.02,
-    }
-    valid = [item for item in signals if item.get("score") is not None]
-    total_weight = sum(weights.get(item.get("indicator_id"), 0) for item in valid)
-    timing_score = (
-        sum((_to_float(item.get("score")) or 50) * weights.get(item.get("indicator_id"), 0) for item in valid) / total_weight
-        if total_weight
-        else stored_signal.get("timing_score")
-    )
-    vote_sum = sum(int(item.get("signal") or 0) for item in valid)
-    if timing_score is not None and timing_score >= 63 and vote_sum >= 1:
-        state = "risk_on"
-        state_label = "正常开仓"
-        position_upper = 0.8
-    elif timing_score is not None and (timing_score <= 42 or vote_sum <= -2):
-        state = "defensive"
-        state_label = "防守观望"
-        position_upper = 0.15
-    else:
-        state = "cautious"
-        state_label = "谨慎试探"
-        position_upper = 0.45
-
-    action_label = {
-        "risk_on": "选股可正常执行，回测可按标准仓位观察",
-        "defensive": "不建议新增重仓，选股结果以观察为主",
-        "cautious": "可小仓验证，等待市场扩散或回踩确认",
-    }[state]
+    composition = compose_timing_state(signals, weights=REALTIME_WEIGHTS)
+    state = composition["state"]
+    state_label = composition["state_label"]
+    position_upper = composition["position_upper"]
+    action_label = composition["action_label"]
     reasons = list(stored_signal.get("reasons") or [])
     realtime_reason = f"盘中上涨/下跌成交额差 {value_label}，{_signal_label(signal_value)}"
     if market_strength is not None:
@@ -427,12 +406,17 @@ def _refresh_stored_with_realtime_overview(stored_signal: dict[str, Any], overvi
             "trade_date": realtime_trade_date,
             "state": state,
             "state_label": state_label,
-            "timing_score": round(float(timing_score), 2) if timing_score is not None else None,
-            "combined_signal": 1 if state == "risk_on" else -1 if state == "defensive" else 0,
+            "timing_score": composition["timing_score"],
+            "combined_signal": composition["combined_signal"],
             "position_upper": position_upper,
             "position_upper_pct": round(position_upper * 100, 0),
+            "confidence": composition["confidence"],
             "action_label": action_label,
             "signals": signals,
+            "dimensions": composition["dimensions"],
+            "dimension_scores": composition["dimension_scores"],
+            "dimension_signals": composition["dimension_signals"],
+            "dimension_vote_sum": composition["dimension_vote_sum"],
             "reasons": reasons[:8],
             "risk_notes": risk_notes[:4],
         }
@@ -485,21 +469,26 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
         raw_score += max(min(amount_weighted_pct_chg, 3), -3) * 2.2
     score = round(_clamp(raw_score), 1)
 
-    if score >= 64 and vote_sum >= 2:
+    if score >= 75 and vote_sum >= 3:
+        state = "strong_risk_on"
+        state_label = "积极进攻"
+        position_upper = 1.0
+        action_label = ACTION_LABELS[state]
+    elif score >= 60 and vote_sum >= 2:
         state = "risk_on"
         state_label = "正常开仓"
         position_upper = 0.8
-        action_label = "选股可正常执行，回测可按标准仓位观察"
+        action_label = ACTION_LABELS[state]
     elif score <= 42 or vote_sum <= -2:
         state = "defensive"
         state_label = "防守观望"
         position_upper = 0.15
-        action_label = "不建议新增重仓，选股结果以观察为主"
+        action_label = ACTION_LABELS[state]
     else:
         state = "cautious"
         state_label = "谨慎试探"
         position_upper = 0.45
-        action_label = "可小仓验证，等待市场扩散或回踩确认"
+        action_label = ACTION_LABELS[state]
 
     reasons: list[str] = []
     if market_strength is not None:
@@ -527,7 +516,7 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
         "state": state,
         "state_label": state_label,
         "timing_score": score,
-        "combined_signal": 1 if state == "risk_on" else -1 if state == "defensive" else 0,
+        "combined_signal": 1 if state in {"strong_risk_on", "risk_on"} else -1 if state == "defensive" else 0,
         "position_upper": position_upper,
         "position_upper_pct": round(position_upper * 100, 0),
         "action_label": action_label,
