@@ -174,7 +174,10 @@ class AuthBoundaryTests(unittest.TestCase):
         self.assertIn('autocomplete="username"', login_page)
         self.assertIn('autocomplete="current-password"', login_page)
         self.assertIn("X-CSRF-Token", common_js)
-        self.assertIn("退出登录", common_js)
+        self.assertIn("'/api/auth/session'", common_js)
+        self.assertIn("data-session-username", common_js)
+        self.assertIn('aria-label="退出登录"', common_js)
+        self.assertIn("session-logout", common_js)
         self.assertIn("window.location.replace(currentLoginUrl())", common_js)
 
     def test_all_product_pages_pin_the_authenticated_common_script(self):
@@ -192,7 +195,7 @@ class AuthBoundaryTests(unittest.TestCase):
         }
         for filename in product_pages:
             source = (pages_dir / filename).read_text(encoding="utf-8")
-            self.assertIn("/static/js/common.js?v=20260723auth1", source)
+            self.assertIn("/static/js/common.js?v=20260723auth2", source)
 
 
 class AuthHttpIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -353,6 +356,14 @@ class AuthHttpIntegrationTests(unittest.IsolatedAsyncioTestCase):
             headers={"Cookie": cookie_header},
         )
         self.assertEqual(status, 200)
+
+        status, _, body = await self._request(
+            "GET",
+            "/api/auth/session",
+            headers={"Cookie": cookie_header},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["username"], "dax")
 
         status, _, body = await self._request(
             "POST",

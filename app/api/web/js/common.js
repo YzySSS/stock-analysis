@@ -134,23 +134,31 @@ function bindGlobalStockSearch() {
   bindStockQuickSearch('[data-global-stock-search-input]', '[data-global-stock-search-btn]');
 }
 
-function bindLogoutControl() {
-  const sidebar = qs('.sidebar');
-  if (!sidebar || sidebar.querySelector('[data-logout-control]')) return;
+async function bindLogoutControl() {
+  if (document.querySelector('[data-logout-control]')) return;
 
   const wrapper = document.createElement('div');
-  wrapper.className = 'sidebar-auth';
+  wrapper.className = 'session-dock';
   wrapper.dataset.logoutControl = 'true';
   wrapper.innerHTML = `
-    <span class="sidebar-auth-label">已安全登录</span>
-    <button class="sidebar-logout" type="button">退出登录</button>
+    <div class="session-user" title="当前登录用户">
+      <span class="session-avatar" data-session-avatar aria-hidden="true">U</span>
+      <span class="session-username" data-session-username>已登录</span>
+    </div>
+    <button class="session-logout" type="button" aria-label="退出登录" title="退出登录">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M10 5H6.8A1.8 1.8 0 0 0 5 6.8v10.4A1.8 1.8 0 0 0 6.8 19H10" />
+        <path d="M14 8l4 4-4 4M18 12H9" />
+      </svg>
+    </button>
   `;
-  sidebar.appendChild(wrapper);
+  document.body.appendChild(wrapper);
 
-  wrapper.querySelector('.sidebar-logout').addEventListener('click', async (event) => {
+  wrapper.querySelector('.session-logout').addEventListener('click', async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
-    button.textContent = '正在退出…';
+    button.classList.add('is-busy');
+    button.title = '正在退出';
     try {
       const response = await fetch('/logout', {
         method: 'POST',
@@ -161,9 +169,19 @@ function bindLogoutControl() {
       window.location.replace('/login');
     } catch (error) {
       button.disabled = false;
-      button.textContent = '重试退出';
+      button.classList.remove('is-busy');
+      button.title = '退出失败，点击重试';
     }
   });
+
+  try {
+    const session = await fetchJson('/api/auth/session');
+    const username = String(session.username || '已登录');
+    wrapper.querySelector('[data-session-username]').textContent = username;
+    wrapper.querySelector('[data-session-avatar]').textContent = username.slice(0, 1).toUpperCase();
+  } catch (error) {
+    wrapper.querySelector('[data-session-username]').textContent = '已登录';
+  }
 }
 
 function ensureTooltip() {
