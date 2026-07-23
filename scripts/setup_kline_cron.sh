@@ -43,8 +43,8 @@ DATA_QUALITY_JOB="0 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON
 45 18 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_data_quality_audit.py >> $LOG_DIR/data_quality_audit.log 2>&1"
 MARKET_OPINION_JOB="*/15 9-15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_opinion_update.py --lookback-days 30 --sleep-seconds 0.5 >> $LOG_DIR/market_opinion_update.log 2>&1"
 MARKET_OPINION_LIFECYCLE_JOB="5 16 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_opinion_lifecycle.py --apply >> $LOG_DIR/market_opinion_lifecycle.log 2>&1"
-SENTIMENT_SNAPSHOT_JOB="7,22,37,52 9-14 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/materialize_sentiment_candidate_snapshot.py >> $LOG_DIR/sentiment_candidate_snapshot_materialize.log 2>&1
-2 15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/materialize_sentiment_candidate_snapshot.py >> $LOG_DIR/sentiment_candidate_snapshot_materialize.log 2>&1
+SENTIMENT_SNAPSHOT_JOB="7,22,37,52 9-14 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/materialize_sentiment_candidate_snapshot.py --dual-run >> $LOG_DIR/sentiment_candidate_snapshot_materialize.log 2>&1
+2 15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/materialize_sentiment_candidate_snapshot.py --dual-run >> $LOG_DIR/sentiment_candidate_snapshot_materialize.log 2>&1
 55 18 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/materialize_sentiment_candidate_snapshot.py >> $LOG_DIR/sentiment_candidate_snapshot_materialize.log 2>&1"
 OPERATIONAL_READ_MODELS_JOB="4-59/5 9-15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/refresh_operational_read_models.py --models realtime-rank,operational-status >> $LOG_DIR/operational_read_models_refresh.log 2>&1
 0 19 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/refresh_operational_read_models.py --models all >> $LOG_DIR/operational_read_models_refresh.log 2>&1"

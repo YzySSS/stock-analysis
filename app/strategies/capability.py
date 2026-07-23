@@ -282,11 +282,15 @@ class StrategyCapabilityService:
         supported_instruments = [str(value).strip().lower() for value in capability.get("supported_instrument_types", [])]
         required_datasets = [str(value).strip() for value in capability.get("required_datasets", []) if str(value).strip()]
         minimum_coverage = float(capability.get("minimum_coverage", 0.95) or 0.95)
-        maximum_data_age_days = int(capability.get("maximum_data_age_days", 1) or 1)
+        configured_maximum_age = capability.get("maximum_data_age_days")
+        maximum_data_age_days = int(
+            1 if configured_maximum_age is None else configured_maximum_age
+        )
         runtime_status = str(capability.get("runtime_status") or "disabled")
         backtest_status = str(capability.get("backtest_status") or "disabled")
         validation_status = str(capability.get("validation_status") or "unvalidated")
         evidence_status = str(capability.get("evidence_status") or "none")
+        status = str(strategy_meta.get("status") or "unknown")
         normalized_instrument = str(instrument_type or "stock").strip().lower()
         executable = bool(strategy_meta.get("executable", True))
 
@@ -331,9 +335,17 @@ class StrategyCapabilityService:
         validated = validation_status in self.VALIDATED_STATUSES
 
         if runtime_ready:
-            availability = "runtime_ready"
-            availability_label = "兼容可执行" if runtime_status == "legacy_enabled" else "可执行"
-            availability_note = "策略可加载、标的兼容且必需数据已达到注册表门槛。"
+            if status == "experimental":
+                availability = "experimental"
+                availability_label = "实验可执行"
+                availability_note = (
+                    "策略可手动运行并保存，但尚未通过交易有效性验证；"
+                    "请结合版本标识与前瞻观察结果审慎使用。"
+                )
+            else:
+                availability = "runtime_ready"
+                availability_label = "兼容可执行" if runtime_status == "legacy_enabled" else "可执行"
+                availability_note = "策略可加载、标的兼容且必需数据已达到注册表门槛。"
         elif not loadable:
             availability = "load_failed"
             availability_label = "加载失败"

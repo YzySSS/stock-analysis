@@ -396,7 +396,7 @@ function renderStrategySummary(strategy) {
       <div class="strategy-item-head">
         <strong>${escapeHtml(strategy.display_name || strategy.id || '-')}</strong>
         <div>
-          <span class="badge ${strategy.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(strategy.mode || 'current')}</span>
+          <span class="badge ${strategy.status === 'experimental' || strategy.mode === 'shadow_only' || strategy.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(strategy.mode || 'current')}</span>
           <span class="badge ${strategyBadgeClass(strategy)}">${escapeHtml(strategy.availability_label || '-')}</span>
           ${historicalDiagnosticFailed ? '<span class="badge status-error">历史诊断未通过</span>' : ''}
         </div>
@@ -1129,7 +1129,8 @@ async function loadStrategies() {
     const option = document.createElement('option');
     option.value = item.id;
     const validationLabel = item.validated ? '已验证' : '未验证';
-    option.textContent = `${item.display_name || item.id} (${item.id} · ${validationLabel})`;
+    const runtimeLabel = item.availability === 'experimental' ? '实验策略' : '正式策略';
+    option.textContent = `${item.display_name || item.id} (${runtimeLabel} · ${validationLabel})`;
     select.appendChild(option);
   });
 

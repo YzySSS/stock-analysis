@@ -10,6 +10,7 @@ function strategyDisplayNameById(strategyId) {
 
 function strategyStatusClass(item = {}) {
   if (item.evidence_status === 'historical_diagnostic_fail') return 'status-error';
+  if (item.availability === 'experimental') return 'status-warn';
   if (item.availability === 'runtime_ready' || item.runtime_ready) return 'status-ok';
   if (item.availability === 'prototype' || item.availability === 'data_not_ready' || item.availability === 'research') return 'status-warn';
   return 'status-muted';
@@ -95,7 +96,7 @@ function renderStrategyDetail(strategy = null) {
 
   if (name) name.textContent = strategy.display_name || strategy.id || '-';
   if (status) {
-    status.className = `badge ${strategy.evidence_status === 'historical_diagnostic_fail' ? 'status-error' : strategy.runtime_ready ? 'status-ok' : 'status-warn'}`;
+    status.className = `badge ${strategy.evidence_status === 'historical_diagnostic_fail' ? 'status-error' : strategy.availability === 'experimental' ? 'status-warn' : strategy.runtime_ready ? 'status-ok' : 'status-warn'}`;
     status.textContent = strategy.availability_label || '-';
   }
 
@@ -246,7 +247,7 @@ function renderStrategyTable(items = []) {
         <td>${escapeHtml(item.display_name || '-')}</td>
         <td><span class="badge ${availabilityClass}">${escapeHtml(item.availability_label || '-')}</span></td>
         <td>v${escapeHtml(item.version || '-')}</td>
-        <td><span class="badge ${item.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(item.mode || '-')}</span></td>
+        <td><span class="badge ${item.status === 'experimental' || item.mode === 'shadow_only' || item.mode === 'legacy' ? 'status-warn' : 'status-ok'}">${escapeHtml(item.mode || '-')}</span></td>
         <td>${item.id === currentStrategyId ? (qs('#strategy-factor-cards')?.querySelectorAll('.factor-metric-row').length || '-') : '-'}</td>
         <td>${item.score_threshold ?? '-'}</td>
         <td><button class="btn btn-secondary" type="button" data-strategy-pick="${escapeHtml(item.id)}">查看</button></td>

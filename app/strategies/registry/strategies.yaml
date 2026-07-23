@@ -50,14 +50,14 @@ strategies:
       supported_instrument_types: [stock]
       required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily, stock_chip_daily, sector_opinion_daily]
       minimum_coverage: 0.98
-      maximum_data_age_days: 1
-      runtime_status: prototype
+      maximum_data_age_days: 0
+      runtime_status: enabled
       backtest_status: disabled
       validation_status: shadow_only
-      evidence_status: none
-      evidence_note: 0.5.0 仅允许测试与影子观察；本地确定性结果、AI建议和 0.4.4 对照证据必须分开保存
-    tags: [sentiment, direct-catalyst, theme-leader, deterministic, shadow-only, experimental]
-    description: 确定性双轨舆情核心；市场状态只作硬门，AI仅生成带证据的有界建议且不改变正式得分
+      evidence_status: prospective_observation
+      evidence_note: 0.5.0 已开放手动实验执行；用户主动保存后按策略版本进入手动 14 天统计，自动观察仍单独保存且不写 selection_result
+    tags: [sentiment, direct-catalyst, theme-leader, deterministic, shadow-only, experimental, manual-selectable]
+    description: 可手动选择的实验性双轨舆情策略；市场状态只作硬门，AI仅生成带证据的有界建议且不改变正式得分
     automatic_observation:
       enabled: true
       start_on: "2026-07-24"

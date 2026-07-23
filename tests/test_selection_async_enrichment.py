@@ -163,10 +163,10 @@ class RetiredStrategyContractTests(unittest.TestCase):
     def test_registered_but_not_ready_strategy_save_maps_to_422(self):
         service = Mock()
         service.is_registered_strategy.return_value = True
-        service.save_strategy_result.side_effect = ValueError("策略尚处于 prototype")
+        service.save_strategy_result.side_effect = ValueError("策略当前不可运行")
         payload = SelectionSaveItemRequest(
             run_id="source-run",
-            strategy_id="a_share_sentiment_v05",
+            strategy_id="temporarily_disabled_strategy",
             item={"code": "sh.600000"},
         )
 

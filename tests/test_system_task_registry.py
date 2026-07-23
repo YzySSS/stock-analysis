@@ -46,6 +46,7 @@ class SystemTaskRegistryTests(unittest.TestCase):
         self.assertIn("stock_technical_feature_daily_refresh.log", source)
         self.assertIn('"$TECHNICAL_FEATURE_JOB"', source)
         self.assertIn("materialize_sentiment_candidate_snapshot.py", source)
+        self.assertIn("materialize_sentiment_candidate_snapshot.py --dual-run", source)
         self.assertIn("sentiment_candidate_snapshot_materialize.log", source)
         self.assertIn('"$SENTIMENT_SNAPSHOT_JOB"', source)
         self.assertIn("refresh_operational_read_models.py", source)

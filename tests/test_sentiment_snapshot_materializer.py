@@ -409,18 +409,36 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
             },
         )
 
-    def test_shadow_strategy_requires_explicit_allow_shadow(self):
+    def test_manual_experimental_strategy_materializes_without_shadow_override(self):
         rows = self.candidate_rows()
-        inputs = FakeInputRepository(input_audit(), rows)
+        audit = input_audit()
+        audit.strategy_id = "a_share_sentiment_v05"
+        audit.strategy_version = "0.5.0"
+        inputs = FakeInputRepository(audit, rows)
+        snapshots = FakeSnapshotRepository()
+        selector = FakeSelector(
+            rows,
+            [
+                {
+                    "code": "sh.600000",
+                    "rank_no": 1,
+                    "score": 72,
+                    "trade_grade_state": "watch",
+                }
+            ],
+        )
         service = SentimentSnapshotMaterializationService(
             input_repository=inputs,  # type: ignore[arg-type]
+            snapshot_repository=snapshots,  # type: ignore[arg-type]
+            selector_factory=lambda *_args: selector,
             local_clock_mode=lambda: "postclose",
         )
 
-        with self.assertRaises(SentimentSnapshotMaterializationError):
-            service.materialize(strategy_id="a_share_sentiment_v05")
+        result = service.materialize(strategy_id="a_share_sentiment_v05")
 
-        self.assertEqual(inputs.open_calls, [])
+        self.assertEqual(result["strategy_id"], "a_share_sentiment_v05")
+        self.assertEqual(len(inputs.open_calls), 1)
+        self.assertEqual(len(snapshots.calls), 1)
 
     def test_explicit_shadow_materialization_writes_v05_snapshot_only(self):
         rows = self.candidate_rows()

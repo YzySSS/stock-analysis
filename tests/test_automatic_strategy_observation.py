@@ -286,7 +286,7 @@ class AutomaticObservationFrontendTests(unittest.TestCase):
         self.assertIn("自动 5 日配对观察", source)
         self.assertIn("当日开盘（09:25 信号）", source)
         self.assertIn("与用户手动选股及其 14 天统计完全分开", source)
-        self.assertIn("strategies.js?v=20260723a1", page)
+        self.assertIn("strategies.js?v=20260724v05manual1", page)
 
 
 def _policy(

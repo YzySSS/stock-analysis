@@ -16,7 +16,7 @@ def ready_snapshot(
     moneyflow_codes: int = 100,
     moneyflow_expected_codes: int | None = None,
 ) -> dict:
-    moneyflow = {"latest_at": "2026-07-14", "covered_codes": moneyflow_codes}
+    moneyflow = {"latest_at": "2026-07-15", "covered_codes": moneyflow_codes}
     if moneyflow_expected_codes is not None:
         moneyflow["expected_codes"] = moneyflow_expected_codes
     return {
@@ -24,9 +24,9 @@ def ready_snapshot(
         "reference_trade_date": "2026-07-15",
         "datasets": {
             "daily_kline": {"latest_at": "2026-07-15", "covered_codes": 100},
-            "factor_input_daily": {"latest_at": "2026-07-14", "covered_codes": factor_codes},
+            "factor_input_daily": {"latest_at": "2026-07-15", "covered_codes": factor_codes},
             "stock_moneyflow_daily": moneyflow,
-            "stock_chip_daily": {"latest_at": "2026-07-14", "covered_codes": 100},
+            "stock_chip_daily": {"latest_at": "2026-07-15", "covered_codes": 100},
             "sector_opinion_daily": {"latest_at": "2026-07-15 15:30:00", "row_count": 10},
         },
     }
@@ -68,7 +68,7 @@ class StrategyCapabilityContractTests(unittest.TestCase):
         self.assertEqual(snapshot["reference_trade_date"], "2026-07-21")
         self.assertEqual(snapshot["datasets"]["daily_kline"]["covered_codes"], 99)
 
-    def test_registry_exposes_only_frozen_and_shadow_sentiment_versions(self):
+    def test_registry_exposes_frozen_and_manual_experimental_sentiment_versions(self):
         service = StrategyService(dataset_snapshot=ready_snapshot())
         items = service.list_strategies()
 
@@ -78,7 +78,7 @@ class StrategyCapabilityContractTests(unittest.TestCase):
         )
         self.assertEqual(
             {item["id"] for item in items if item["runtime_ready"]},
-            {"a_share_sentiment"},
+            {"a_share_sentiment", "a_share_sentiment_v05"},
         )
         self.assertFalse(any(item["backtest_ready"] for item in items))
         self.assertIsNone(service.get_default_strategy_id())
@@ -89,18 +89,20 @@ class StrategyCapabilityContractTests(unittest.TestCase):
         self.assertEqual(by_id["a_share_sentiment"]["status"], "stable")
         self.assertEqual(by_id["a_share_sentiment_v05"]["mode"], "shadow_only")
         self.assertEqual(by_id["a_share_sentiment_v05"]["validation_status"], "shadow_only")
-        self.assertEqual(by_id["a_share_sentiment_v05"]["availability"], "prototype")
+        self.assertEqual(by_id["a_share_sentiment_v05"]["availability"], "experimental")
+        self.assertEqual(by_id["a_share_sentiment_v05"]["availability_label"], "实验可执行")
 
-    def test_loadable_prototype_is_not_misreported_as_runtime_ready(self):
+    def test_loadable_v05_is_runtime_ready_but_explicitly_experimental(self):
         item = StrategyService(dataset_snapshot=ready_snapshot()).get_strategy_capability(
             "a_share_sentiment_v05"
         )
 
         self.assertTrue(item["loadable"])
         self.assertTrue(item["data_ready"])
-        self.assertEqual(item["runtime_status"], "prototype")
-        self.assertFalse(item["runtime_ready"])
-        self.assertTrue(any("prototype" in reason for reason in item["runtime_reasons"]))
+        self.assertEqual(item["runtime_status"], "enabled")
+        self.assertTrue(item["runtime_ready"])
+        self.assertEqual(item["availability"], "experimental")
+        self.assertFalse(item["validated"])
 
     def test_v05_requires_98_percent_cross_sectional_coverage(self):
         item = StrategyService(
@@ -109,6 +111,20 @@ class StrategyCapabilityContractTests(unittest.TestCase):
 
         self.assertFalse(item["data_ready"])
         self.assertTrue(any("stock_moneyflow_daily" in reason for reason in item["runtime_reasons"]))
+
+    def test_v05_requires_same_trade_day_for_hard_datasets(self):
+        snapshot = ready_snapshot()
+        snapshot["datasets"]["stock_moneyflow_daily"]["latest_at"] = "2026-07-14"
+
+        item = StrategyService(dataset_snapshot=snapshot).get_strategy_capability(
+            "a_share_sentiment_v05"
+        )
+
+        self.assertFalse(item["data_ready"])
+        self.assertFalse(item["runtime_ready"])
+        self.assertTrue(
+            any("落后基准交易日 1 天" in reason for reason in item["runtime_reasons"])
+        )
 
     def test_v05_moneyflow_uses_provider_supported_universe_denominator(self):
         snapshot = ready_snapshot(
