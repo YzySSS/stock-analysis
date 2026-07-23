@@ -1,3 +1,53 @@
+function getCookieValue(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const item = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+}
+
+function currentLoginUrl() {
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  return `/login?next=${encodeURIComponent(currentPath)}`;
+}
+
+function installAuthenticatedFetch() {
+  if (window.__stockAnalysisAuthFetchInstalled) return;
+  window.__stockAnalysisAuthFetchInstalled = true;
+  const nativeFetch = window.fetch.bind(window);
+
+  window.fetch = async (input, options = {}) => {
+    const requestUrl = new URL(
+      typeof input === 'string' ? input : input.url,
+      window.location.href,
+    );
+    const requestMethod = String(
+      options.method || (typeof input === 'string' ? 'GET' : input.method) || 'GET',
+    ).toUpperCase();
+    let requestOptions = options;
+
+    if (
+      requestUrl.origin === window.location.origin
+      && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(requestMethod)
+    ) {
+      const csrfToken = getCookieValue('stock_analysis_csrf');
+      const headers = new Headers(typeof input === 'string' ? undefined : input.headers);
+      new Headers(options.headers || {}).forEach((value, key) => headers.set(key, value));
+      if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+      requestOptions = { ...options, headers };
+    }
+
+    const response = await nativeFetch(input, requestOptions);
+    if (response.status === 401 && requestUrl.origin === window.location.origin) {
+      window.location.replace(currentLoginUrl());
+    }
+    return response;
+  };
+}
+
+installAuthenticatedFetch();
+
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -84,6 +134,38 @@ function bindGlobalStockSearch() {
   bindStockQuickSearch('[data-global-stock-search-input]', '[data-global-stock-search-btn]');
 }
 
+function bindLogoutControl() {
+  const sidebar = qs('.sidebar');
+  if (!sidebar || sidebar.querySelector('[data-logout-control]')) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'sidebar-auth';
+  wrapper.dataset.logoutControl = 'true';
+  wrapper.innerHTML = `
+    <span class="sidebar-auth-label">已安全登录</span>
+    <button class="sidebar-logout" type="button">退出登录</button>
+  `;
+  sidebar.appendChild(wrapper);
+
+  wrapper.querySelector('.sidebar-logout').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = '正在退出…';
+    try {
+      const response = await fetch('/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      window.location.replace('/login');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = '重试退出';
+    }
+  });
+}
+
 function ensureTooltip() {
   let tooltip = document.querySelector('[data-shared-tooltip]');
   if (!tooltip) {
@@ -145,5 +227,6 @@ function bindTooltips() {
 document.addEventListener('DOMContentLoaded', () => {
   setActiveNav();
   bindGlobalStockSearch();
+  bindLogoutControl();
   bindTooltips();
 });

@@ -1,10 +1,13 @@
 # 当前服务器部署模板
 
-这些文件复现当前单机部署边界：FastAPI 只监听 loopback，Nginx 提供 HTTPS、全站 Basic Auth 和重型接口限流，`/api/health` 保持免认证。
+这些文件复现当前单机部署边界：FastAPI 只监听 loopback，Nginx 提供 HTTPS
+和重型接口限流，FastAPI 提供单管理员登录页与签名会话，`/api/health`
+保持免认证。
 
 逐阶段执行、验收和回滚清单见 `docs/cloud_deployment_task_plan.md`；云端操作应以该清单记录发布 SHA、备份、migration、快照、探针和压测证据。
 
-模板不包含数据库密码、API token、TLS 私钥或 Basic Auth 明文密码。部署前确认项目 `.env` 和 MySQL 已独立准备；TLS 由 Certbot 在服务器上签发，证书文件不进入仓库。
+模板不包含数据库密码、API token、TLS 私钥或站点登录凭据。部署前确认项目
+`.env` 和 MySQL 已独立准备；TLS 由 Certbot 在服务器上签发，证书文件不进入仓库。
 
 ## 依赖
 
@@ -191,18 +194,38 @@ unset TUSHARE_RT_PROBE_TOKEN
 
 完整接口 SLO 与资源阈值见 `docs/sentiment_remediation_v2_implementation.md` 的“云端验收”。
 
-## Basic Auth 凭据
+## 应用登录凭据
 
-以下流程把随机密码保存在 root-only 文件中，并只把哈希交给 Nginx。不要把这两个运行时文件提交到仓库。
+站点使用一个管理员账号、PBKDF2 密码哈希和 HMAC 签名会话。配置脚本使用
+隐藏交互输入，不接收命令行明文密码；更新密码时默认轮换会话密钥，让旧
+浏览器会话全部失效。
 
 ```bash
-install -d -o root -g root -m 700 /root/.config/stock-analysis
-umask 077
-openssl rand -out /root/.config/stock-analysis/basic-auth-password -hex 18
-password_hash=$(openssl passwd -apr1 -in /root/.config/stock-analysis/basic-auth-password)
-install -o root -g www-data -m 640 <(printf 'dax:%s\n' "$password_hash") /etc/nginx/.htpasswd-stock-analysis
-unset password_hash
+.venv/bin/python scripts/configure_site_auth.py --username your_username
+stat -c '%a %U:%G %n' .env
 ```
+
+`.env` 必须为 `600 root:root`。生产必须设置
+`SITE_AUTH_COOKIE_SECURE=true`。会话默认 7 天过期；写请求同时校验签名会话
+和 CSRF token。Nginx 不再配置 `auth_basic`，否则浏览器原生弹窗会先于
+应用登录页出现。
+
+### 从 Basic Auth 安全切换到应用登录
+
+切换顺序不能颠倒，避免在旧应用仍运行时先撤掉 Nginx 防线：
+
+1. 备份生产 `.env`、Nginx 站点配置和原 `.htpasswd`，但暂时保留线上
+   `auth_basic`。
+2. 运行 `configure_site_auth.py` 配置凭据，确认 `.env` 为 `600 root:root`。
+3. 部署并重启新 FastAPI 服务；此时公网仍由原 Basic Auth 保护。
+4. 直接访问 loopback `127.0.0.1:8000`，验证匿名页面 303、匿名 API 401、
+   正确登录 200、无 CSRF 写请求 403、退出后再次 303。
+5. 上述应用层验证全部通过后，才安装不含 `auth_basic` 的新 Nginx 配置，
+   运行 `/usr/sbin/nginx -t` 并 reload。
+6. 最后从公网无旧凭据的新浏览器会话验证登录页、原路径回跳和退出登录。
+
+回滚时顺序相反：先恢复并 reload 原 Nginx Basic Auth，让外围保护重新生效，
+再回滚 FastAPI 代码或环境配置。
 
 ## TLS 自动签发与续期
 
@@ -235,7 +258,7 @@ certbot renew --dry-run --run-deploy-hooks
 systemctl list-timers certbot.timer --all --no-pager
 ```
 
-不要把 `/etc/letsencrypt`、私钥、账户文件或 Basic Auth 凭据复制进仓库。
+不要把 `/etc/letsencrypt`、私钥、账户文件或应用登录凭据复制进仓库。
 
 ## Nginx
 
@@ -250,8 +273,11 @@ systemctl reload nginx.service
 验证口径：
 
 - 未认证 `GET /api/health` 返回 200。
-- 未认证页面和其他 API 返回 401。
-- 正确凭据访问页面和普通 API 返回 200。
+- 未认证页面返回 303 并跳转到 `/login?next=...`，其他 API 返回 JSON 401。
+- 登录页、静态资源和 favicon 无需认证且不出现浏览器 Basic Auth 弹窗。
+- 正确凭据登录后设置 `Secure + HttpOnly + SameSite` 会话 Cookie，原页面返回 200。
+- 无 CSRF header 的已登录写请求返回 403，站内前端自动附加 CSRF token。
+- 退出登录后会话 Cookie 被清除，再次访问受保护页面会回到登录页。
 - 选股、回测、DeepSeek 深度复盘和持仓建议接口按 IP 限制为每分钟 6 次、突发 2 次，超限返回 429。
 - HTTP-01 路径 `/.well-known/acme-challenge/` 免认证且不重定向，其余 HTTP 请求 301 到 HTTPS。
 - 远端证书 SAN 同时包含 `yzysstock.cloud` 与 `www.yzysstock.cloud`，证书指纹与本机 Certbot live 文件一致。

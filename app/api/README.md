@@ -22,6 +22,18 @@ cp .env.example .env
 - `DB_USER`
 - `DB_PASSWORD`
 - `DB_NAME`
+- `SITE_AUTH_USERNAME`
+- `SITE_AUTH_PASSWORD_HASH`
+- `SITE_AUTH_SESSION_SECRET`
+
+首次配置登录凭据时不要手写哈希，也不要把明文密码放进命令行。使用隐藏输入：
+
+```bash
+.venv/bin/python scripts/configure_site_auth.py --username your_username
+```
+
+该命令只把 PBKDF2 密码哈希和随机会话密钥写入权限为 `600` 的 `.env`。
+再次执行可修改用户名或密码，并默认让全部旧会话失效。
 
 如果是新环境，建议先初始化 schema：
 
@@ -68,5 +80,10 @@ systemctl restart stock-analysis-api.service
 ## 4. 接口访问
 
 - 健康检查：`http://127.0.0.1:8000/api/health`
+- 登录页面：`http://127.0.0.1:8000/login`
 - Swagger 文档：`http://127.0.0.1:8000/docs`
 - ReDoc：`http://127.0.0.1:8000/redoc`
+
+除 `/login`、`/static/*`、`/favicon.ico` 和 `/api/health` 外，其余页面和 API
+都需要应用会话。生产环境必须使用 HTTPS，并保持
+`SITE_AUTH_COOKIE_SECURE=true`。

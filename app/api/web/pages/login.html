@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>登录 - 股票分析控制台</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/login.css?v=20260723a1" />
+</head>
+<body data-page="login">
+  <main class="login-shell">
+    <section class="login-intro" aria-labelledby="login-title">
+      <div class="login-brand">
+        <span class="login-brand-mark" aria-hidden="true">Y</span>
+        <div>
+          <strong>股票分析控制台</strong>
+          <small>Stock Research Console</small>
+        </div>
+      </div>
+
+      <div class="login-copy">
+        <p class="login-eyebrow">PRIVATE WORKSPACE</p>
+        <h1 id="login-title">先验证身份，<br />再进入你的研究台。</h1>
+        <p>选股、复盘、持仓与数据状态都集中在这里。登录状态仅保存在当前浏览器。</p>
+      </div>
+
+      <div class="login-signal" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </section>
+
+    <section class="login-panel" aria-label="登录表单">
+      <form id="login-form" class="login-card" novalidate>
+        <div class="login-card-head">
+          <span class="login-status-dot" aria-hidden="true"></span>
+          <span>授权访问</span>
+        </div>
+        <h2>登录</h2>
+        <p class="login-card-desc">请输入本站专用的用户名和密码。</p>
+
+        <label class="login-field">
+          <span>用户名</span>
+          <input
+            id="login-username"
+            name="username"
+            type="text"
+            autocomplete="username"
+            maxlength="64"
+            required
+            autofocus
+          />
+        </label>
+
+        <label class="login-field">
+          <span>密码</span>
+          <span class="login-password-wrap">
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              maxlength="1024"
+              required
+            />
+            <button id="login-password-toggle" type="button" aria-label="显示密码">显示</button>
+          </span>
+        </label>
+
+        <div id="login-message" class="login-message" role="alert" aria-live="polite"></div>
+
+        <button id="login-submit" class="login-submit" type="submit">
+          <span>进入控制台</span>
+          <span aria-hidden="true">→</span>
+        </button>
+
+        <p class="login-footnote">会话 7 天后自动过期；在公共设备上使用完请主动退出。</p>
+      </form>
+    </section>
+  </main>
+  <script src="/static/js/login.js?v=20260723a1" defer></script>
+</body>
+</html>

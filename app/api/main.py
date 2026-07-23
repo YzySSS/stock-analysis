@@ -9,6 +9,8 @@ from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
+from app.api.auth import SiteAuthenticator, SiteAuthMiddleware, SiteAuthSettings
+from app.api.routes.auth import router as auth_router
 from app.api.routes.backtest import router as backtest_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.health import router as health_router
@@ -29,6 +31,9 @@ app = FastAPI(
     description="股票分析项目第一版 Web API",
 )
 logger = logging.getLogger(__name__)
+site_authenticator = SiteAuthenticator(SiteAuthSettings.from_env())
+app.state.site_authenticator = site_authenticator
+app.add_middleware(SiteAuthMiddleware, authenticator=site_authenticator)
 
 
 @app.middleware("http")
@@ -72,6 +77,7 @@ async def observe_request(request: Request, call_next):  # noqa: ANN001
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
+app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(health_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
@@ -83,4 +89,6 @@ app.include_router(portfolio_router, prefix="/api")
 app.include_router(backtest_router, prefix="/api")
 app.include_router(trade_strategies_router, prefix="/api")
 app.include_router(stocks_router, prefix="/api")
-app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+app.mount("/static/css", StaticFiles(directory=WEB_DIR / "css"), name="static-css")
+app.mount("/static/js", StaticFiles(directory=WEB_DIR / "js"), name="static-js")
+app.mount("/static/assets", StaticFiles(directory=WEB_DIR / "assets"), name="static-assets")
