@@ -283,6 +283,7 @@ class StrategyService:
             "count": len(items),
             "results": items,
             "input_snapshot_id": snapshot.snapshot_id,
+            "ai_mode": manifest.get("ai_mode") or "local_core",
             "data_freshness": {
                 "status": "published",
                 "decision_as_of": str(manifest.get("decision_as_of")) if manifest.get("decision_as_of") else None,
@@ -302,6 +303,47 @@ class StrategyService:
                 "score_threshold": effective_threshold,
             },
         }
+
+    def published_sentiment_observation_result(
+        self,
+        *,
+        strategy_id: str,
+        snapshot_id: str,
+        limit: int = 3,
+        score_threshold: float | None = None,
+        run_id: str | None = None,
+        allow_shadow: bool = False,
+    ) -> Dict[str, Any]:
+        """Read one immutable snapshot for the separate forward-observation path."""
+
+        strategy_meta = self.get_strategy_meta(strategy_id)
+        serialized_meta = self.get_strategy_capability(
+            strategy_id,
+            instrument_type="stock",
+        )
+        if not serialized_meta.get("loadable"):
+            raise ValueError(
+                f"策略 {strategy_id} 当前不可加载："
+                f"{serialized_meta.get('load_error') or 'unknown error'}"
+            )
+        if not serialized_meta.get("data_ready"):
+            reasons = serialized_meta.get("data_reasons") or ["必需数据未就绪"]
+            raise ValueError(f"策略 {strategy_id} 当前不可观察：{reasons[0]}")
+        if not serialized_meta.get("runtime_ready"):
+            if not (
+                allow_shadow
+                and str(strategy_meta.get("mode") or "") == "shadow_only"
+            ):
+                reasons = serialized_meta.get("runtime_reasons") or ["未获准运行"]
+                raise ValueError(f"策略 {strategy_id} 当前不可观察：{reasons[0]}")
+        return self._published_sentiment_result(
+            strategy_meta=strategy_meta,
+            serialized_meta=serialized_meta,
+            limit=limit,
+            score_threshold=score_threshold,
+            run_id=run_id,
+            input_snapshot_id=snapshot_id,
+        )
 
     def _resolve_strategy_id(self, strategy_id: Optional[str]) -> str:
         final_strategy_id = strategy_id or self.get_default_strategy_id()

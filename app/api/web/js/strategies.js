@@ -317,18 +317,26 @@ function renderForwardEvidence(evidence = null) {
   const actionCounts = evidence.actions || {};
   const userDiscipline = evidence.user_discipline || {};
   const isPreliminary = evidence.status === 'preliminary_ready';
+  const isAutomaticObservation = protocolInfo.observation_source === 'automatic_observation';
+  const entryRuleLabel = protocolInfo.entry_rule === 'same_day_open'
+    ? '当日开盘（09:25 信号）'
+    : '次日可交易开盘';
+  const sourceLabel = isAutomaticObservation ? '自动 5 日配对观察' : '固定前瞻观察';
   status.className = 'badge status-warn';
   status.textContent = isPreliminary ? '初步样本达标 · 未验证' : '采集中 · 未验证';
   note.textContent = isPreliminary
     ? '已达到预设的初步观察门槛，但这不是交易有效性认证；继续积累样本并观察稳定性。'
-    : '按冻结版本持续收集真实盘后信号；成熟收益、零候选日和 AI 降级日都会保留。';
+    : isAutomaticObservation
+      ? '新策略按冻结版本自动收集 5 个交易日的 09:25 配对样本；与用户手动选股及其 14 天统计完全分开。'
+      : '按冻结版本持续收集真实盘后信号；成熟收益、零候选日和 AI 降级日都会保留。';
 
   protocol.className = 'strategy-forward-protocol';
   protocol.innerHTML = `
     <span><b>${escapeHtml(protocolInfo.protocol_id || '-')}</b><small>协议</small></span>
     <span><b>v${escapeHtml(protocolInfo.strategy_version || '-')}</b><small>策略版本</small></span>
+    <span><b>${escapeHtml(sourceLabel)}</b><small>样本来源</small></span>
     <span><b>${escapeHtml(protocolInfo.execution_time || '-')}</b><small>每日执行</small></span>
-    <span><b>次日可交易开盘</b><small>入场口径</small></span>
+    <span><b>${escapeHtml(entryRuleLabel)}</b><small>入场口径</small></span>
     <span><b>${escapeHtml((protocolInfo.horizons || []).join(' / ') || '-')} 日</b><small>观察窗口</small></span>
     <span><b>${escapeHtml(protocolInfo.started_on || '-')}</b><small>开始日期</small></span>
   `;

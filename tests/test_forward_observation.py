@@ -194,6 +194,19 @@ class ForwardOutcomeTests(unittest.TestCase):
         self.assertEqual(outcome["status"], "complete")
         self.assertEqual(outcome["price_adjustment_mode"], "raw_fallback")
 
+    def test_same_day_open_protocol_is_preserved_in_outcome(self):
+        path = self._path(days=1)
+
+        outcome = build_forward_outcome(
+            path,
+            horizons=(1,),
+            entry_rule="same_day_open",
+        )
+
+        self.assertEqual(outcome["entry_trade_date"], "2026-07-21")
+        self.assertEqual(outcome["entry_rule"], "same_day_open")
+        self.assertEqual(outcome["returns"]["1"], 0.0)
+
 
 class ForwardSubmissionTests(unittest.TestCase):
     def test_non_trading_day_is_recorded_as_skip_without_selection_task(self):

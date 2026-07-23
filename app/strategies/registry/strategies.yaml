@@ -1,11 +1,26 @@
 default_strategy: null
 
+automatic_observation_defaults:
+  enabled: true
+  mode: paired_first_n_trade_days
+  baseline_strategy_id: a_share_sentiment
+  target_trade_days: 5
+  execution_time: "09:25:00"
+  timezone: Asia/Shanghai
+  entry_rule: same_day_open
+  horizons: [1, 3, 5, 20]
+  benchmark_codes: ["000300.SH", "000905.SH", "000852.SH"]
+  max_picks: 3
+  minimum_realtime_coverage: 0.90
+  engine: sentiment_snapshot_pair
+
 strategies:
   - id: a_share_sentiment
     display_name: A股舆情选股
     entrypoint: app.strategies.active.a_share_sentiment_strategy.AShareSentimentStrategy
     config_path: app/strategies/registry/configs/a_share_sentiment.yaml
     version: 0.4.4
+    immutable_tag: a-share-sentiment-v0.4.4
     status: stable
     mode: frozen_baseline
     executable: true
@@ -27,6 +42,7 @@ strategies:
     entrypoint: app.strategies.active.a_share_sentiment_strategy.AShareSentimentV05Strategy
     config_path: app/strategies/registry/configs/a_share_sentiment_v05.yaml
     version: 0.5.0
+    immutable_tag: a-share-sentiment-v0.5.0
     status: experimental
     mode: shadow_only
     executable: true
@@ -42,3 +58,7 @@ strategies:
       evidence_note: 0.5.0 仅允许测试与影子观察；本地确定性结果、AI建议和 0.4.4 对照证据必须分开保存
     tags: [sentiment, direct-catalyst, theme-leader, deterministic, shadow-only, experimental]
     description: 确定性双轨舆情核心；市场状态只作硬门，AI仅生成带证据的有界建议且不改变正式得分
+    automatic_observation:
+      enabled: true
+      start_on: "2026-07-24"
+      engine: sentiment_snapshot_pair

@@ -1635,14 +1635,33 @@ class SentimentSnapshotMaterializationService:
         return self._result_payload(published, audit, len(candidate_rows))
 
     def materialize_dual(self, *, max_picks: int | None = None) -> dict[str, Any]:
-        """Run stable and v0.5 shadow against one repeatable-read input snapshot.
+        """Compatibility wrapper for the current stable/v0.5 shadow pair."""
 
-        The v0.5 result is persisted only as its own candidate snapshot. This
-        method never writes ``selection_result`` and does not change registry
-        capability/status fields.
+        return self.materialize_pair(
+            baseline_strategy_id="a_share_sentiment",
+            candidate_strategy_id="a_share_sentiment_v05",
+            max_picks=max_picks,
+        )
+
+    def materialize_pair(
+        self,
+        *,
+        baseline_strategy_id: str,
+        candidate_strategy_id: str,
+        max_picks: int | None = None,
+    ) -> dict[str, Any]:
+        """Run one enabled baseline and one shadow candidate on the same inputs.
+
+        Both outputs remain immutable candidate snapshots. This method never
+        writes ``selection_result`` and never promotes the shadow strategy.
         """
 
-        strategy_ids = ("a_share_sentiment", "a_share_sentiment_v05")
+        strategy_ids = (
+            str(baseline_strategy_id).strip(),
+            str(candidate_strategy_id).strip(),
+        )
+        if not all(strategy_ids) or strategy_ids[0] == strategy_ids[1]:
+            raise ValueError("baseline and candidate strategy ids must be distinct")
         strategy_metas = [self.strategy_service.get_strategy_meta(value) for value in strategy_ids]
         stable_capability = strategy_metas[0].get("capability") or {}
         if str(stable_capability.get("runtime_status") or "disabled") not in {
@@ -1654,7 +1673,7 @@ class SentimentSnapshotMaterializationService:
             )
         if str(strategy_metas[1].get("mode") or "") != "shadow_only":
             raise SentimentSnapshotMaterializationError(
-                "v0.5 must remain shadow_only for dual materialization"
+                f"candidate strategy {strategy_ids[1]} must remain shadow_only"
             )
 
         required_datasets: list[str] = []
@@ -1667,7 +1686,7 @@ class SentimentSnapshotMaterializationService:
                 float(capability.get("minimum_coverage") or MIN_COVERAGE_RATIO),
             )
         dual_meta = {
-            "id": "a_share_sentiment_dual_shadow",
+            "id": f"{strategy_ids[0]}__{strategy_ids[1]}__paired_shadow",
             "version": "+".join(str(meta.get("version") or "") for meta in strategy_metas),
             "capability": {"required_datasets": list(dict.fromkeys(required_datasets))},
         }
@@ -1723,8 +1742,11 @@ class SentimentSnapshotMaterializationService:
                     audit=strategy_audit,
                     extra_metadata={
                         "dual_run": True,
+                        "paired_run": True,
                         "dual_input_hash": common_input_hash,
+                        "paired_input_hash": common_input_hash,
                         "dual_strategy_ids": list(strategy_ids),
+                        "paired_strategy_ids": list(strategy_ids),
                     },
                 )
                 run_payloads[str(output["strategy_meta"]["id"])] = self._result_payload(
@@ -1740,6 +1762,8 @@ class SentimentSnapshotMaterializationService:
                 else "rejected"
             ),
             "mode": "stable_plus_shadow",
+            "baseline_strategy_id": strategy_ids[0],
+            "candidate_strategy_id": strategy_ids[1],
             "decision_as_of": audit.decision_as_of,
             "trade_date": audit.reference_trade_date,
             "coverage_ratio": audit.coverage_ratio,

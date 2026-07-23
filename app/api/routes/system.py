@@ -46,7 +46,7 @@ TASK_SCHEDULES = [
     {"task_name": "market_opinion_lifecycle", "task_label": "舆情快照去重与保留", "schedule": "交易日 16:05"},
     {"task_name": "sentiment_candidate_snapshot_materialize", "task_label": "舆情候选快照物化", "schedule": "交易时段约每 15 分钟；交易日 18:55"},
     {"task_name": "operational_read_models_refresh", "task_label": "实时榜单、首页缓存与运维读模型刷新", "schedule": "交易时段每 5 分钟；交易日 19:00"},
-    {"task_name": "strategy_forward_observation_submit", "task_label": "舆情策略前瞻观察", "schedule": "交易日 16:20"},
+    {"task_name": "automatic_strategy_observation", "task_label": "新策略五交易日配对前瞻观察", "schedule": "交易日 09:25；每个新策略仅前 5 个成功配对交易日"},
     {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内判断交易时段"},
     {"task_name": "portfolio_etf_quote_update", "task_label": "持仓 ETF 行情", "schedule": "交易日 09:00-15:59 每 5 分钟"},
     {"task_name": "market_fund_flow_update", "task_label": "板块资金流快照", "schedule": "交易日 09:00-15:59 每 3 分钟"},

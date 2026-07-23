@@ -31,6 +31,7 @@ REQUIRED_TABLES = {
     "index_constituent_pit_manifest",
     "strategy_validation_protocol",
     "strategy_forward_protocol",
+    "strategy_observation_campaign",
     "strategy_forward_observation",
     "strategy_forward_pick",
     "strategy_forward_action",

@@ -97,12 +97,21 @@ class ForwardProtocolSpec:
     strategy_snapshot: dict[str, Any]
     request: dict[str, Any]
     started_on: str
+    campaign_id: str | None = None
+    observation_source: str = "scheduled_forward"
 
     def immutable_material(self) -> dict[str, Any]:
         return asdict(self)
 
 
 def _ai_status(result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    explicit_mode = str(result.get("ai_mode") or "").strip()
+    if explicit_mode:
+        return explicit_mode, {
+            "mode": explicit_mode,
+            "source": "immutable_candidate_snapshot",
+            "input_snapshot_id": result.get("input_snapshot_id"),
+        }
     progressive = result.get("progressive_rerank") or {}
     sector = progressive.get("sector_deepseek") or {}
     stock = progressive.get("stock_deepseek") or {}
@@ -144,7 +153,7 @@ def _ai_status(result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 def _pick_signal_price(item: dict[str, Any]) -> float | None:
-    for key in ("realtime_price", "latest_price", "close"):
+    for key in ("realtime_price", "selected_price", "latest_price", "close"):
         value = _float(item.get(key))
         if value is not None and value > 0:
             return value
@@ -182,21 +191,24 @@ class ForwardObservationRepository:
                 cursor.execute(
                     """
                     INSERT INTO strategy_forward_protocol (
-                        protocol_id, strategy_id, strategy_version, protocol_version, status,
-                        execution_time, timezone, entry_rule, horizons_json, benchmark_codes_json,
+                        protocol_id, campaign_id, strategy_id, strategy_version, protocol_version,
+                        status, observation_source, execution_time, timezone, entry_rule,
+                        horizons_json, benchmark_codes_json,
                         minimum_observation_days, minimum_candidate_count, immutable_tag,
                         implementation_commit, strategy_config_hash, ai_policy,
                         strategy_snapshot_json, request_json, started_on, locked_at
                     ) VALUES (
-                        %s,%s,%s,%s,'active',%s,%s,%s,%s,%s,
+                        %s,%s,%s,%s,%s,'active',%s,%s,%s,%s,%s,%s,
                         %s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
                     )
                     """,
                     (
                         spec.protocol_id,
+                        spec.campaign_id,
                         spec.strategy_id,
                         spec.strategy_version,
                         spec.protocol_version,
+                        spec.observation_source,
                         spec.execution_time,
                         spec.timezone,
                         spec.entry_rule,
@@ -223,6 +235,7 @@ class ForwardObservationRepository:
     def _assert_protocol_unchanged(existing: dict[str, Any], spec: ForwardProtocolSpec) -> None:
         actual = {
             "protocol_id": str(existing.get("protocol_id") or ""),
+            "campaign_id": existing.get("campaign_id"),
             "strategy_id": str(existing.get("strategy_id") or ""),
             "strategy_version": str(existing.get("strategy_version") or ""),
             "protocol_version": str(existing.get("protocol_version") or ""),
@@ -240,6 +253,9 @@ class ForwardObservationRepository:
             "strategy_snapshot": _from_json(existing.get("strategy_snapshot_json"), {}) or {},
             "request": _from_json(existing.get("request_json"), {}) or {},
             "started_on": _date_text(existing.get("started_on")),
+            "observation_source": str(
+                existing.get("observation_source") or "scheduled_forward"
+            ),
         }
         expected = spec.immutable_material()
         expected["execution_time"] = _time_text(expected["execution_time"])
@@ -267,6 +283,10 @@ class ForwardObservationRepository:
         protocol_id: str,
         signal_trade_date: date,
         request: dict[str, Any],
+        campaign_id: str | None = None,
+        observation_source: str = "scheduled_forward",
+        source_snapshot_id: str | None = None,
+        paired_input_hash: str | None = None,
     ) -> dict[str, Any]:
         request_json = _json(request)
         with self._connect() as conn:
@@ -274,10 +294,21 @@ class ForwardObservationRepository:
                 cursor.execute(
                     """
                     INSERT IGNORE INTO strategy_forward_observation (
-                        observation_id, protocol_id, signal_trade_date, status, request_json
-                    ) VALUES (%s,%s,%s,'pending_submission',%s)
+                        observation_id, protocol_id, campaign_id, signal_trade_date,
+                        source_snapshot_id, paired_input_hash, status, observation_source,
+                        request_json
+                    ) VALUES (%s,%s,%s,%s,%s,%s,'pending_submission',%s,%s)
                     """,
-                    (observation_id, protocol_id, signal_trade_date, request_json),
+                    (
+                        observation_id,
+                        protocol_id,
+                        campaign_id,
+                        signal_trade_date,
+                        source_snapshot_id,
+                        paired_input_hash,
+                        observation_source,
+                        request_json,
+                    ),
                 )
                 cursor.execute(
                     "SELECT * FROM strategy_forward_observation WHERE protocol_id=%s AND signal_trade_date=%s",
@@ -288,6 +319,23 @@ class ForwardObservationRepository:
             raise ForwardProtocolDriftError(
                 f"observation request drift for {protocol_id} on {signal_trade_date}"
             )
+        expected_lineage = {
+            "campaign_id": campaign_id,
+            "observation_source": observation_source,
+            "source_snapshot_id": source_snapshot_id,
+            "paired_input_hash": paired_input_hash,
+        }
+        if row:
+            changed = [
+                key
+                for key, expected in expected_lineage.items()
+                if row.get(key) != expected
+            ]
+            if changed:
+                raise ForwardProtocolDriftError(
+                    f"observation lineage drift for {protocol_id} on "
+                    f"{signal_trade_date}: {', '.join(changed)}"
+                )
         return row
 
     def get_observation(self, observation_id: str) -> dict[str, Any] | None:
@@ -354,7 +402,119 @@ class ForwardObservationRepository:
         *,
         protocol_id: str,
         observation_id: str,
-        selection_run_id: str,
+        selection_run_id: str | None,
+        result: dict[str, Any],
+    ) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                self._finalize_success_with_cursor(
+                    cursor,
+                    protocol_id=protocol_id,
+                    observation_id=observation_id,
+                    selection_run_id=selection_run_id,
+                    result=result,
+                )
+
+    def finalize_paired_success(
+        self,
+        records: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Persist a paired observation atomically without writing selection_result."""
+
+        items = [dict(record) for record in records]
+        if len(items) < 2:
+            raise ValueError("paired forward observation requires at least two strategy records")
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                for record in items:
+                    request_json = _json(record.get("request") or {})
+                    cursor.execute(
+                        """
+                        INSERT IGNORE INTO strategy_forward_observation (
+                            observation_id, protocol_id, campaign_id, signal_trade_date,
+                            source_snapshot_id, paired_input_hash, status,
+                            observation_source, request_json
+                        ) VALUES (%s,%s,%s,%s,%s,%s,'pending_submission',%s,%s)
+                        """,
+                        (
+                            record["observation_id"],
+                            record["protocol_id"],
+                            record.get("campaign_id"),
+                            record["signal_trade_date"],
+                            record.get("source_snapshot_id"),
+                            record.get("paired_input_hash"),
+                            record.get("observation_source") or "automatic_observation",
+                            request_json,
+                        ),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT *
+                        FROM strategy_forward_observation
+                        WHERE observation_id=%s
+                        FOR UPDATE
+                        """,
+                        (record["observation_id"],),
+                    )
+                    existing = cursor.fetchone() or {}
+                    if not existing:
+                        raise RuntimeError(
+                            f"forward observation not found: {record['observation_id']}"
+                        )
+                    expected = {
+                        "protocol_id": record["protocol_id"],
+                        "campaign_id": record.get("campaign_id"),
+                        "observation_source": (
+                            record.get("observation_source")
+                            or "automatic_observation"
+                        ),
+                        "source_snapshot_id": record.get("source_snapshot_id"),
+                        "paired_input_hash": record.get("paired_input_hash"),
+                    }
+                    changed = [
+                        key
+                        for key, value in expected.items()
+                        if existing.get(key) != value
+                    ]
+                    if (
+                        _json(_from_json(existing.get("request_json"), {}) or {})
+                        != request_json
+                    ):
+                        changed.append("request")
+                    if changed:
+                        raise ForwardProtocolDriftError(
+                            f"paired observation lineage drift for "
+                            f"{record['observation_id']}: {', '.join(changed)}"
+                        )
+
+                for record in items:
+                    self._finalize_success_with_cursor(
+                        cursor,
+                        protocol_id=str(record["protocol_id"]),
+                        observation_id=str(record["observation_id"]),
+                        selection_run_id=None,
+                        result=dict(record.get("result") or {}),
+                    )
+
+                placeholders = ",".join(["%s"] * len(items))
+                cursor.execute(
+                    f"""
+                    SELECT *
+                    FROM strategy_forward_observation
+                    WHERE observation_id IN ({placeholders})
+                    ORDER BY protocol_id
+                    """,
+                    tuple(str(record["observation_id"]) for record in items),
+                )
+                return cursor.fetchall() or []
+
+    def _finalize_success_with_cursor(
+        self,
+        cursor: Any,
+        *,
+        protocol_id: str,
+        observation_id: str,
+        selection_run_id: str | None,
         result: dict[str, Any],
     ) -> None:
         result_json = _json(result)
@@ -368,6 +528,7 @@ class ForwardObservationRepository:
                 item.get("opinion_as_of_datetime")
                 or context.get("as_of")
                 or item.get("realtime_quote_time")
+                or item.get("selected_price_quote_time")
             )
             if as_of:
                 data_as_of_candidates.append(_datetime_text(as_of))
@@ -389,62 +550,75 @@ class ForwardObservationRepository:
                 )
             )
 
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT * FROM strategy_forward_observation WHERE observation_id=%s FOR UPDATE",
-                    (observation_id,),
+        cursor.execute(
+            "SELECT * FROM strategy_forward_observation WHERE observation_id=%s FOR UPDATE",
+            (observation_id,),
+        )
+        observation = cursor.fetchone() or {}
+        if not observation:
+            raise RuntimeError(f"forward observation not found: {observation_id}")
+        if observation.get("protocol_id") != protocol_id:
+            raise RuntimeError("forward observation protocol mismatch")
+        if selection_run_id is not None and observation.get("selection_run_id") not in {
+            None,
+            selection_run_id,
+        }:
+            raise RuntimeError("forward observation selection run mismatch")
+        if observation.get("status") == "success":
+            if _json(_from_json(observation.get("result_json"), {}) or {}) != result_json:
+                raise ForwardProtocolDriftError(
+                    "a completed forward observation cannot be rewritten"
                 )
-                observation = cursor.fetchone() or {}
-                if not observation:
-                    raise RuntimeError(f"forward observation not found: {observation_id}")
-                if observation.get("protocol_id") != protocol_id:
-                    raise RuntimeError("forward observation protocol mismatch")
-                if observation.get("selection_run_id") not in {None, selection_run_id}:
-                    raise RuntimeError("forward observation selection run mismatch")
-                if observation.get("status") == "success":
-                    if _json(_from_json(observation.get("result_json"), {}) or {}) != result_json:
-                        raise ForwardProtocolDriftError("a completed forward observation cannot be rewritten")
-                    return
-                signal_trade_date = observation.get("signal_trade_date")
-                if pick_values:
-                    normalized_values = [
-                        (
-                            value[0],
-                            value[1],
-                            signal_trade_date,
-                            *value[3:],
-                        )
-                        for value in pick_values
-                    ]
-                    cursor.executemany(
-                        """
-                        INSERT INTO strategy_forward_pick (
-                            observation_id, protocol_id, signal_trade_date, code, name, rank_no,
-                            score, signal_price, theme_name, trade_grade_state, selection_phase,
-                            opinion_as_of_at, raw_json
-                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        """,
-                        normalized_values,
-                    )
-                cursor.execute(
-                    """
-                    UPDATE strategy_forward_observation
-                    SET selection_run_id=%s, status='success', result_count=%s,
-                        data_as_of_at=%s, ai_mode=%s, ai_status_json=%s, result_json=%s,
-                        error_code=NULL, error_message=NULL, completed_at=NOW()
-                    WHERE observation_id=%s
-                    """,
-                    (
-                        selection_run_id,
-                        len(items),
-                        max(data_as_of_candidates) if data_as_of_candidates else None,
-                        ai_mode,
-                        _json(ai_status),
-                        result_json,
-                        observation_id,
-                    ),
+            return
+        signal_trade_date = observation.get("signal_trade_date")
+        if pick_values:
+            normalized_values = [
+                (
+                    value[0],
+                    value[1],
+                    observation.get("campaign_id"),
+                    observation.get("observation_source")
+                    or "scheduled_forward",
+                    observation.get("source_snapshot_id"),
+                    signal_trade_date,
+                    *value[3:],
                 )
+                for value in pick_values
+            ]
+            cursor.executemany(
+                """
+                INSERT INTO strategy_forward_pick (
+                    observation_id, protocol_id, campaign_id, observation_source,
+                    source_snapshot_id, signal_trade_date, code, name, rank_no,
+                    score, signal_price, theme_name, trade_grade_state,
+                    selection_phase, opinion_as_of_at, raw_json
+                ) VALUES (
+                    %s,%s,%s,%s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                normalized_values,
+            )
+        cursor.execute(
+            """
+            UPDATE strategy_forward_observation
+            SET selection_run_id=COALESCE(selection_run_id, %s),
+                status='success', result_count=%s,
+                data_as_of_at=%s, ai_mode=%s, ai_status_json=%s, result_json=%s,
+                error_code=NULL, error_message=NULL,
+                submitted_at=COALESCE(submitted_at, NOW()), completed_at=NOW()
+            WHERE observation_id=%s
+            """,
+            (
+                selection_run_id,
+                len(items),
+                max(data_as_of_candidates) if data_as_of_candidates else None,
+                ai_mode,
+                _json(ai_status),
+                result_json,
+                observation_id,
+            ),
+        )
 
     def mark_failed(
         self,
@@ -484,7 +658,8 @@ class ForwardObservationRepository:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT p.*, pr.horizons_json, pr.benchmark_codes_json
+                    SELECT p.*, pr.horizons_json, pr.benchmark_codes_json,
+                           pr.entry_rule
                     FROM strategy_forward_pick p
                     INNER JOIN strategy_forward_protocol pr ON pr.protocol_id=p.protocol_id
                     WHERE p.outcome_status <> 'complete'
@@ -495,15 +670,24 @@ class ForwardObservationRepository:
                 )
                 return cursor.fetchall() or []
 
-    def load_price_path(self, code: str, signal_trade_date: str, limit: int = 25) -> list[dict[str, Any]]:
+    def load_price_path(
+        self,
+        code: str,
+        signal_trade_date: str,
+        limit: int = 25,
+        entry_rule: str = "next_tradable_open",
+    ) -> list[dict[str, Any]]:
+        if entry_rule not in {"next_tradable_open", "same_day_open"}:
+            raise ValueError(f"unsupported forward entry rule: {entry_rule}")
+        operator = ">=" if entry_rule == "same_day_open" else ">"
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    """
+                    f"""
                     SELECT dk.trade_date, dk.open, dk.high, dk.low, dk.close, af.adj_factor
                     FROM daily_kline dk
                     LEFT JOIN adj_factor_daily af ON af.code=dk.code AND af.trade_date=dk.trade_date
-                    WHERE dk.code=%s AND dk.trade_date>%s
+                    WHERE dk.code=%s AND dk.trade_date{operator}%s
                     ORDER BY dk.trade_date ASC
                     LIMIT %s
                     """,
@@ -633,8 +817,10 @@ class ForwardObservationRepository:
                 protocol_id = protocol.get("protocol_id")
                 cursor.execute(
                     """
-                    SELECT observation_id, signal_trade_date, selection_run_id, status, result_count,
-                           data_as_of_at, ai_mode, ai_status_json, error_code, error_message,
+                    SELECT observation_id, campaign_id, observation_source,
+                           signal_trade_date, selection_run_id, source_snapshot_id,
+                           paired_input_hash, status, result_count, data_as_of_at,
+                           ai_mode, ai_status_json, error_code, error_message,
                            submitted_at, completed_at, created_at
                     FROM strategy_forward_observation
                     WHERE protocol_id=%s ORDER BY signal_trade_date, id
@@ -644,8 +830,10 @@ class ForwardObservationRepository:
                 observations = cursor.fetchall() or []
                 cursor.execute(
                     """
-                    SELECT observation_id, signal_trade_date, code, name, rank_no, score,
-                           theme_name, trade_grade_state, entry_trade_date, entry_price,
+                    SELECT observation_id, campaign_id, observation_source,
+                           source_snapshot_id, signal_trade_date, code, name,
+                           rank_no, score, theme_name, trade_grade_state,
+                           entry_trade_date, entry_price,
                            price_adjustment_mode, return_1d_pct, return_3d_pct,
                            return_5d_pct, return_20d_pct, max_favorable_5d_pct,
                            max_adverse_5d_pct, max_favorable_20d_pct, max_adverse_20d_pct,
@@ -685,7 +873,10 @@ def build_forward_outcome(
     *,
     horizons: Iterable[int],
     benchmark_paths: dict[str, list[dict[str, Any]]] | None = None,
+    entry_rule: str = "next_tradable_open",
 ) -> dict[str, Any]:
+    if entry_rule not in {"next_tradable_open", "same_day_open"}:
+        raise ValueError(f"unsupported forward entry rule: {entry_rule}")
     requested_horizons = sorted({int(value) for value in horizons if int(value) > 0})
     if not price_path:
         return {
@@ -782,7 +973,7 @@ def build_forward_outcome(
         "status": status,
         "entry_trade_date": entry_date,
         "entry_price": round(entry_price, 4),
-        "entry_rule": "next_tradable_open",
+        "entry_rule": entry_rule,
         "returns": returns,
         "horizons": horizon_details,
         "max_favorable_5d_pct": mfe5,
@@ -850,6 +1041,7 @@ class ForwardObservationService:
                 str(pick.get("code")),
                 str(pick.get("signal_trade_date")),
                 limit=max(max(int(value) for value in horizons), 20) + 5,
+                entry_rule=str(pick.get("entry_rule") or "next_tradable_open"),
             )
             benchmark_paths: dict[str, list[dict[str, Any]]] = {}
             if price_path:
@@ -862,6 +1054,7 @@ class ForwardObservationService:
                 price_path,
                 horizons=horizons,
                 benchmark_paths=benchmark_paths,
+                entry_rule=str(pick.get("entry_rule") or "next_tradable_open"),
             )
             self.repository.update_pick_outcome(int(pick["id"]), outcome)
             status = str(outcome.get("status") or "pending")
@@ -961,6 +1154,8 @@ class ForwardObservationService:
             "strategy_id": strategy_id,
             "protocol": {
                 "protocol_id": protocol.get("protocol_id"),
+                "campaign_id": protocol.get("campaign_id"),
+                "observation_source": protocol.get("observation_source"),
                 "strategy_version": protocol.get("strategy_version"),
                 "protocol_version": protocol.get("protocol_version"),
                 "execution_time": _time_text(protocol.get("execution_time")),
@@ -1011,6 +1206,10 @@ class ForwardObservationService:
             "recent_observations": [
                 {
                     "observation_id": row.get("observation_id"),
+                    "campaign_id": row.get("campaign_id"),
+                    "observation_source": row.get("observation_source"),
+                    "source_snapshot_id": row.get("source_snapshot_id"),
+                    "paired_input_hash": row.get("paired_input_hash"),
                     "signal_trade_date": _date_text(row.get("signal_trade_date")),
                     "status": row.get("status"),
                     "result_count": int(row.get("result_count") or 0),
@@ -1053,6 +1252,9 @@ def _recent_pick_payload(
     action_rows = actions_by_pick.get((observation_id, code), [])
     return {
         "observation_id": row.get("observation_id"),
+        "campaign_id": row.get("campaign_id"),
+        "observation_source": row.get("observation_source"),
+        "source_snapshot_id": row.get("source_snapshot_id"),
         "signal_trade_date": _date_text(row.get("signal_trade_date")),
         "code": row.get("code"),
         "name": row.get("name"),

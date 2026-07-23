@@ -30,7 +30,7 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "data_quality_audit",
                 "fundamental_pit_backfill",
                 "index_constituent_pit_backfill",
-                "strategy_forward_observation_submit",
+                "automatic_strategy_observation",
                 "strategy_forward_outcome_update",
                 "adj_factor_history_backfill",
                 "stock_technical_feature_daily_refresh",
@@ -51,6 +51,11 @@ class SystemTaskRegistryTests(unittest.TestCase):
         self.assertIn("refresh_operational_read_models.py", source)
         self.assertIn("operational_read_models_refresh.log", source)
         self.assertIn('"$OPERATIONAL_READ_MODELS_JOB"', source)
+        self.assertIn('AUTOMATIC_OBSERVATION_JOB="25 9 * * 1-5', source)
+        self.assertIn("run_automatic_strategy_observation.py", source)
+        self.assertIn("automatic_strategy_observation.log", source)
+        self.assertIn('"$AUTOMATIC_OBSERVATION_JOB"', source)
+        self.assertNotIn('FORWARD_OBSERVATION_JOB="20 16', source)
 
     def test_old_running_task_is_exposed_as_stale(self):
         conn_context = MagicMock()

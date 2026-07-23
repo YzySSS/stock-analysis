@@ -18,6 +18,13 @@
 `experimental / shadow_only / prototype`。它只允许测试、候选快照和同批影子
 对照，不能从普通选股 API 创建任务，也不会自动晋级或替换 `0.4.4`。
 
+从 `2026-07-24` 起，`0.4.4` 与 `0.5.0` 会在交易日 `09:25` 使用同一批
+集合竞价输入做配对观察，累计 5 个成功交易日后自动停止物化。结果只写入
+`strategy_forward_*` 前瞻观察与执行复盘表，按当日开盘价计算后续表现；
+不会写入 `selection_result`，也不会进入用户手动选股的 14 天统计。以后新增
+的 `shadow_only` 策略必须带不可变版本标签，并自动继承同样的 5 交易日配对
+观察规则，不能自行跳过。
+
 其他非舆情、历史和诊断失败的选股策略已从注册表与执行代码中移除。通用回测框架仍保留，用于查看历史任务和承接未来经过单独冻结、验证的策略；两个舆情版本的 `backtest_status` 均为 `disabled`，不能直接发起回测。
 
 跟踪复盘按入选时间统计最近 14 个自然日内的已保存结果，不因策略升级排除旧版本；每条 `selection_result` 都会显式保存并展示当时实际执行的 `strategy_version`。超过 14 天或被手动标记为“不统计”的记录不进入汇总。
@@ -148,6 +155,7 @@ PYTHONPATH=. .venv/bin/python scripts/run_market_opinion_lifecycle.py       # �
 PYTHONPATH=. .venv/bin/python scripts/run_market_opinion_lifecycle.py --apply
 PYTHONPATH=. .venv/bin/python scripts/run_job_retention.py                  # 默认 dry-run
 PYTHONPATH=. .venv/bin/python scripts/run_job_retention.py --apply
+PYTHONPATH=. .venv/bin/python scripts/run_automatic_strategy_observation.py --dry-run
 ```
 
 ## 部署

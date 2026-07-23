@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from app.orchestration.adj_factor_schema import ensure_adj_factor_manifest_schema
+from app.orchestration.automatic_observation_schema import ensure_automatic_observation_schema
 from app.jobs.schema import ensure_job_ops_schema
 from app.orchestration.durable_task_schema import ensure_durable_task_schema
 from app.orchestration.backtest_validation_schema import ensure_backtest_validation_schema
@@ -112,6 +113,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0025", "durable API asynchronous task queue", ensure_durable_task_schema),
     Migration("0026", "realtime lifecycle source fingerprint schema", ensure_realtime_lifecycle_schema),
     Migration("0027", "selection result strategy lineage and cross-version 14-day statistics", ensure_selection_result_version_schema),
+    Migration("0028", "automatic paired strategy observation campaign schema", ensure_automatic_observation_schema),
 )
 
 

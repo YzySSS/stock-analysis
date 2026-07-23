@@ -8,10 +8,12 @@ FORWARD_OBSERVATION_DDL = (
     CREATE TABLE IF NOT EXISTS strategy_forward_protocol (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         protocol_id VARCHAR(96) NOT NULL,
+        campaign_id VARCHAR(96) DEFAULT NULL,
         strategy_id VARCHAR(64) NOT NULL,
         strategy_version VARCHAR(32) NOT NULL,
         protocol_version VARCHAR(48) NOT NULL,
         status VARCHAR(24) NOT NULL DEFAULT 'active',
+        observation_source VARCHAR(32) NOT NULL DEFAULT 'scheduled_forward',
         execution_time TIME NOT NULL,
         timezone VARCHAR(48) NOT NULL DEFAULT 'Asia/Shanghai',
         entry_rule VARCHAR(64) NOT NULL,
@@ -31,7 +33,8 @@ FORWARD_OBSERVATION_DDL = (
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_strategy_forward_protocol (protocol_id),
         KEY idx_strategy_forward_protocol_strategy (strategy_id, status),
-        KEY idx_strategy_forward_protocol_started (started_on)
+        KEY idx_strategy_forward_protocol_started (started_on),
+        KEY idx_strategy_forward_protocol_campaign (campaign_id, strategy_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -39,9 +42,13 @@ FORWARD_OBSERVATION_DDL = (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         observation_id VARCHAR(96) NOT NULL,
         protocol_id VARCHAR(96) NOT NULL,
+        campaign_id VARCHAR(96) DEFAULT NULL,
         signal_trade_date DATE NOT NULL,
         selection_run_id VARCHAR(64) DEFAULT NULL,
+        source_snapshot_id VARCHAR(96) DEFAULT NULL,
+        paired_input_hash CHAR(64) DEFAULT NULL,
         status VARCHAR(32) NOT NULL DEFAULT 'pending_submission',
+        observation_source VARCHAR(32) NOT NULL DEFAULT 'scheduled_forward',
         result_count INT NOT NULL DEFAULT 0,
         data_as_of_at DATETIME DEFAULT NULL,
         ai_mode VARCHAR(48) DEFAULT NULL,
@@ -58,7 +65,9 @@ FORWARD_OBSERVATION_DDL = (
         UNIQUE KEY uniq_strategy_forward_protocol_date (protocol_id, signal_trade_date),
         UNIQUE KEY uniq_strategy_forward_selection_run (selection_run_id),
         KEY idx_strategy_forward_observation_status (status, signal_trade_date),
-        KEY idx_strategy_forward_observation_protocol (protocol_id, signal_trade_date)
+        KEY idx_strategy_forward_observation_protocol (protocol_id, signal_trade_date),
+        KEY idx_strategy_forward_observation_campaign (campaign_id, signal_trade_date, status),
+        KEY idx_strategy_forward_observation_snapshot (source_snapshot_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
@@ -66,6 +75,9 @@ FORWARD_OBSERVATION_DDL = (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         observation_id VARCHAR(96) NOT NULL,
         protocol_id VARCHAR(96) NOT NULL,
+        campaign_id VARCHAR(96) DEFAULT NULL,
+        observation_source VARCHAR(32) NOT NULL DEFAULT 'scheduled_forward',
+        source_snapshot_id VARCHAR(96) DEFAULT NULL,
         signal_trade_date DATE NOT NULL,
         code VARCHAR(16) NOT NULL,
         name VARCHAR(64) DEFAULT NULL,
@@ -97,7 +109,8 @@ FORWARD_OBSERVATION_DDL = (
         UNIQUE KEY uniq_strategy_forward_pick (observation_id, code),
         KEY idx_strategy_forward_pick_protocol (protocol_id, signal_trade_date),
         KEY idx_strategy_forward_pick_code (code, signal_trade_date),
-        KEY idx_strategy_forward_pick_outcome (outcome_status, signal_trade_date)
+        KEY idx_strategy_forward_pick_outcome (outcome_status, signal_trade_date),
+        KEY idx_strategy_forward_pick_campaign (campaign_id, signal_trade_date, rank_no)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
     """
