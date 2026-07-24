@@ -735,14 +735,47 @@ function formatTradePlanInline(plan = null, status = null) {
   return `买入 ${formatNumber(entryZone.low ?? plan.entry_price, 3)}-${formatNumber(entryZone.high ?? plan.entry_price, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${riskRewardText}${statusText}`;
 }
 
+function formatTurtleShadowInline(plan = null) {
+  const shadow = plan?.research_shadow;
+  if (!shadow) return '';
+  const state = shadow.state_label || shadow.state || '研究观察';
+  if (shadow.state === 'no_trade' || !shadow.entry) {
+    return `海龟V4（研究）：${state} · ${shadow.state_reason || shadow.reasons?.[0] || '条件不足'}`;
+  }
+  const entry = shadow.entry || {};
+  const risk = shadow.risk || {};
+  const exits = shadow.exits || {};
+  const firstAdd = Array.isArray(shadow.add_levels) ? shadow.add_levels[0] : null;
+  const sizing = risk.unit_shares != null
+    ? ` · 本账户单元 ${risk.unit_shares}股`
+    : risk.shares_per_reference_equity != null
+      ? ` · 每10万元参考 ${risk.shares_per_reference_equity}股`
+      : '';
+  const addText = firstAdd != null ? ` · 盈利加仓 ${formatNumber(firstAdd, 3)}` : ' · 当前不允许加仓';
+  const trendExitText = exits.trend_exit != null ? ` · 趋势退出 ${formatNumber(exits.trend_exit, 3)}` : '';
+  const timeExitText = exits.time_exit_trade_days != null
+    ? ` · ${exits.time_exit_trade_days}日未达+${formatNumber(exits.time_exit_minimum_progress_n, 1)}N退出`
+    : '';
+  const partialExitText = exits.optional_partial_take_profit != null
+    ? ` · 可选减半 ${formatNumber(exits.optional_partial_take_profit, 3)}`
+    : '';
+  return `海龟V4（研究）：${state} · 触发 ${formatNumber(entry.trigger, 3)} · 区间 ${formatNumber(entry.zone_low, 3)}-${formatNumber(entry.zone_high, 3)} · 止损 ${formatNumber(risk.initial_stop, 3)} · N20 ${formatNumber(shadow.n20, 3)}${sizing}${addText}${trendExitText}${timeExitText}${partialExitText}`;
+}
+
 function renderTradePlanBlock(plan = null, status = null) {
   const text = formatTradePlanInline(plan, status);
   if (!text) return '';
   const reasons = Array.isArray(plan.reasons) ? plan.reasons.slice(0, 2).join('；') : '';
+  const turtleText = formatTurtleShadowInline(plan);
+  const turtleWarnings = Array.isArray(plan?.research_shadow?.warnings)
+    ? plan.research_shadow.warnings.slice(0, 2).join('；')
+    : '';
   return `
     <div class="trade-plan-block">
       <div>${escapeHtml(text)}</div>
       ${reasons ? `<div class="muted">${escapeHtml(reasons)}</div>` : ''}
+      ${turtleText ? `<div>${escapeHtml(turtleText)}</div>` : ''}
+      ${turtleWarnings ? `<div class="muted">${escapeHtml(turtleWarnings)}</div>` : ''}
     </div>
   `;
 }
@@ -766,6 +799,7 @@ function renderSelectionResultCards(items = [], emptyText = '暂无达标标的'
     const tradeBadgeClass = tradeState === 'tradable' ? 'status-ok' : tradeState === 'weak' ? 'status-error' : tradeState === 'watch' ? 'status-warn' : 'status-muted';
     const pctClass = getPctClass(item.price_change_pct) || '';
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
+    const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
     return `
       <article class="selection-stock-card">
         <div class="selection-stock-head">
@@ -789,6 +823,7 @@ function renderSelectionResultCards(items = [], emptyText = '暂无达标标的'
           <span>最新 ${formatPrice(item.current_price)}</span>
         </div>
         ${tradePlanText ? `<div class="selection-card-note">${escapeHtml(tradePlanText)}</div>` : ''}
+        ${turtlePlanText ? `<div class="selection-card-note">${escapeHtml(turtlePlanText)}</div>` : ''}
         <div class="selection-factor-mini">${escapeHtml(factorSummary)}</div>
         ${sentimentContext ? `<div class="selection-card-note">${escapeHtml(renderSentimentContextInline(sentimentContext))}</div>` : ''}
         <div class="selection-card-note">${escapeHtml(reasons)}</div>
@@ -980,6 +1015,7 @@ function renderSelectionResults(data) {
       ? `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 缺失 ${fundamentalMissingFields.join(', ')}`
       : `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 关键字段齐全`;
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
+    const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
     const peStatusHint = item.pe_status_label
       ? `PE状态：${item.pe_status_label}${item.pe_status_reason ? `（${item.pe_status_reason}）` : ''}`
       : null;
@@ -1000,6 +1036,7 @@ function renderSelectionResults(data) {
       `交易状态：${tradeLabel || '-'}${sentimentContext?.trade_signal_reason ? `，${sentimentContext.trade_signal_reason}` : ''}`,
       `分级说明：${sentimentContext?.trade_grade_reason || item.trade_grade_reason || '-'}`,
       `买卖计划：${tradePlanText || '-'}`,
+      `海龟V4研究计划：${turtlePlanText || '-'}`,
       `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
       peStatusHint,
       `基本面：${fundamentalHint}`,
@@ -1035,6 +1072,7 @@ function renderSelectionResults(data) {
           <div>${escapeHtml(reasons)}</div>
           <div class="muted">共 ${reasonsList.length} 条</div>
           ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
+          ${turtlePlanText ? `<div class="muted">${escapeHtml(turtlePlanText)}</div>` : ''}
         </td>
         <td>
           <div>${escapeHtml(risks)}</div>

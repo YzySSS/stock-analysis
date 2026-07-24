@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from app.stock_selection.sentiment_snapshot import SnapshotStageResult, SnapshotValidation
 from app.stock_selection.dataset_scope import (
@@ -117,6 +118,13 @@ class FakeInputRepository:
     def open_consistent_inputs(self, **kwargs):
         self.open_calls.append(kwargs)
 
+        @contextmanager
+        def borrowed_connection(*, dict_cursor=True):
+            self.borrowed_dict_cursor = dict_cursor
+            yield object()
+
+        self.borrowed_connection_factory = borrowed_connection
+
         def register_read_view(rows):
             self.asserted_rows = list(rows)
             return SourceDatasetBatch(
@@ -137,6 +145,7 @@ class FakeInputRepository:
             selection_repository=object(),  # type: ignore[arg-type]
             _register_read_view=register_read_view,
             _commit=self._commit,
+            read_connection_factory=borrowed_connection,
         )
         yield prepared
 
@@ -342,7 +351,14 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         self.assertEqual(selector_calls, [])
         self.assertEqual(snapshots.calls, [])
 
-    def test_materializes_exact_audited_universe_without_external_provider(self):
+    @patch(
+        "app.stock_selection.sentiment_snapshot_materializer."
+        "attach_turtle_research_shadow"
+    )
+    def test_materializes_exact_audited_universe_without_external_provider(
+        self,
+        attach_shadow,
+    ):
         rows = self.candidate_rows()
         audit = input_audit()
         inputs = FakeInputRepository(audit, rows)
@@ -358,12 +374,25 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
                     "trade_grade_state": "tradable",
                     "trade_grade_reason": "all gates passed",
                     "factors": {"sector_heat": 80},
-                    "explain": {"reason": "fixture"},
-                    "trade_plan": {"invalidates_on": "fixture"},
+                    "explain": {
+                        "reason": "fixture",
+                        "raw_metrics": {"industry": "银行"},
+                    },
+                    "trade_plan": {
+                        "version": "selection_trade_plan_v3_risk_control",
+                        "invalidates_on": "fixture",
+                    },
                     "close": 10.5,
                 }
             ],
         )
+        attach_shadow.return_value = {
+            "version": "selection_trade_plan_v3_risk_control",
+            "invalidates_on": "fixture",
+            "research_shadow": {
+                "version": "selection_trade_plan_v4_turtle_risk",
+            },
+        }
         service = SentimentSnapshotMaterializationService(
             input_repository=inputs,  # type: ignore[arg-type]
             snapshot_repository=snapshots,  # type: ignore[arg-type]
@@ -391,7 +420,21 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         candidate = published["candidates"][0]
         self.assertTrue(candidate["is_selected"])
         self.assertTrue(candidate["is_tradable"])
+        self.assertEqual(candidate["industry"], "银行")
         self.assertEqual(candidate["factor_json"], {"sector_heat": 80})
+        self.assertEqual(
+            candidate["trade_plan_json"]["research_shadow"]["version"],
+            "selection_trade_plan_v4_turtle_risk",
+        )
+        attach_shadow.assert_called_once()
+        self.assertEqual(
+            attach_shadow.call_args.kwargs["strategy_id"],
+            "a_share_sentiment",
+        )
+        self.assertIs(
+            attach_shadow.call_args.kwargs["connection_factory"],
+            inputs.borrowed_connection_factory,
+        )
         injected = selector.bundle["candidates"][0]
         self.assertEqual(injected["freshness_status"], "fresh")
         self.assertEqual(injected["market_coverage_ratio"], 0.99)

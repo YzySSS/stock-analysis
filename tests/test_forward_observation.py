@@ -10,8 +10,10 @@ from app.stock_selection.forward_observation import (
     ForwardProtocolDriftError,
     ForwardProtocolSpec,
     build_forward_outcome,
+    build_turtle_forward_outcome,
     strategy_config_hash,
 )
+from app.stock_selection.turtle_trade_plan import EXPECTED_SPEC_SHA256
 from app.stock_selection.run_tasks import SelectionRunService, SelectionTaskPayload
 from scripts.run_strategy_forward_observation import (
     BASE_REQUEST,
@@ -206,6 +208,184 @@ class ForwardOutcomeTests(unittest.TestCase):
         self.assertEqual(outcome["entry_trade_date"], "2026-07-21")
         self.assertEqual(outcome["entry_rule"], "same_day_open")
         self.assertEqual(outcome["returns"]["1"], 0.0)
+
+    @staticmethod
+    def _turtle_item() -> dict:
+        return {
+            "code": "sh.600000",
+            "selected_price_quote_time": "2026-07-21 09:25:00",
+            "trade_plan": {
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": EXPECTED_SPEC_SHA256,
+                    "decision_time": "2026-07-21 09:25:00",
+                    "state": "watch",
+                    "reference_price": 9.95,
+                    "n20": 0.20,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.00,
+                        "zone_low": 10.00,
+                        "zone_high": 10.10,
+                        "expires_after_trade_days": 3,
+                    },
+                    "risk": {},
+                    "exits": {"trend_exit": 9.50},
+                }
+            },
+        }
+
+    def test_turtle_forward_outcome_persists_plan_entry_add_and_exit_evidence(self):
+        path = [
+            {
+                "trade_date": f"2026-07-{21 + index:02d}",
+                "open": 9.95 if index == 0 else 10.05 + index * 0.05,
+                "high": 10.05 + index * 0.10,
+                "low": 9.85 + index * 0.05,
+                "close": 10.02 + index * 0.10,
+                "prev_close": 9.90 if index == 0 else 10.02 + (index - 1) * 0.10,
+                "adj_factor": 1.0,
+            }
+            for index in range(6)
+        ]
+        path[-1]["low"] = 9.95
+        path[-1]["close"] = 10.00
+
+        evaluation, events = build_turtle_forward_outcome(
+            raw_item=self._turtle_item(),
+            price_path=path,
+            strategy_id="a_share_sentiment",
+            observation_id="obs-v4",
+            signal_trade_date="2026-07-21",
+            source_snapshot_id="snapshot-v4",
+        )
+
+        self.assertEqual(evaluation["status"], "complete")
+        self.assertEqual(
+            evaluation["trade"]["trade_plan_spec_hash"],
+            EXPECTED_SPEC_SHA256,
+        )
+        self.assertEqual(
+            [item["event_type"] for item in events],
+            ["plan_created", "entry_triggered", "add_triggered", "exit_triggered"],
+        )
+        self.assertEqual(events[0]["snapshot_id"], "snapshot-v4")
+
+    def test_turtle_forward_outcome_stays_pending_before_holding_window_matures(self):
+        path = [
+            {
+                "trade_date": f"2026-07-{21 + index:02d}",
+                "open": 10.00,
+                "high": 10.08,
+                "low": 9.90,
+                "close": 10.04,
+                "prev_close": 9.95,
+                "adj_factor": 1.0,
+            }
+            for index in range(2)
+        ]
+
+        evaluation, events = build_turtle_forward_outcome(
+            raw_item=self._turtle_item(),
+            price_path=path,
+            strategy_id="a_share_sentiment",
+            observation_id="obs-pending",
+            signal_trade_date="2026-07-21",
+            source_snapshot_id=None,
+        )
+
+        self.assertEqual(evaluation["status"], "pending")
+        self.assertEqual(
+            evaluation["rejection_reason"],
+            "turtle_holding_pending",
+        )
+        self.assertEqual(
+            [item["event_type"] for item in events],
+            ["plan_created"],
+        )
+
+    def test_turtle_forward_outcome_marks_open_winner_as_censored(self):
+        path = [
+            {
+                "trade_date": (
+                    date(2026, 7, 21) + timedelta(days=index)
+                ).isoformat(),
+                "open": 10.00 + index * 0.04,
+                "high": 10.08 + index * 0.04,
+                "low": 9.90 + index * 0.04,
+                "close": 10.04 + index * 0.04,
+                "prev_close": 9.95 + index * 0.04,
+                "adj_factor": 1.0,
+            }
+            for index in range(20)
+        ]
+
+        evaluation, events = build_turtle_forward_outcome(
+            raw_item=self._turtle_item(),
+            price_path=path,
+            strategy_id="a_share_sentiment",
+            observation_id="obs-censored",
+            signal_trade_date="2026-07-21",
+            source_snapshot_id=None,
+        )
+
+        self.assertEqual(evaluation["status"], "censored")
+        self.assertEqual(
+            evaluation["rejection_reason"],
+            "turtle_open_at_evaluation_horizon",
+        )
+        self.assertEqual(events[-1]["event_type"], "evaluation_censored")
+
+    def test_refresh_keeps_pick_open_when_signal_horizon_matures_before_trade_plan(self):
+        repository = MagicMock()
+        events = MagicMock()
+        raw_item = self._turtle_item()
+        repository.pending_outcome_picks.return_value = [
+            {
+                "id": 1,
+                "code": "sh.600000",
+                "signal_trade_date": "2026-07-21",
+                "entry_rule": "next_tradable_open",
+                "horizons_json": [1, 3, 5, 20],
+                "benchmark_codes_json": [],
+                "raw_json": raw_item,
+                "strategy_id": "a_share_sentiment",
+                "observation_id": "obs-late-entry",
+                "source_snapshot_id": "snapshot-late-entry",
+            }
+        ]
+        path = []
+        for index in range(20):
+            triggered = index >= 2
+            base = 10.00 + max(index - 2, 0) * 0.04
+            path.append(
+                {
+                    "trade_date": (
+                        date(2026, 7, 21) + timedelta(days=index)
+                    ).isoformat(),
+                    "open": base if triggered else 9.80,
+                    "high": base + 0.08 if triggered else 9.90,
+                    "low": base - 0.10 if triggered else 9.70,
+                    "close": base + 0.04 if triggered else 9.82,
+                    "prev_close": base - 0.02,
+                    "adj_factor": 1.0,
+                }
+            )
+        repository.load_price_path.return_value = path
+        repository.load_benchmark_path.return_value = {}
+
+        result = ForwardObservationService(
+            repository=repository,
+            trade_plan_events=events,
+        ).refresh_outcomes()
+
+        self.assertEqual(result["partial"], 1)
+        saved_outcome = repository.update_pick_outcome.call_args.args[1]
+        self.assertEqual(saved_outcome["status"], "partial")
+        self.assertEqual(
+            saved_outcome["trade_plan_evaluation"]["status"],
+            "pending",
+        )
 
 
 class ForwardSubmissionTests(unittest.TestCase):

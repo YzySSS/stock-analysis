@@ -26,6 +26,7 @@ def candidate(
     return {
         "code": code,
         "name": "浦发银行",
+        "industry": "银行",
         "candidate_state": "eligible",
         "is_selected": True,
         "is_tradable": True,
@@ -241,7 +242,7 @@ class SentimentSnapshotRepositoryTests(unittest.TestCase):
         )
 
         stored_params = cursor.executemany_calls[0][1][0]
-        stored_explain = json.loads(stored_params[18])
+        stored_explain = json.loads(stored_params[19])
         self.assertEqual(stored_explain["summary"], "fixture")
         self.assertEqual(
             stored_explain[SELECTION_CONTRACT_ENVELOPE_KEY]["signal_grade"],
@@ -260,6 +261,7 @@ class SentimentSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(decoded["gate_results"], {"hard_gate_pass": True})
         self.assertEqual(decoded["evidence_ids"], ["news-1", "news-2"])
         self.assertEqual(decoded["ai_status"], "advisory_only")
+        self.assertEqual(decoded["industry"], "银行")
         self.assertEqual(decoded["explain_json"], {"summary": "fixture"})
 
     def test_invalid_stage_is_persisted_as_rejected_not_ready(self):

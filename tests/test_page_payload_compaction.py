@@ -23,6 +23,37 @@ class PagePayloadCompactionTests(unittest.TestCase):
                 "entry_zone": {"low": 9.9, "high": 10.1, "unused": "z" * 500},
                 "stop_loss": {"price": 9.5, "reason": "unused"},
                 "take_profit": [{"price": 11}, {"price": 12}],
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": "a" * 64,
+                    "status": "research_only_shadow",
+                    "state": "breakout_ready",
+                    "state_label": "突破待确认",
+                    "state_reason": "等待触发",
+                    "n20": 0.2,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.2,
+                        "zone_low": 10.2,
+                        "zone_high": 10.3,
+                        "unused": "x" * 5000,
+                    },
+                    "risk": {
+                        "initial_stop": 9.8,
+                        "shares_per_reference_equity": 800,
+                        "unused": "x" * 5000,
+                    },
+                    "add_levels": [10.3, 10.4],
+                    "exits": {
+                        "trend_exit": 9.7,
+                        "time_exit_trade_days": 5,
+                        "time_exit_minimum_progress_n": 0.5,
+                        "optional_partial_take_profit": 11.0,
+                        "unused": "x" * 5000,
+                    },
+                    "warnings": ["只读研究", "不自动交易", "unused"],
+                    "technical": {"large": "x" * 5000},
+                },
             },
             "trade_plan_status": {"status": "tracking", "status_label": "跟踪中", "completed": False, "unused": "x"},
         }
@@ -31,6 +62,27 @@ class PagePayloadCompactionTests(unittest.TestCase):
 
         self.assertEqual(compact["code"], "sh.600000")
         self.assertEqual(compact["trade_plan"]["take_profit"], [{"price": 11}])
+        self.assertEqual(
+            compact["trade_plan"]["research_shadow"]["entry"]["trigger"],
+            10.2,
+        )
+        self.assertEqual(
+            compact["trade_plan"]["research_shadow"]["add_levels"],
+            [10.3],
+        )
+        self.assertEqual(
+            compact["trade_plan"]["research_shadow"]["exits"],
+            {
+                "trend_exit": 9.7,
+                "time_exit_trade_days": 5,
+                "time_exit_minimum_progress_n": 0.5,
+                "optional_partial_take_profit": 11.0,
+            },
+        )
+        self.assertNotIn(
+            "technical",
+            compact["trade_plan"]["research_shadow"],
+        )
         self.assertNotIn("factor_scores", compact)
         self.assertNotIn("sentiment_context", compact)
         self.assertLess(len(json.dumps(compact)), len(json.dumps(raw)) / 10)

@@ -31,6 +31,9 @@ from app.orchestration.realtime_lifecycle_schema import ensure_realtime_lifecycl
 from app.orchestration.realtime_schema import ensure_realtime_schema
 from app.orchestration.selection_result_schema import ensure_selection_result_version_schema
 from app.orchestration.selection_run_schema import ensure_selection_run_schema
+from app.orchestration.selection_trade_plan_v4_schema import (
+    ensure_selection_trade_plan_v4_schema,
+)
 from app.orchestration.sentiment_consistency_schema import ensure_sentiment_consistency_schema
 from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
 from app.orchestration.stock_status_pit_schema import ensure_stock_status_pit_schema
@@ -116,6 +119,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0027", "selection result strategy lineage and cross-version 14-day statistics", ensure_selection_result_version_schema),
     Migration("0028", "automatic paired strategy observation campaign schema", ensure_automatic_observation_schema),
     Migration("0029", "market timing V1.9 versioned indicator schema", ensure_market_timing_v19_schema),
+    Migration("0030", "selection trade-plan V4 shadow and immutable industry snapshot schema", ensure_selection_trade_plan_v4_schema),
 )
 
 

@@ -10,6 +10,10 @@ from statistics import mean
 from typing import Any, Callable, Iterable
 
 from app.shared.db import mysql_conn
+from app.stock_selection.trade_plan_events import (
+    TradePlanEventRepository,
+    immutable_trade_plan_id,
+)
 
 
 ConnectionFactory = Callable[..., AbstractContextManager]
@@ -168,6 +172,181 @@ def _pick_theme(item: dict[str, Any]) -> str | None:
         or item.get("sector_name")
         or context.get("sector_name")
     )
+
+
+def build_turtle_forward_outcome(
+    *,
+    raw_item: dict[str, Any],
+    price_path: list[dict[str, Any]],
+    strategy_id: str,
+    observation_id: str,
+    signal_trade_date: str,
+    source_snapshot_id: str | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Evaluate the frozen V4 plan without relabelling the selection protocol.
+
+    Daily OHLC cannot identify the exact intraday order of trigger and stop, so
+    the shared backtest resolver uses the conservative stop-first assumption.
+    This evaluation is gross of trading costs and remains research-only.
+    """
+
+    trade_plan = raw_item.get("trade_plan")
+    if not isinstance(trade_plan, dict):
+        return {"status": "not_applicable"}, []
+    shadow = trade_plan.get("research_shadow")
+    if not isinstance(shadow, dict):
+        return {"status": "not_applicable"}, []
+
+    from app.backtest.service import BacktestRequest, BacktestService
+
+    code = str(raw_item.get("code") or "")
+    spec_hash = str(shadow.get("spec_hash") or "")
+    plan_version = str(
+        shadow.get("version") or "selection_trade_plan_v4_turtle_risk"
+    )
+    plan_id = immutable_trade_plan_id(
+        source_kind="forward",
+        source_id=observation_id,
+        code=code,
+        spec_hash=spec_hash,
+    )
+    request = BacktestRequest(
+        strategy_id=strategy_id,
+        start_date=signal_trade_date,
+        end_date=signal_trade_date,
+        return_mode="turtle_selection_risk_v1",
+        trade_strategy_id="turtle_selection_risk_v1",
+        use_adjusted_price=True,
+        apply_execution_constraints=True,
+    )
+    trade, rejection = BacktestService()._resolve_turtle_trade(
+        run_id=f"forward_{observation_id}",
+        strategy_id=strategy_id,
+        signal_date=signal_trade_date,
+        pick={"code": code, "trade_plan": trade_plan},
+        bars=price_path,
+        request=request,
+    )
+    pending_reasons = {
+        "turtle_entry_pending",
+        "turtle_holding_pending",
+        "turtle_stop_pending_limit_down",
+        "turtle_time_exit_pending_limit_down",
+        "turtle_missing_holding_bars",
+    }
+    censor_reasons = {"turtle_open_at_evaluation_horizon"}
+    status = (
+        "complete"
+        if trade and trade.get("return_3d_pct") is not None
+        else "blocked"
+        if trade
+        else "censored"
+        if rejection in censor_reasons
+        else "pending"
+        if rejection in pending_reasons
+        else "not_triggered"
+    )
+    evaluation = {
+        "status": status,
+        "plan_id": plan_id,
+        "trade_strategy_id": "turtle_selection_risk_v1",
+        "trade_plan_version": plan_version,
+        "spec_hash": spec_hash or None,
+        "evaluation_method": "daily_ohlc_conservative_stop_first_v1",
+        "return_basis": "adjusted_gross_before_costs",
+        "rejection_reason": rejection,
+        "trade": trade,
+    }
+
+    decision_time = str(
+        shadow.get("decision_time")
+        or raw_item.get("selected_price_quote_time")
+        or f"{signal_trade_date} 15:00:00"
+    ).replace("T", " ")[:19]
+    common = {
+        "plan_id": plan_id,
+        "selection_result_id": None,
+        "snapshot_id": source_snapshot_id,
+        "code": code,
+        "trade_plan_version": plan_version,
+        "spec_hash": spec_hash or None,
+    }
+    events: list[dict[str, Any]] = [
+        {
+            **common,
+            "event_time": decision_time,
+            "event_type": "plan_created",
+            "planned_price": (shadow.get("entry") or {}).get("trigger"),
+            "observed_price": shadow.get("reference_price"),
+            "executable": False,
+            "block_reason": None,
+            "metadata": {
+                "observation_id": observation_id,
+                "strategy_id": strategy_id,
+                "signal_trade_date": signal_trade_date,
+                "state": shadow.get("state"),
+                "event_time_semantics": "frozen_decision_time",
+            },
+        }
+    ]
+    for trace in (trade or {}).get("event_trace") or []:
+        event_trade_date = str(trace.get("trade_date") or signal_trade_date)[:10]
+        events.append(
+            {
+                **common,
+                "event_time": f"{event_trade_date} 15:00:00",
+                "event_type": trace.get("event_type"),
+                "planned_price": trace.get("planned_price"),
+                "observed_price": trace.get("observed_price"),
+                "executable": trace.get("executable"),
+                "block_reason": trace.get("block_reason"),
+                "metadata": {
+                    "observation_id": observation_id,
+                    "strategy_id": strategy_id,
+                    "signal_trade_date": signal_trade_date,
+                    "reason": trace.get("reason"),
+                    "event_time_semantics": "observed_by_daily_close",
+                },
+            }
+        )
+    if (
+        not trade
+        and rejection
+        and rejection not in pending_reasons
+    ):
+        last_trade_date = (
+            _date_text(price_path[-1].get("trade_date"))
+            if price_path
+            else signal_trade_date
+        )
+        event_type = {
+            "turtle_no_trade": "plan_blocked",
+            "turtle_chase_gap": "entry_cancelled",
+            "turtle_entry_not_triggered": "entry_expired",
+            "turtle_open_at_evaluation_horizon": "evaluation_censored",
+        }.get(rejection, "evaluation_blocked")
+        events.append(
+            {
+                **common,
+                "event_time": f"{last_trade_date} 15:00:00",
+                "event_type": event_type,
+                "planned_price": (shadow.get("entry") or {}).get("trigger"),
+                "observed_price": (
+                    _float(price_path[-1].get("close"))
+                    if price_path
+                    else shadow.get("reference_price")
+                ),
+                "executable": False,
+                "block_reason": rejection,
+                "metadata": {
+                    "observation_id": observation_id,
+                    "strategy_id": strategy_id,
+                    "signal_trade_date": signal_trade_date,
+                    "event_time_semantics": "observed_by_daily_close",
+                },
+            }
+        )
+    return evaluation, events
 
 
 class ForwardObservationRepository:
@@ -659,7 +838,7 @@ class ForwardObservationRepository:
                 cursor.execute(
                     """
                     SELECT p.*, pr.horizons_json, pr.benchmark_codes_json,
-                           pr.entry_rule
+                           pr.entry_rule, pr.strategy_id
                     FROM strategy_forward_pick p
                     INNER JOIN strategy_forward_protocol pr ON pr.protocol_id=p.protocol_id
                     WHERE p.outcome_status <> 'complete'
@@ -684,7 +863,16 @@ class ForwardObservationRepository:
             with conn.cursor() as cursor:
                 cursor.execute(
                     f"""
-                    SELECT dk.trade_date, dk.open, dk.high, dk.low, dk.close, af.adj_factor
+                    SELECT dk.trade_date, dk.open, dk.high, dk.low, dk.close,
+                           (
+                               SELECT prev.close
+                               FROM daily_kline prev
+                               WHERE prev.code=dk.code
+                                 AND prev.trade_date < dk.trade_date
+                               ORDER BY prev.trade_date DESC
+                               LIMIT 1
+                           ) AS prev_close,
+                           af.adj_factor
                     FROM daily_kline dk
                     LEFT JOIN adj_factor_daily af ON af.code=dk.code AND af.trade_date=dk.trade_date
                     WHERE dk.code=%s AND dk.trade_date{operator}%s
@@ -987,8 +1175,15 @@ def build_forward_outcome(
 
 
 class ForwardObservationService:
-    def __init__(self, repository: ForwardObservationRepository | None = None) -> None:
+    def __init__(
+        self,
+        repository: ForwardObservationRepository | None = None,
+        trade_plan_events: TradePlanEventRepository | None = None,
+    ) -> None:
         self.repository = repository or ForwardObservationRepository()
+        self.trade_plan_events = (
+            trade_plan_events or TradePlanEventRepository()
+        )
 
     def reconcile_open_observations(self) -> dict[str, int]:
         changed = {"success": 0, "failed": 0, "waiting": 0}
@@ -1056,6 +1251,23 @@ class ForwardObservationService:
                 benchmark_paths=benchmark_paths,
                 entry_rule=str(pick.get("entry_rule") or "next_tradable_open"),
             )
+            raw_item = _from_json(pick.get("raw_json"), {}) or {}
+            turtle_evaluation, plan_events = build_turtle_forward_outcome(
+                raw_item=raw_item,
+                price_path=price_path,
+                strategy_id=str(pick.get("strategy_id") or ""),
+                observation_id=str(pick.get("observation_id") or ""),
+                signal_trade_date=str(pick.get("signal_trade_date") or "")[:10],
+                source_snapshot_id=pick.get("source_snapshot_id"),
+            )
+            if turtle_evaluation.get("status") != "not_applicable":
+                outcome["trade_plan_evaluation"] = turtle_evaluation
+                self.trade_plan_events.append(plan_events)
+                if (
+                    outcome.get("status") == "complete"
+                    and turtle_evaluation.get("status") == "pending"
+                ):
+                    outcome["status"] = "partial"
             self.repository.update_pick_outcome(int(pick["id"]), outcome)
             status = str(outcome.get("status") or "pending")
             changed["processed"] += 1

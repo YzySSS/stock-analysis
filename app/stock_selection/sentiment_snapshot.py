@@ -407,14 +407,14 @@ class SentimentCandidateSnapshotRepository:
         """
         row_sql = """
         INSERT INTO sentiment_candidate_snapshot (
-            snapshot_id, code, name, candidate_state, eligibility_reason,
+            snapshot_id, code, name, industry, candidate_state, eligibility_reason,
             is_selected, is_tradable, rank_no, score, trade_grade_state,
             opinion_sector_type, opinion_sector_name, opinion_match_type,
             market_opinion_snapshot_id, selected_price, selected_price_source,
             selected_price_quote_time, factor_json, explain_json, trade_plan_json,
             source_lineage_json, row_hash
         ) VALUES (
-            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
@@ -441,6 +441,7 @@ class SentimentCandidateSnapshotRepository:
                     snapshot_id,
                     code,
                     item.get("name"),
+                    item.get("industry"),
                     item.get("candidate_state") or "eligible",
                     item.get("eligibility_reason"),
                     1 if item.get("is_selected") else 0,

@@ -22,6 +22,7 @@ from app.stock_selection.sentiment_snapshot import (
     SentimentCandidateSnapshotRepository,
     SnapshotStageResult,
 )
+from app.stock_selection.turtle_trade_plan import attach_turtle_research_shadow
 from app.strategies.service import StrategyService
 
 
@@ -196,6 +197,7 @@ class PreparedSentimentInputs:
     selection_repository: SelectionRepository
     _register_read_view: Callable[[Sequence[Mapping[str, Any]]], SourceDatasetBatch]
     _commit: Callable[[], None]
+    read_connection_factory: ConnectionFactory | None = None
     committed: bool = False
 
     def register_read_view(
@@ -353,6 +355,7 @@ class MySQLSentimentSnapshotInputRepository:
                     ),
                     _register_read_view=register_read_view,
                     _commit=conn.commit,
+                    read_connection_factory=borrowed_connection,
                 )
                 yield prepared
                 prepared.commit()
@@ -1559,7 +1562,12 @@ class SentimentSnapshotMaterializationService:
                 raise SentimentSnapshotMaterializationError(
                     "selection crossed a market clock boundary; retry to avoid a mixed-mode snapshot"
                 )
-            candidate_rows = self._snapshot_candidates(results, audit.source_lineage)
+            candidate_rows = self._snapshot_candidates(
+                results,
+                audit.source_lineage,
+                strategy_id=strategy_id,
+                history_connection_factory=prepared.read_connection_factory,
+            )
             prepared.commit()
 
             config = self.strategy_service.loader.load_config(strategy_id)
@@ -1832,7 +1840,12 @@ class SentimentSnapshotMaterializationService:
             for item in [*base_batches, read_view]
             if item.lineage_ready
         ]
-        candidate_rows = self._snapshot_candidates(results, source_lineage)
+        candidate_rows = self._snapshot_candidates(
+            results,
+            source_lineage,
+            strategy_id=strategy_id,
+            history_connection_factory=prepared.read_connection_factory,
+        )
         config = self.strategy_service.loader.load_config(strategy_id)
         strategy_config_hash = _sha256(config)
         implementation_hash = hashlib.sha256(
@@ -1950,10 +1963,28 @@ class SentimentSnapshotMaterializationService:
     def _snapshot_candidates(
         results: Sequence[Mapping[str, Any]],
         source_lineage: Sequence[Mapping[str, Any]],
+        *,
+        strategy_id: str,
+        history_connection_factory: ConnectionFactory | None = None,
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for index, raw in enumerate(results, start=1):
             item = dict(raw)
+            explain = (
+                item.get("explain")
+                if isinstance(item.get("explain"), Mapping)
+                else {}
+            )
+            explain_raw_metrics = (
+                explain.get("raw_metrics")
+                if isinstance(explain.get("raw_metrics"), Mapping)
+                else {}
+            )
+            strategy_raw_metrics = (
+                item.get("strategy_raw_metrics")
+                if isinstance(item.get("strategy_raw_metrics"), Mapping)
+                else {}
+            )
             grade = str(
                 item.get("trade_grade_state")
                 or item.get("signal_grade")
@@ -1961,10 +1992,20 @@ class SentimentSnapshotMaterializationService:
                 or "watch"
             ).strip().lower()
             grade_reason = item.get("trade_grade_reason") or item.get("grade_reason")
+            trade_plan = attach_turtle_research_shadow(
+                item,
+                strategy_id=strategy_id,
+                connection_factory=history_connection_factory,
+            )
             rows.append(
                 {
                     "code": item.get("code"),
                     "name": item.get("name"),
+                    "industry": (
+                        item.get("industry")
+                        or strategy_raw_metrics.get("industry")
+                        or explain_raw_metrics.get("industry")
+                    ),
                     "candidate_state": "eligible",
                     "eligibility_reason": grade_reason,
                     "is_selected": True,
@@ -1982,7 +2023,7 @@ class SentimentSnapshotMaterializationService:
                     "selected_price_quote_time": item.get("selected_price_quote_time"),
                     "factor_json": item.get("factors") or {},
                     "explain_json": item.get("explain") or {},
-                    "trade_plan_json": item.get("trade_plan") or {},
+                    "trade_plan_json": trade_plan,
                     "source_lineage": [dict(value) for value in source_lineage],
                     "signal_grade": grade,
                     "validation_status": item.get("validation_status"),

@@ -84,6 +84,25 @@ function formatTradePlanInline(plan = null, status = null) {
   return `买入 ${formatNumber(entryLow, 3)}-${formatNumber(entryHigh, 3)} · 止盈 ${formatNumber(firstTakeProfit.price, 3)} · 止损 ${formatNumber(stopLoss.price, 3)}${riskRewardText}${statusText}`;
 }
 
+function formatTurtleShadowInline(plan = null) {
+  const shadow = plan?.research_shadow;
+  if (!shadow) return '';
+  const state = shadow.state_label || shadow.state || '研究观察';
+  if (shadow.state === 'no_trade' || !shadow.entry) {
+    return `海龟V4（研究）：${state} · ${shadow.state_reason || shadow.reasons?.[0] || '条件不足'}`;
+  }
+  const entry = shadow.entry || {};
+  const risk = shadow.risk || {};
+  const exits = shadow.exits || {};
+  const firstAdd = Array.isArray(shadow.add_levels) ? shadow.add_levels[0] : null;
+  const addText = firstAdd != null ? ` · 盈利加仓 ${formatNumber(firstAdd, 3)}` : ' · 当前不允许加仓';
+  const trendExitText = exits.trend_exit != null ? ` · 趋势退出 ${formatNumber(exits.trend_exit, 3)}` : '';
+  const timeExitText = exits.time_exit_trade_days != null
+    ? ` · ${exits.time_exit_trade_days}日未达+${formatNumber(exits.time_exit_minimum_progress_n, 1)}N退出`
+    : '';
+  return `海龟V4（研究）：${state} · 触发 ${formatNumber(entry.trigger, 3)} · 区间 ${formatNumber(entry.zone_low, 3)}-${formatNumber(entry.zone_high, 3)} · 止损 ${formatNumber(risk.initial_stop, 3)} · N20 ${formatNumber(shadow.n20, 3)}${addText}${trendExitText}${timeExitText}`;
+}
+
 function getTradePlanBadgeClass(status = null) {
   const value = status?.status || '';
   if (value.includes('take_profit')) return 'status-ok';
@@ -243,6 +262,7 @@ function renderTrackingTable(items, summary = {}) {
         ? '已验证正收益'
         : '需重点复盘回撤';
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
+    const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
     const planBadgeClass = getTradePlanBadgeClass(item.trade_plan_status);
     const tradeGradeLabel = item.sentiment_context?.trade_grade_label;
     const tradeGradeClass = item.sentiment_context?.trade_grade_state === 'tradable' ? 'status-ok' : 'status-warn';
@@ -274,6 +294,7 @@ function renderTrackingTable(items, summary = {}) {
         <td>
           <div>${escapeHtml(reviewNote)}</div>
           ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
+          ${turtlePlanText ? `<div class="muted">${escapeHtml(turtlePlanText)}</div>` : ''}
         </td>
         <td>
           <button class="btn btn-sm ${includeInStats ? 'btn-secondary' : 'btn-warning'}" type="button" data-action="toggle-tracking-stats" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}" data-include-in-stats="${includeInStats ? 'true' : 'false'}" data-stats-window-expired="${statsWindowExpired ? 'true' : 'false'}" title="${escapeHtml(statsWindowExpired ? statsExclusionReason : '手动切换该记录是否参与统计')}" ${statsWindowExpired ? 'disabled' : ''}>
@@ -303,6 +324,7 @@ function renderTrackingCards(items = [], summary = {}) {
     const statsWindowExpired = item.stats_window_expired === true;
     const includeInStats = item.include_in_stats !== false && !statsWindowExpired;
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
+    const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
     const tradeGradeLabel = item.sentiment_context?.trade_grade_label;
     const tradeGradeClass = item.sentiment_context?.trade_grade_state === 'tradable' ? 'status-ok' : 'status-warn';
     return `
@@ -323,6 +345,7 @@ function renderTrackingCards(items = [], summary = {}) {
           <span>最大回撤 <b class="down">${formatPercent(item.max_drawdown_pct)}</b></span>
         </div>
         ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
+        ${turtlePlanText ? `<div class="muted">${escapeHtml(turtlePlanText)}</div>` : ''}
         <div class="tracking-record-foot">
           <span>${escapeHtml(formatSelectionTime(item))} · ${escapeHtml(item.realtime_quote_time || '无实时')}</span>
           <span>

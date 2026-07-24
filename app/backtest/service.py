@@ -27,6 +27,10 @@ from app.shared.index_universe import (
     universe_label,
 )
 from app.stock_selection.selector import StockSelector
+from app.stock_selection.turtle_trade_plan import (
+    SUPPORTED_STRATEGY_IDS as TURTLE_SUPPORTED_STRATEGY_IDS,
+)
+from app.stock_selection.turtle_trade_plan import load_turtle_trade_plan_spec
 from app.strategies.service import StrategyService
 
 
@@ -121,6 +125,7 @@ class BacktestService:
                 "3d": "含入场日在内持有三个交易日后收盘",
                 "triple_barrier_5d": "入场后五个交易日内止盈/止损/到期退出",
                 "observe_t3_daily": "入场后逐日观察至第三个交易日",
+                "turtle_selection_risk_v1": "三日内等待买点触发；五日无 0.5N 进展退出，盈利趋势继续由 2N 管理",
             }.get(request.return_mode),
             "fundamental_policy": "tushare_daily_basic_t_day_plus_announcement_date_asof_v4",
             "universe_policy": (
@@ -342,15 +347,36 @@ class BacktestService:
                 "hold_3d_close": "3d",
                 "triple_barrier_5d": "triple_barrier_5d",
                 "observe_t3_daily": "observe_t3_daily",
+                "turtle_selection_risk_v1": "turtle_selection_risk_v1",
             }.get(request.trade_strategy_id)
             if not mapped_mode:
-                raise ValueError("trade_strategy_id 当前仅支持 next_open_1d / hold_3d_close / triple_barrier_5d / observe_t3_daily")
+                raise ValueError(
+                    "trade_strategy_id 当前仅支持 next_open_1d / hold_3d_close / "
+                    "triple_barrier_5d / observe_t3_daily / turtle_selection_risk_v1"
+                )
             request.return_mode = mapped_mode
         else:
             request.trade_strategy_id = "next_open_1d" if request.return_mode == "1d" else "hold_3d_close"
         request.evaluation_mode = "realistic" if (request.commission_bps or request.stamp_tax_bps or request.slippage_bps or request.apply_execution_constraints) else "research"
-        if request.return_mode not in {"1d", "3d", "triple_barrier_5d", "observe_t3_daily"}:
-            raise ValueError("return_mode 仅支持 1d / 3d / triple_barrier_5d / observe_t3_daily")
+        if request.return_mode not in {
+            "1d",
+            "3d",
+            "triple_barrier_5d",
+            "observe_t3_daily",
+            "turtle_selection_risk_v1",
+        }:
+            raise ValueError(
+                "return_mode 仅支持 1d / 3d / triple_barrier_5d / "
+                "observe_t3_daily / turtle_selection_risk_v1"
+            )
+        if (
+            request.return_mode == "turtle_selection_risk_v1"
+            and request.strategy_id not in TURTLE_SUPPORTED_STRATEGY_IDS
+        ):
+            raise ValueError(
+                "turtle_selection_risk_v1 当前只允许用于 "
+                "a_share_sentiment / a_share_sentiment_v05"
+            )
         if request.commission_bps < 0 or request.commission_bps > 100:
             raise ValueError("commission_bps 需在 0~100 之间")
         if request.slippage_bps < 0 or request.slippage_bps > 100:
@@ -571,19 +597,46 @@ class BacktestService:
                 "raw_metrics": item.get("explain", {}).get("raw_metrics", {}),
             },
             "explain_json": item.get("explain", {}),
+            "trade_plan": item.get("trade_plan"),
         }
 
     def _build_trades(self, run_id: str, strategy_id: str, trade_date: str, picks: Sequence[Dict[str, Any]], request: BacktestRequest) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
         if not picks:
             return [], {}
         codes = [p["code"] for p in picks if p.get("code")]
-        lookahead = 6 if request.return_mode == "triple_barrier_5d" else 3 if request.return_mode in {"3d", "observe_t3_daily"} else 2
+        if request.return_mode == "turtle_selection_risk_v1":
+            turtle_spec = load_turtle_trade_plan_spec()
+            lookahead = (
+                int(turtle_spec["entry"]["expires_after_trade_days"])
+                + int(turtle_spec["exit"]["evaluation_censor_trade_days"])
+            )
+        else:
+            lookahead = (
+                6
+                if request.return_mode == "triple_barrier_5d"
+                else 3
+                if request.return_mode in {"3d", "observe_t3_daily"}
+                else 2
+            )
         future = self._fetch_future_bars(codes, trade_date, lookahead=lookahead)
         trades: List[Dict[str, Any]] = []
         rejection_counts: Dict[str, int] = {}
         for pick in picks:
             code = pick["code"]
             bars = future.get(code, [])
+            if request.return_mode == "turtle_selection_risk_v1":
+                turtle_trade, turtle_rejection = self._resolve_turtle_trade(
+                    run_id=run_id,
+                    strategy_id=strategy_id,
+                    signal_date=trade_date,
+                    pick=pick,
+                    bars=bars,
+                    request=request,
+                )
+                self._count_reason(rejection_counts, turtle_rejection)
+                if turtle_trade:
+                    trades.append(turtle_trade)
+                continue
             entry_bar = bars[0] if bars else None
             entry_price = _to_float(entry_bar.get("open")) if entry_bar else None
             if entry_price is None or entry_price <= 0:
@@ -660,6 +713,493 @@ class BacktestService:
                 }
             )
         return trades, rejection_counts
+
+    def _resolve_turtle_trade(
+        self,
+        *,
+        run_id: str,
+        strategy_id: str,
+        signal_date: str,
+        pick: Dict[str, Any],
+        bars: Sequence[Dict[str, Any]],
+        request: BacktestRequest,
+    ) -> tuple[Dict[str, Any] | None, str | None]:
+        """Resolve the frozen V4 shadow plan with conservative daily-OHLC ordering."""
+
+        active_plan = pick.get("trade_plan")
+        if not isinstance(active_plan, dict):
+            return None, "turtle_plan_missing"
+        plan = active_plan.get("research_shadow")
+        if not isinstance(plan, dict):
+            return None, "turtle_shadow_missing"
+        if plan.get("state") == "no_trade":
+            return None, "turtle_no_trade"
+
+        entry = plan.get("entry")
+        risk = plan.get("risk")
+        exits = plan.get("exits")
+        if not isinstance(entry, dict) or not isinstance(risk, dict) or not isinstance(exits, dict):
+            return None, "turtle_plan_incomplete"
+        trigger = _to_float(entry.get("trigger"))
+        zone_low = _to_float(entry.get("zone_low"))
+        zone_high = _to_float(entry.get("zone_high"))
+        n20 = _to_float(plan.get("n20"))
+        if (
+            trigger is None
+            or zone_low is None
+            or zone_high is None
+            or n20 is None
+            or n20 <= 0
+        ):
+            return None, "turtle_plan_invalid_levels"
+
+        spec = load_turtle_trade_plan_spec()
+        required_entry_window = max(
+            int(entry.get("expires_after_trade_days") or 0),
+            1,
+        )
+        entry_window = min(required_entry_window, len(bars))
+        setup = str(entry.get("setup") or "breakout_20d")
+        entry_index: int | None = None
+        first_entry_price: float | None = None
+        entry_bar: Dict[str, Any] | None = None
+        blocked_entry_reason: str | None = None
+
+        for index, bar in enumerate(list(bars)[:entry_window]):
+            open_price = _to_float(bar.get("open"))
+            high_price = _to_float(bar.get("high"))
+            low_price = _to_float(bar.get("low"))
+            if open_price is None or high_price is None or low_price is None:
+                continue
+
+            candidate_price: float | None = None
+            if setup == "pullback_reclaim":
+                if low_price <= zone_high and high_price >= trigger:
+                    candidate_price = (
+                        open_price
+                        if trigger <= open_price <= zone_high
+                        else trigger
+                    )
+            else:
+                if open_price > zone_high:
+                    return None, "turtle_chase_gap"
+                if trigger <= open_price <= zone_high:
+                    candidate_price = open_price
+                elif open_price < trigger <= high_price:
+                    candidate_price = trigger
+
+            if candidate_price is None:
+                continue
+            if request.apply_execution_constraints:
+                blocked_entry_reason = self._execution_block_reason(bar, "buy")
+                if blocked_entry_reason:
+                    continue
+            entry_index = index
+            first_entry_price = candidate_price
+            entry_bar = bar
+            break
+
+        if entry_index is None or first_entry_price is None or entry_bar is None:
+            if len(bars) < required_entry_window:
+                return None, blocked_entry_reason or "turtle_entry_pending"
+            return None, blocked_entry_reason or "turtle_entry_not_triggered"
+
+        entry_factor = _to_float(entry_bar.get("adj_factor"))
+        stop_n = float(spec["risk"]["initial_stop_n"])
+        minimum_stop_n = float(spec["risk"]["minimum_stop_distance_n"])
+        structure_stop = _to_float(exits.get("trend_exit"))
+        volatility_stop = first_entry_price - stop_n * n20
+        valid_stops = [
+            value
+            for value in (volatility_stop, structure_stop)
+            if value is not None and 0 < value < first_entry_price
+        ]
+        initial_stop = max(valid_stops) if valid_stops else volatility_stop
+        if (
+            initial_stop <= 0
+            or (first_entry_price - initial_stop) / n20 < minimum_stop_n
+        ):
+            initial_stop = volatility_stop
+        if initial_stop <= 0:
+            return None, "turtle_stop_invalid"
+
+        time_exit_days = int(spec["exit"]["time_exit_trade_days"])
+        minimum_progress_n = float(spec["exit"]["minimum_progress_n"])
+        evaluation_horizon_days = max(
+            int(spec["exit"]["evaluation_censor_trade_days"]),
+            time_exit_days,
+        )
+        holding_bars = list(bars)[
+            entry_index : entry_index + evaluation_horizon_days
+        ]
+        if not holding_bars:
+            return None, "turtle_missing_holding_bars"
+
+        highest_close = first_entry_price
+        current_stop = initial_stop
+        add_trigger = first_entry_price + float(spec["risk"]["add_interval_n"]) * n20
+        maximum_units = int(spec["risk"]["maximum_event_units"])
+        unit_entries = [first_entry_price]
+        event_trace: list[dict[str, Any]] = [
+            {
+                "event_type": "entry_triggered",
+                "trade_date": str(entry_bar.get("trade_date")),
+                "planned_price": round(trigger, 4),
+                "observed_price": round(first_entry_price, 4),
+                "executable": True,
+                "block_reason": None,
+            }
+        ]
+        comparable_highs: list[float] = []
+        comparable_lows: list[float] = []
+        pending_forced_exit: str | None = None
+        exit_bar: Dict[str, Any] | None = None
+        exit_compare_price: float | None = None
+        exit_raw_price: float | None = None
+        exit_reason: str | None = None
+        exit_factor: float | None = None
+
+        for holding_index, bar in enumerate(holding_bars):
+            factor = _to_float(bar.get("adj_factor"))
+            open_price = _to_float(bar.get("open"))
+            high_price = _to_float(bar.get("high"))
+            low_price = _to_float(bar.get("low"))
+            close_price = _to_float(bar.get("close"))
+            if request.use_adjusted_price and entry_factor:
+                open_compare = self._adjusted_compare_price(
+                    open_price, factor, entry_factor
+                )
+                high_compare = self._adjusted_compare_price(
+                    high_price, factor, entry_factor
+                )
+                low_compare = self._adjusted_compare_price(
+                    low_price, factor, entry_factor
+                )
+                close_compare = self._adjusted_compare_price(
+                    close_price, factor, entry_factor
+                )
+            else:
+                open_compare = open_price
+                high_compare = high_price
+                low_compare = low_price
+                close_compare = close_price
+
+            if high_compare is not None:
+                comparable_highs.append(high_compare)
+            if low_compare is not None:
+                comparable_lows.append(low_compare)
+
+            sell_blocked = (
+                request.apply_execution_constraints
+                and self._is_limit_blocked(bar, "sell")
+            )
+            if (
+                pending_forced_exit
+                and not sell_blocked
+                and open_compare is not None
+            ):
+                exit_bar = bar
+                exit_compare_price = (
+                    min(open_compare, current_stop)
+                    if pending_forced_exit == "stop"
+                    else open_compare
+                )
+                exit_raw_price = self._raw_price_from_comparable(
+                    exit_compare_price,
+                    factor=factor,
+                    entry_factor=entry_factor,
+                    adjusted=request.use_adjusted_price,
+                )
+                exit_factor = factor
+                exit_reason = (
+                    "delayed_stop_after_limit_down"
+                    if pending_forced_exit == "stop"
+                    else "delayed_time_exit_after_limit_down"
+                )
+                event_trace.append(
+                    {
+                        "event_type": "exit_triggered",
+                        "trade_date": str(bar.get("trade_date")),
+                        "planned_price": round(current_stop, 4),
+                        "observed_price": round(exit_compare_price, 4),
+                        "executable": True,
+                        "block_reason": None,
+                        "reason": exit_reason,
+                    }
+                )
+                break
+
+            if low_compare is not None and low_compare <= current_stop:
+                if sell_blocked:
+                    pending_forced_exit = "stop"
+                    event_trace.append(
+                        {
+                            "event_type": "exit_blocked",
+                            "trade_date": str(bar.get("trade_date")),
+                            "planned_price": round(current_stop, 4),
+                            "observed_price": round(low_compare, 4),
+                            "executable": False,
+                            "block_reason": "sell_blocked_limit_down",
+                        }
+                    )
+                    continue
+                exit_bar = bar
+                exit_compare_price = current_stop
+                exit_raw_price = self._raw_price_from_comparable(
+                    current_stop,
+                    factor=factor,
+                    entry_factor=entry_factor,
+                    adjusted=request.use_adjusted_price,
+                )
+                exit_factor = factor
+                exit_reason = (
+                    "same_day_ohlc_ambiguous_stop_first"
+                    if holding_index == 0 and first_entry_price != open_compare
+                    else "initial_stop"
+                    if abs(current_stop - initial_stop) < 1e-9
+                    else "trailing_stop"
+                )
+                event_trace.append(
+                    {
+                        "event_type": "exit_triggered",
+                        "trade_date": str(bar.get("trade_date")),
+                        "planned_price": round(current_stop, 4),
+                        "observed_price": round(exit_compare_price, 4),
+                        "executable": True,
+                        "block_reason": None,
+                        "reason": exit_reason,
+                    }
+                )
+                break
+
+            if (
+                holding_index > 0
+                and len(unit_entries) < maximum_units
+                and high_compare is not None
+                and high_compare >= add_trigger
+            ):
+                add_block_reason = (
+                    self._execution_block_reason(bar, "buy")
+                    if request.apply_execution_constraints
+                    else None
+                )
+                if add_block_reason:
+                    event_trace.append(
+                        {
+                            "event_type": "add_blocked",
+                            "trade_date": str(bar.get("trade_date")),
+                            "planned_price": round(add_trigger, 4),
+                            "observed_price": round(high_compare, 4),
+                            "executable": False,
+                            "block_reason": add_block_reason,
+                        }
+                    )
+                else:
+                    unit_entries.append(add_trigger)
+                    event_trace.append(
+                        {
+                            "event_type": "add_triggered",
+                            "trade_date": str(bar.get("trade_date")),
+                            "planned_price": round(add_trigger, 4),
+                            "observed_price": round(add_trigger, 4),
+                            "executable": True,
+                            "block_reason": None,
+                        }
+                    )
+
+            if close_compare is not None:
+                highest_close = max(highest_close, close_compare)
+            trailing_stop = highest_close - stop_n * n20
+            current_stop = max(
+                initial_stop,
+                trailing_stop,
+                structure_stop or initial_stop,
+            )
+
+            completed_holding_days = holding_index + 1
+            highest_executable_high = (
+                max(comparable_highs)
+                if comparable_highs
+                else first_entry_price
+            )
+            minimum_progress_price = (
+                first_entry_price + minimum_progress_n * n20
+            )
+            if (
+                completed_holding_days == time_exit_days
+                and highest_executable_high < minimum_progress_price
+            ):
+                if sell_blocked:
+                    pending_forced_exit = "time_exit"
+                    event_trace.append(
+                        {
+                            "event_type": "exit_blocked",
+                            "trade_date": str(bar.get("trade_date")),
+                            "planned_price": (
+                                round(close_compare, 4)
+                                if close_compare is not None
+                                else None
+                            ),
+                            "observed_price": (
+                                round(close_compare, 4)
+                                if close_compare is not None
+                                else None
+                            ),
+                            "executable": False,
+                            "block_reason": "sell_blocked_limit_down",
+                            "reason": "time_exit_no_progress",
+                        }
+                    )
+                    continue
+                if close_compare is None:
+                    return None, "turtle_time_exit_price_missing"
+                exit_bar = bar
+                exit_compare_price = close_compare
+                exit_raw_price = close_price
+                exit_factor = factor
+                exit_reason = "time_exit_no_progress"
+                event_trace.append(
+                    {
+                        "event_type": "exit_triggered",
+                        "trade_date": str(bar.get("trade_date")),
+                        "planned_price": None,
+                        "observed_price": round(exit_compare_price, 4),
+                        "executable": True,
+                        "block_reason": None,
+                        "reason": exit_reason,
+                    }
+                )
+                break
+
+        if exit_bar is None and len(holding_bars) < evaluation_horizon_days:
+            return None, (
+                "turtle_stop_pending_limit_down"
+                if pending_forced_exit == "stop"
+                else "turtle_time_exit_pending_limit_down"
+                if pending_forced_exit == "time_exit"
+                else "turtle_holding_pending"
+            )
+
+        if exit_bar is None:
+            return None, (
+                "turtle_stop_pending_limit_down"
+                if pending_forced_exit == "stop"
+                else "turtle_time_exit_pending_limit_down"
+                if pending_forced_exit == "time_exit"
+                else "turtle_open_at_evaluation_horizon"
+            )
+
+        average_entry_compare = sum(unit_entries) / len(unit_entries)
+        return_pct = self._pct_return_from_comparable(
+            average_entry_compare,
+            exit_compare_price,
+            request,
+        )
+        pick["entry_price"] = round(average_entry_compare, 4)
+        pick["entry_price_type"] = "turtle_trigger_average"
+        return (
+            {
+                "run_id": run_id,
+                "strategy_id": strategy_id,
+                "trade_date": signal_date,
+                "code": pick["code"],
+                "entry_date": str(entry_bar.get("trade_date")),
+                "entry_price": round(average_entry_compare, 4),
+                "first_entry_price": round(first_entry_price, 4),
+                "exit_date_1d": None,
+                "exit_price_1d": None,
+                "return_1d_pct": None,
+                "exit_date_3d": (
+                    str(exit_bar.get("trade_date"))
+                    if exit_bar is not None
+                    else None
+                ),
+                "exit_price_3d": (
+                    round(exit_raw_price, 4)
+                    if exit_raw_price is not None
+                    else None
+                ),
+                "return_3d_pct": return_pct,
+                "trade_strategy_id": request.trade_strategy_id,
+                "exit_reason": exit_reason,
+                "max_gain_pct": self._pct_return_from_comparable(
+                    average_entry_compare,
+                    max(comparable_highs) if comparable_highs else None,
+                    None,
+                ),
+                "max_drawdown_pct": self._pct_return_from_comparable(
+                    average_entry_compare,
+                    min(comparable_lows) if comparable_lows else None,
+                    None,
+                ),
+                "add_count": len(unit_entries) - 1,
+                "unit_count": len(unit_entries),
+                "initial_stop": round(initial_stop, 4),
+                "final_stop": round(current_stop, 4),
+                "trade_plan_version": plan.get("version"),
+                "trade_plan_spec_hash": plan.get("spec_hash"),
+                "event_trace": event_trace,
+            },
+            "sell_blocked_limit_down"
+            if exit_reason == "sell_blocked_limit_down"
+            else None,
+        )
+
+    @staticmethod
+    def _raw_price_from_comparable(
+        price: float,
+        *,
+        factor: float | None,
+        entry_factor: float | None,
+        adjusted: bool,
+    ) -> float:
+        if (
+            adjusted
+            and factor is not None
+            and entry_factor is not None
+            and factor > 0
+        ):
+            return price * entry_factor / factor
+        return price
+
+    @staticmethod
+    def _pct_return_from_comparable(
+        entry: float | None,
+        exit_price: float | None,
+        request: BacktestRequest | None,
+    ) -> float | None:
+        if entry is None or exit_price is None or entry <= 0:
+            return None
+        commission_rate = (
+            max(_to_float(getattr(request, "commission_bps", 0)) or 0, 0)
+            / 10000
+            if request
+            else 0.0
+        )
+        stamp_tax_rate = (
+            max(_to_float(getattr(request, "stamp_tax_bps", 0)) or 0, 0)
+            / 10000
+            if request
+            else 0.0
+        )
+        slippage_rate = (
+            max(_to_float(getattr(request, "slippage_bps", 0)) or 0, 0)
+            / 10000
+            if request
+            else 0.0
+        )
+        effective_entry = entry * (
+            1 + commission_rate + slippage_rate
+        )
+        effective_exit = exit_price * (
+            1 - commission_rate - stamp_tax_rate - slippage_rate
+        )
+        if effective_entry <= 0:
+            return None
+        return round(
+            ((effective_exit - effective_entry) / effective_entry) * 100,
+            4,
+        )
 
     def _resolve_triple_barrier_exit(
         self,

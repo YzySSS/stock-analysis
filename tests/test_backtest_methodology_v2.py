@@ -9,6 +9,7 @@ from app.backtest.policy import (
     research_disclosure,
 )
 from app.backtest.service import BacktestRequest, BacktestService
+from app.stock_selection.turtle_trade_plan import EXPECTED_SPEC_SHA256
 
 
 def bar(trade_date: str, open_price: float, close_price: float) -> dict:
@@ -42,6 +43,28 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
 
         self.assertIsNone(pick["entry_price"])
         self.assertEqual(pick["entry_price_type"], "next_open")
+
+    def test_pick_preserves_frozen_trade_plan_for_execution_evaluation(self):
+        trade_plan = {
+            "version": "selection_trade_plan_v3_risk_control",
+            "research_shadow": {
+                "version": "selection_trade_plan_v4_turtle_risk",
+                "spec_hash": EXPECTED_SPEC_SHA256,
+            },
+        }
+
+        pick = BacktestService()._build_pick(
+            {
+                "code": "sh.600000",
+                "score": 80,
+                "factors": {},
+                "explain": {},
+                "trade_plan": trade_plan,
+            },
+            "2026-07-01",
+        )
+
+        self.assertEqual(pick["trade_plan"], trade_plan)
 
     def test_one_day_trade_enters_after_signal_date(self):
         service = BacktestService()
@@ -97,6 +120,323 @@ class BacktestMethodologyV2Tests(unittest.TestCase):
         self.assertEqual(trades[0]["entry_date"], "2026-07-02")
         self.assertEqual(trades[0]["exit_date_3d"], "2026-07-06")
         self.assertEqual(trades[0]["exit_price_3d"], 10.8)
+
+    def test_turtle_trade_waits_for_trigger_adds_only_after_profit_and_trails_winner(self):
+        service = BacktestService()
+        service._fetch_future_bars = lambda *_args, **_kwargs: {
+            "sh.600000": [
+                {
+                    **bar("2026-07-02", 9.90, 10.02),
+                    "high": 10.05,
+                    "low": 9.85,
+                },
+                {
+                    **bar("2026-07-03", 10.05, 10.12),
+                    "high": 10.15,
+                    "low": 9.95,
+                },
+                {
+                    **bar("2026-07-06", 10.15, 10.25),
+                    "high": 10.30,
+                    "low": 10.05,
+                },
+                {
+                    **bar("2026-07-07", 10.25, 10.35),
+                    "high": 10.40,
+                    "low": 10.15,
+                },
+                {
+                    **bar("2026-07-08", 10.35, 10.50),
+                    "high": 10.55,
+                    "low": 10.25,
+                },
+                {
+                    **bar("2026-07-09", 10.30, 10.05),
+                    "high": 10.35,
+                    "low": 10.00,
+                },
+            ]
+        }
+        request = BacktestRequest(
+            strategy_id="a_share_sentiment",
+            start_date="2026-07-01",
+            end_date="2026-07-01",
+            return_mode="turtle_selection_risk_v1",
+            trade_strategy_id="turtle_selection_risk_v1",
+        )
+        pick = {
+            "code": "sh.600000",
+            "entry_price": None,
+            "trade_plan": {
+                "version": "selection_trade_plan_v3_risk_control",
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": EXPECTED_SPEC_SHA256,
+                    "state": "watch",
+                    "n20": 0.20,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.00,
+                        "zone_low": 10.00,
+                        "zone_high": 10.10,
+                        "expires_after_trade_days": 3,
+                    },
+                    "risk": {},
+                    "exits": {"trend_exit": 9.50},
+                },
+            },
+        }
+
+        trades, rejections = service._build_trades(
+            "run",
+            request.strategy_id,
+            "2026-07-01",
+            [pick],
+            request,
+        )
+
+        self.assertEqual(rejections, {})
+        self.assertEqual(len(trades), 1)
+        trade = trades[0]
+        self.assertEqual(trade["entry_date"], "2026-07-02")
+        self.assertEqual(trade["first_entry_price"], 10.00)
+        self.assertEqual(trade["add_count"], 1)
+        self.assertEqual(trade["unit_count"], 2)
+        self.assertEqual(trade["entry_price"], 10.05)
+        self.assertEqual(trade["exit_date_3d"], "2026-07-09")
+        self.assertEqual(trade["exit_reason"], "trailing_stop")
+        self.assertGreater(trade["return_3d_pct"], 0)
+        self.assertEqual(
+            trade["trade_plan_spec_hash"],
+            EXPECTED_SPEC_SHA256,
+        )
+
+    def test_turtle_time_exit_requires_no_half_n_progress_after_five_sessions(self):
+        service = BacktestService()
+        service._fetch_future_bars = lambda *_args, **_kwargs: {
+            "sh.600000": [
+                {
+                    **bar(f"2026-07-{day:02d}", 10.00, 10.04),
+                    "high": 10.08,
+                    "low": 9.90,
+                }
+                for day in (2, 3, 6, 7, 8)
+            ]
+        }
+        request = BacktestRequest(
+            strategy_id="a_share_sentiment",
+            start_date="2026-07-01",
+            end_date="2026-07-01",
+            return_mode="turtle_selection_risk_v1",
+            trade_strategy_id="turtle_selection_risk_v1",
+        )
+        pick = {
+            "code": "sh.600000",
+            "entry_price": None,
+            "trade_plan": {
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": EXPECTED_SPEC_SHA256,
+                    "state": "watch",
+                    "n20": 0.20,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.00,
+                        "zone_low": 10.00,
+                        "zone_high": 10.10,
+                        "expires_after_trade_days": 3,
+                    },
+                    "risk": {},
+                    "exits": {"trend_exit": 9.50},
+                },
+            },
+        }
+
+        trades, rejections = service._build_trades(
+            "run",
+            request.strategy_id,
+            "2026-07-01",
+            [pick],
+            request,
+        )
+
+        self.assertEqual(rejections, {})
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["add_count"], 0)
+        self.assertEqual(trades[0]["exit_date_3d"], "2026-07-08")
+        self.assertEqual(trades[0]["exit_reason"], "time_exit_no_progress")
+
+    def test_turtle_open_winner_is_censored_only_after_twenty_holding_sessions(self):
+        service = BacktestService()
+        service._fetch_future_bars = lambda *_args, **_kwargs: {
+            "sh.600000": [
+                {
+                    **bar(
+                        f"2026-07-{day:02d}",
+                        10.00 + index * 0.04,
+                        10.04 + index * 0.04,
+                    ),
+                    "high": 10.08 + index * 0.04,
+                    "low": 9.90 + index * 0.04,
+                }
+                for index, day in enumerate(range(2, 22))
+            ]
+        }
+        request = BacktestRequest(
+            strategy_id="a_share_sentiment",
+            start_date="2026-07-01",
+            end_date="2026-07-01",
+            return_mode="turtle_selection_risk_v1",
+            trade_strategy_id="turtle_selection_risk_v1",
+        )
+        pick = {
+            "code": "sh.600000",
+            "entry_price": None,
+            "trade_plan": {
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": EXPECTED_SPEC_SHA256,
+                    "state": "watch",
+                    "n20": 0.20,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.00,
+                        "zone_low": 10.00,
+                        "zone_high": 10.10,
+                        "expires_after_trade_days": 3,
+                    },
+                    "risk": {},
+                    "exits": {"trend_exit": 9.50},
+                },
+            },
+        }
+
+        trades, rejections = service._build_trades(
+            "run",
+            request.strategy_id,
+            "2026-07-01",
+            [pick],
+            request,
+        )
+
+        self.assertEqual(trades, [])
+        self.assertEqual(
+            rejections,
+            {"turtle_open_at_evaluation_horizon": 1},
+        )
+
+    def test_turtle_intraday_trigger_uses_stop_first_when_daily_path_is_ambiguous(self):
+        service = BacktestService()
+        service._fetch_future_bars = lambda *_args, **_kwargs: {
+            "sh.600000": [
+                {
+                    **bar("2026-07-02", 9.80, 9.95),
+                    "high": 10.08,
+                    "low": 9.55,
+                },
+            ]
+        }
+        request = BacktestRequest(
+            strategy_id="a_share_sentiment",
+            start_date="2026-07-01",
+            end_date="2026-07-01",
+            return_mode="turtle_selection_risk_v1",
+            trade_strategy_id="turtle_selection_risk_v1",
+        )
+        pick = {
+            "code": "sh.600000",
+            "entry_price": None,
+            "trade_plan": {
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": EXPECTED_SPEC_SHA256,
+                    "state": "watch",
+                    "n20": 0.20,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.00,
+                        "zone_low": 10.00,
+                        "zone_high": 10.10,
+                        "expires_after_trade_days": 3,
+                    },
+                    "risk": {},
+                    "exits": {"trend_exit": 9.50},
+                },
+            },
+        }
+
+        trades, rejections = service._build_trades(
+            "run",
+            request.strategy_id,
+            "2026-07-01",
+            [pick],
+            request,
+        )
+
+        self.assertEqual(rejections, {})
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            trades[0]["exit_reason"],
+            "same_day_ohlc_ambiguous_stop_first",
+        )
+        self.assertEqual(trades[0]["exit_price_3d"], 9.60)
+        self.assertLess(trades[0]["return_3d_pct"], 0)
+
+    def test_turtle_holding_does_not_time_exit_before_five_complete_sessions(self):
+        service = BacktestService()
+        service._fetch_future_bars = lambda *_args, **_kwargs: {
+            "sh.600000": [
+                {
+                    **bar("2026-07-02", 10.00, 10.05),
+                    "high": 10.08,
+                    "low": 9.90,
+                },
+                {
+                    **bar("2026-07-03", 10.05, 10.10),
+                    "high": 10.12,
+                    "low": 9.95,
+                },
+            ]
+        }
+        request = BacktestRequest(
+            strategy_id="a_share_sentiment",
+            start_date="2026-07-01",
+            end_date="2026-07-01",
+            return_mode="turtle_selection_risk_v1",
+            trade_strategy_id="turtle_selection_risk_v1",
+        )
+        pick = {
+            "code": "sh.600000",
+            "entry_price": None,
+            "trade_plan": {
+                "research_shadow": {
+                    "version": "selection_trade_plan_v4_turtle_risk",
+                    "spec_hash": EXPECTED_SPEC_SHA256,
+                    "state": "watch",
+                    "n20": 0.20,
+                    "entry": {
+                        "setup": "breakout_20d",
+                        "trigger": 10.00,
+                        "zone_low": 10.00,
+                        "zone_high": 10.10,
+                        "expires_after_trade_days": 3,
+                    },
+                    "risk": {},
+                    "exits": {"trend_exit": 9.50},
+                },
+            },
+        }
+
+        trades, rejections = service._build_trades(
+            "run",
+            request.strategy_id,
+            "2026-07-01",
+            [pick],
+            request,
+        )
+
+        self.assertEqual(trades, [])
+        self.assertEqual(rejections, {"turtle_holding_pending": 1})
 
     def test_unknown_fundamentals_are_removed_but_t_day_valuation_is_kept(self):
         row = BacktestService._sanitize_point_in_time_fields(

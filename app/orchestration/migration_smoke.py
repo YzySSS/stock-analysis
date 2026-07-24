@@ -35,6 +35,7 @@ REQUIRED_TABLES = {
     "strategy_forward_observation",
     "strategy_forward_pick",
     "strategy_forward_action",
+    "selection_trade_plan_event",
     "sector_opinion_daily",
     "sector_opinion_stock",
     "market_timing_signal_daily",

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS sentiment_candidate_snapshot (
     snapshot_id VARCHAR(96) NOT NULL,
     code VARCHAR(16) NOT NULL,
     name VARCHAR(64) DEFAULT NULL,
+    industry VARCHAR(128) DEFAULT NULL,
     candidate_state VARCHAR(24) NOT NULL DEFAULT 'eligible',
     eligibility_reason VARCHAR(500) DEFAULT NULL,
     is_selected TINYINT(1) NOT NULL DEFAULT 0,

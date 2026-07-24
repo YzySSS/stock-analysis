@@ -1,0 +1,65 @@
+{
+  "spec_id": "turtle_selection_risk_v1",
+  "trade_plan_version": "selection_trade_plan_v4_turtle_risk",
+  "status": "research_only_shadow",
+  "instrument_type": "stock",
+  "strategy_scope": [
+    "a_share_sentiment",
+    "a_share_sentiment_v05"
+  ],
+  "decision_contract": {
+    "postclose_signal_execution": "next_trading_day_open",
+    "auction_signal_execution": "same_day_final_open",
+    "allow_automatic_ordering": false,
+    "allow_automatic_strategy_promotion": false
+  },
+  "volatility": {
+    "method": "wilder_n",
+    "lookback_days": 20,
+    "minimum_history_rows": 21
+  },
+  "entry": {
+    "breakout_lookback_days": 20,
+    "pullback_zone_n": 0.25,
+    "max_chase_n": 0.5,
+    "expires_after_trade_days": 3
+  },
+  "risk": {
+    "risk_per_unit_equity": 0.0035,
+    "hard_max_risk_per_unit_equity": 0.005,
+    "initial_stop_n": 2.0,
+    "minimum_stop_distance_n": 1.0,
+    "maximum_event_units": 2,
+    "add_interval_n": 0.5,
+    "reference_equity": 100000,
+    "one_limit_down_stress_cap_equity": 0.01,
+    "two_limit_down_stress_cap_equity": 0.02
+  },
+  "exit": {
+    "trend_exit_lookback_days": 10,
+    "time_exit_trade_days": 5,
+    "minimum_progress_n": 0.5,
+    "minimum_progress_price_basis": "highest_observed_high_after_stop_first",
+    "evaluation_censor_trade_days": 20,
+    "optional_partial_take_profit_r": 2.0
+  },
+  "portfolio": {
+    "maximum_portfolio_heat": 0.02,
+    "maximum_single_sector_heat": 0.0075
+  },
+  "account_drawdown": {
+    "full_risk_below_pct": 3.0,
+    "half_risk_below_pct": 5.0,
+    "minimal_risk_below_pct": 8.0,
+    "minimal_risk_multiplier": 0.25,
+    "minimal_risk_position_cap_pct": 30.0,
+    "cooldown_trade_days": 5
+  },
+  "missing_context_policy": {
+    "account_equity": "normalized_shares_only",
+    "account_drawdown": "not_evaluated",
+    "market_timing": "not_evaluated",
+    "industry_state": "not_evaluated",
+    "technical_history": "no_trade"
+  }
+}

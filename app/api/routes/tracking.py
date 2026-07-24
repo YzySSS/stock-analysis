@@ -218,6 +218,52 @@ def _compact_trade_plan(plan: dict[str, Any] | None) -> dict[str, Any] | None:
     stop_loss = plan.get("stop_loss") or {}
     take_profit = plan.get("take_profit") or []
     first_take_profit = take_profit[0] if take_profit else {}
+    shadow = plan.get("research_shadow")
+    compact_shadow = None
+    if isinstance(shadow, dict):
+        shadow_entry = shadow.get("entry") or {}
+        shadow_risk = shadow.get("risk") or {}
+        shadow_exits = shadow.get("exits") or {}
+        compact_shadow = {
+            "version": shadow.get("version"),
+            "spec_hash": shadow.get("spec_hash"),
+            "status": shadow.get("status"),
+            "state": shadow.get("state"),
+            "state_label": shadow.get("state_label"),
+            "state_reason": shadow.get("state_reason"),
+            "n20": shadow.get("n20"),
+            "entry": {
+                "setup": shadow_entry.get("setup"),
+                "trigger": shadow_entry.get("trigger"),
+                "zone_low": shadow_entry.get("zone_low"),
+                "zone_high": shadow_entry.get("zone_high"),
+            }
+            if shadow_entry
+            else None,
+            "risk": {
+                "initial_stop": shadow_risk.get("initial_stop"),
+                "unit_shares": shadow_risk.get("unit_shares"),
+                "shares_per_reference_equity": shadow_risk.get(
+                    "shares_per_reference_equity"
+                ),
+            },
+            "add_levels": list(shadow.get("add_levels") or [])[:1],
+            "exits": {
+                "trend_exit": shadow_exits.get("trend_exit"),
+                "time_exit_trade_days": shadow_exits.get(
+                    "time_exit_trade_days"
+                ),
+                "time_exit_minimum_progress_n": shadow_exits.get(
+                    "time_exit_minimum_progress_n"
+                ),
+                "optional_partial_take_profit": shadow_exits.get(
+                    "optional_partial_take_profit"
+                ),
+            }
+            if shadow_exits
+            else None,
+            "warnings": list(shadow.get("warnings") or [])[:2],
+        }
     return {
         "entry_price": plan.get("entry_price"),
         "entry_zone": {
@@ -226,6 +272,7 @@ def _compact_trade_plan(plan: dict[str, Any] | None) -> dict[str, Any] | None:
         },
         "stop_loss": {"price": stop_loss.get("price")},
         "take_profit": [{"price": first_take_profit.get("price")}],
+        "research_shadow": compact_shadow,
     }
 
 
