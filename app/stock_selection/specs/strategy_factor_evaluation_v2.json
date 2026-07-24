@@ -1,0 +1,86 @@
+{
+  "protocol_id": "strategy_factor_evaluation_v2",
+  "version": "v2",
+  "status": "research_only",
+  "decision_contract": {
+    "point_in_time_required": true,
+    "entry_rule": "next_tradable_open",
+    "return_basis": "adjusted_total_return_when_available_else_raw_with_explicit_flag",
+    "automatic_weight_change": false,
+    "automatic_strategy_promotion": false,
+    "selected_only_history_can_produce_cross_sectional_ic": false
+  },
+  "scopes": [
+    "pre_filter_universe",
+    "eligible_pool",
+    "selected_top_k"
+  ],
+  "horizons": [
+    1,
+    3,
+    5,
+    10,
+    20
+  ],
+  "benchmark_code": "000300.SH",
+  "factor_keys": [
+    "catalyst_quality",
+    "persistence",
+    "relation_recognition",
+    "fund_confirmation",
+    "price_volume_confirmation",
+    "chip_liquidity_capacity"
+  ],
+  "statistics": {
+    "correlations": [
+      "pearson",
+      "spearman_rank"
+    ],
+    "newey_west_lag_rule": "floor(4*(T/100)^(2/9))",
+    "bootstrap": {
+      "method": "moving_block",
+      "iterations": 1000,
+      "fixed_seed": 20260724,
+      "confidence_level": 0.95
+    },
+    "groups": {
+      "preferred": 5,
+      "fallback": 3,
+      "minimum_per_group": 20
+    },
+    "multiple_testing": "benjamini_hochberg_fdr"
+  },
+  "maturity": {
+    "data_only": {
+      "minimum_observation_days": 0,
+      "minimum_valid_rows": 0
+    },
+    "directional_hint": {
+      "minimum_observation_days": 10,
+      "minimum_valid_rows": 500
+    },
+    "provisional": {
+      "minimum_observation_days": 30,
+      "minimum_valid_rows": 1000
+    },
+    "research_candidate": {
+      "minimum_observation_days": 60,
+      "minimum_valid_rows": 2000,
+      "minimum_market_states": 2
+    }
+  },
+  "score_buckets": [
+    [60, 64.99],
+    [65, 69.99],
+    [70, 74.99],
+    [75, 79.99],
+    [80, null]
+  ],
+  "guardrails": [
+    "No in-place modification of frozen strategy versions.",
+    "No automatic factor weight update.",
+    "No traditional cross-sectional IC on selected top-K only history.",
+    "All unavailable labels remain pending instead of being imputed.",
+    "Every evaluation must expose sample scope, maturity and missingness."
+  ]
+}

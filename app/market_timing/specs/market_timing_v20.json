@@ -1,0 +1,77 @@
+{
+  "model_id": "market_timing_v20",
+  "model_name": "市场择时 V2.0",
+  "version": "v2.0",
+  "status": "research_only",
+  "core_dimensions": {
+    "trend": 0.25,
+    "breadth": 0.25,
+    "capital": 0.2,
+    "tail_risk": 0.15,
+    "leadership": 0.15
+  },
+  "missing_data_policy": {
+    "neutral_score": 50,
+    "redistribute_missing_weight": false,
+    "lower_confidence": true
+  },
+  "intraday_overlay": {
+    "maximum_absolute_points": 10,
+    "may_override_emergency_risk": false
+  },
+  "states": [
+    {
+      "state": "cash",
+      "score_min": 0,
+      "score_max": 20,
+      "position_range_pct": [0, 10]
+    },
+    {
+      "state": "defensive",
+      "score_min": 20,
+      "score_max": 35,
+      "position_range_pct": [10, 25]
+    },
+    {
+      "state": "cautious",
+      "score_min": 35,
+      "score_max": 48,
+      "position_range_pct": [25, 45]
+    },
+    {
+      "state": "neutral",
+      "score_min": 48,
+      "score_max": 60,
+      "position_range_pct": [45, 65]
+    },
+    {
+      "state": "risk_on",
+      "score_min": 60,
+      "score_max": 75,
+      "position_range_pct": [65, 85]
+    },
+    {
+      "state": "strong_risk_on",
+      "score_min": 75,
+      "score_max": 100,
+      "position_range_pct": [85, 100]
+    }
+  ],
+  "hysteresis": {
+    "upgrade_confirmation_days": 2,
+    "maximum_daily_position_increase_pct": 20,
+    "downgrade_same_day": true,
+    "emergency_can_jump_to_cash_or_defensive": true
+  },
+  "emergency_rules": {
+    "tail_risk_score_at_or_below": 20,
+    "breadth_score_at_or_below": 25,
+    "trend_score_at_or_below_with_weak_breadth": 35
+  },
+  "guardrails": [
+    "V1.9 remains the formal signal during shadow comparison.",
+    "V2.0 never auto-trades or directly changes portfolio positions.",
+    "May-July 2026 is diagnostic history, not a hard-coded seasonal rule.",
+    "Missing core dimensions remain neutral and reduce confidence; weights are never redistributed."
+  ]
+}

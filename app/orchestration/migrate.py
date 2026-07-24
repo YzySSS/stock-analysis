@@ -22,6 +22,9 @@ from app.orchestration.intraday_bar_schema import ensure_intraday_bar_schema
 from app.orchestration.index_constituent_pit_schema import ensure_index_constituent_pit_schema
 from app.orchestration.market_fund_flow_schema import ensure_market_fund_flow_schema
 from app.orchestration.market_opinion_schema import ensure_market_opinion_schema
+from app.orchestration.market_scenario_forecast_schema import (
+    ensure_market_scenario_forecast_schema,
+)
 from app.orchestration.market_sentiment_schema import ensure_market_sentiment_schema
 from app.orchestration.market_timing_schema import ensure_market_timing_schema
 from app.orchestration.market_timing_v19_schema import ensure_market_timing_v19_schema
@@ -39,6 +42,9 @@ from app.orchestration.stock_popularity_schema import ensure_stock_popularity_sc
 from app.orchestration.stock_status_pit_schema import ensure_stock_status_pit_schema
 from app.orchestration.stock_technical_feature_schema import ensure_stock_technical_feature_schema
 from app.orchestration.strategy_factor_ci_schema import ensure_strategy_factor_ci_schema
+from app.orchestration.strategy_factor_evaluation_v2_schema import (
+    ensure_strategy_factor_evaluation_v2_schema,
+)
 from app.orchestration.ths_concept_hot_schema import ensure_ths_concept_hot_schema
 from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.db import mysql_conn, ping_mysql
@@ -120,6 +126,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0028", "automatic paired strategy observation campaign schema", ensure_automatic_observation_schema),
     Migration("0029", "market timing V1.9 versioned indicator schema", ensure_market_timing_v19_schema),
     Migration("0030", "selection trade-plan V4 shadow and immutable industry snapshot schema", ensure_selection_trade_plan_v4_schema),
+    Migration("0031", "point-in-time strategy factor evaluation V2 schema", ensure_strategy_factor_evaluation_v2_schema),
+    Migration("0032", "market probability scenario and leadership state schema", ensure_market_scenario_forecast_schema),
 )
 
 

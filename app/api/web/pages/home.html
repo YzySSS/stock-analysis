@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260723timing-v19" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260724research-v2" />
 </head>
 <body data-page="home">
   <div class="app-shell dashboard-shell">
@@ -109,6 +109,44 @@
               </div>
             </div>
             <div id="home-market-timing-reasons" class="home-market-timing-reasons"></div>
+            <section class="home-research-layer" aria-label="研究影子层">
+              <article class="home-research-panel home-timing-v20-panel">
+                <div class="home-research-panel-head">
+                  <div>
+                    <span>Shadow Timing V2.0</span>
+                    <h3>仓位区间与状态滞回</h3>
+                  </div>
+                  <b id="home-timing-v20-status">加载中...</b>
+                </div>
+                <div id="home-timing-v20-body" class="home-timing-v20-body">
+                  <div class="empty-state">加载中...</div>
+                </div>
+              </article>
+              <article class="home-research-panel home-scenario-panel">
+                <div class="home-research-panel-head">
+                  <div>
+                    <span>Scenario Forecast</span>
+                    <h3>未来情景概率</h3>
+                  </div>
+                  <b id="home-scenario-status">加载中...</b>
+                </div>
+                <div id="home-scenario-forecast" class="home-scenario-grid">
+                  <div class="empty-state">加载中...</div>
+                </div>
+              </article>
+            </section>
+            <section class="home-leadership-panel">
+              <div class="home-research-panel-head">
+                <div>
+                  <span>Leadership Radar</span>
+                  <h3>新主线状态</h3>
+                </div>
+                <b id="home-leadership-status">萌芽 / 确认 / 拥挤 / 退潮</b>
+              </div>
+              <div id="home-leadership-grid" class="home-leadership-grid">
+                <div class="empty-state">加载中...</div>
+              </div>
+            </section>
           </section>
 
           <section class="home-hot-theme-section">
@@ -193,6 +231,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260723auth3"></script>
-  <script src="/static/js/home.js?v=20260716perf"></script>
+  <script src="/static/js/home.js?v=20260724research-v2"></script>
 </body>
 </html>

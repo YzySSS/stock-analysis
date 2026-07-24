@@ -45,7 +45,7 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
         self.assertEqual(versions, sorted(versions))
         self.assertEqual(len(versions), len(set(versions)))
         self.assertEqual(versions[0], "0001")
-        self.assertEqual(versions[-1], "0030")
+        self.assertEqual(versions[-1], "0032")
         self.assertTrue(any("market opinion" in name for name in names))
         self.assertTrue(any("realtime" in name for name in names))
         self.assertTrue(any("job state" in name for name in names))

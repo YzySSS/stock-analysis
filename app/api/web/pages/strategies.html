@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/base.css" />
   <link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3" />
   <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260510n" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260724factorv2" />
 </head>
 <body data-page="strategies">
   <div class="app-shell dashboard-shell">
@@ -82,9 +82,9 @@
               <article class="strategy-matrix-card factor-weight-card">
                 <div class="card-header compact-card-header">
                   <p class="card-kicker">Factors</p>
-                  <h3>因子权重</h3>
+                  <h3>因子权重与兼容探针</h3>
                 </div>
-                <div id="strategy-factor-summary" class="muted">请选择策略后查看因子分析</div>
+                <div id="strategy-factor-summary" class="muted">旧 CI 只作兼容数据探针；有效性结论以下方 V2 研究为准</div>
                 <div id="strategy-factor-cards" class="strategy-factor-cards empty-state">请选择策略</div>
               </article>
 
@@ -103,6 +103,56 @@
                 </div>
                 <div id="strategy-readiness-list" class="strategy-readiness-list empty-state">请选择策略</div>
               </article>
+            </div>
+          </section>
+
+          <section class="card strategy-factor-research-console">
+            <div class="card-header with-actions">
+              <div>
+                <p class="card-kicker">Factor Evidence V2</p>
+                <h2>因子有效性研究</h2>
+                <p id="strategy-factor-research-note" class="muted">
+                  只使用不可变时点快照和成熟收益标签；不会自动修改策略权重。
+                </p>
+              </div>
+              <span id="strategy-factor-research-status" class="badge status-muted">未选择</span>
+            </div>
+
+            <div class="strategy-factor-research-toolbar">
+              <label>
+                样本范围
+                <select id="strategy-factor-scope">
+                  <option value="eligible_pool">通过硬门槛的候选池</option>
+                  <option value="selected_top_k">最终入选 Top K</option>
+                </select>
+              </label>
+              <label>
+                收益周期
+                <select id="strategy-factor-horizon">
+                  <option value="1">T+1</option>
+                  <option value="3">T+3</option>
+                  <option value="5" selected>T+5</option>
+                  <option value="10">T+10</option>
+                  <option value="20">T+20</option>
+                </select>
+              </label>
+              <div id="strategy-factor-protocol" class="strategy-factor-protocol">
+                等待研究快照
+              </div>
+            </div>
+
+            <section id="strategy-factor-trace-summary"
+              class="stat-grid compact-stats strategy-factor-trace-summary"></section>
+
+            <div class="strategy-factor-view-tabs" role="tablist" aria-label="因子研究视图">
+              <button type="button" class="active" data-factor-view="quality">覆盖与成熟度</button>
+              <button type="button" data-factor-view="ic">IC 与显著性</button>
+              <button type="button" data-factor-view="groups">分组单调性</button>
+              <button type="button" data-factor-view="ablation">消融与冗余</button>
+            </div>
+
+            <div id="strategy-factor-research-body" class="strategy-factor-research-body empty-state">
+              请选择策略
             </div>
           </section>
 
@@ -214,6 +264,6 @@
   </div>
 
   <script src="/static/js/common.js?v=20260723auth3"></script>
-  <script src="/static/js/strategies.js?v=20260724v05manual1"></script>
+  <script src="/static/js/strategies.js?v=20260724factorv2"></script>
 </body>
 </html>

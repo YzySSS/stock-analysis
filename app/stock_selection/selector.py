@@ -45,6 +45,7 @@ class StockSelector:
         self.strategy = self.loader.load_strategy(self.strategy_id)
         self.strategy_overrides = strategy_overrides or {}
         self.last_run_diagnostics: Dict[str, Any] = {}
+        self.last_factor_evaluation_trace: List[Dict[str, Any]] = []
         self._apply_strategy_overrides()
 
     def _apply_strategy_overrides(self) -> None:
@@ -1634,7 +1635,197 @@ class StockSelector:
         }
         return sorted(adjusted, key=lambda row: row.get("score", 0), reverse=True)
 
+    @staticmethod
+    def _factor_trace_market_context(item: Dict[str, Any]) -> Dict[str, Any]:
+        keys = (
+            "trade_date",
+            "decision_clock_mode",
+            "decision_data_version",
+            "freshness_status",
+            "market_coverage_ratio",
+            "market_regime",
+            "market_state",
+            "open",
+            "close",
+            "selected_price",
+            "amount",
+            "realtime_amount",
+            "median_amount_20",
+            "avg_amount_20",
+            "pct_chg_1d",
+            "realtime_pct_chg",
+            "ma5",
+            "ma10",
+            "ma20",
+            "ma60",
+            "turnover_rate",
+            "total_mv",
+            "circ_mv",
+            "technical_source_trade_date",
+            "fundamental_publish_date",
+        )
+        return {key: item.get(key) for key in keys if item.get(key) is not None}
+
+    def _build_factor_evaluation_trace(
+        self,
+        *,
+        input_rows: List[Dict[str, Any]],
+        context: Dict[str, Any],
+        factor_rows: List[Dict[str, Any]],
+        core_scored: List[Dict[str, Any]],
+        final_scored: List[Dict[str, Any]],
+        selected: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Capture the exact point-in-time selection funnel for research.
+
+        The trace is opt-in and is only enabled by the immutable sentiment
+        materializer.  It never changes scores, ordering, gates or selection.
+        """
+
+        if not bool(self.strategy.config.get("capture_factor_evaluation_trace")):
+            return []
+
+        eligible_by_code = {
+            str(item.get("code") or ""): item
+            for item in factor_rows
+            if str(item.get("code") or "")
+        }
+        core_by_code = {
+            str(item.get("code") or ""): item
+            for item in core_scored
+            if str(item.get("code") or "")
+        }
+        final_by_code = {
+            str(item.get("code") or ""): item
+            for item in final_scored
+            if str(item.get("code") or "")
+        }
+        selected_by_code = {
+            str(item.get("code") or ""): item
+            for item in selected
+            if str(item.get("code") or "")
+        }
+
+        rejection_by_code: Dict[str, List[str]] = {}
+        for key, value in context.items():
+            if not (key.endswith("_summary") and isinstance(value, dict)):
+                continue
+            for rejection in value.get("rejections") or []:
+                if not isinstance(rejection, dict):
+                    continue
+                code = str(rejection.get("code") or "").strip()
+                if not code:
+                    continue
+                reasons = rejection.get("reasons") or []
+                if not isinstance(reasons, list):
+                    reasons = [reasons]
+                rejection_by_code.setdefault(code, []).extend(
+                    str(reason).strip() for reason in reasons if str(reason).strip()
+                )
+
+        # A row that passed strategy hard filters but disappeared only in the
+        # global live rule remains part of the eligible pool.  Record that
+        # execution gate explicitly instead of erasing it from the research
+        # sample.
+        removed_by_global_rule = set(core_by_code) - set(final_by_code)
+        for code in removed_by_global_rule:
+            rejection_by_code.setdefault(code, []).append(
+                "global_live_rule_removed"
+            )
+
+        threshold = (
+            (self.strategy.config.get("selection") or {}).get("score_threshold")
+            if isinstance(self.strategy.config.get("selection"), dict)
+            else None
+        )
+        if threshold is None:
+            threshold = self.strategy.config.get("score_threshold")
+
+        trace: List[Dict[str, Any]] = []
+        for raw in input_rows:
+            code = str(raw.get("code") or "").strip()
+            if not code:
+                continue
+            eligible = eligible_by_code.get(code)
+            core = core_by_code.get(code)
+            final = final_by_code.get(code)
+            chosen = selected_by_code.get(code)
+            evidence = chosen or final or core or eligible or raw
+            rejection_reasons = sorted(set(rejection_by_code.get(code) or []))
+            hard_gate_pass = code in eligible_by_code
+            signal_grade = (
+                evidence.get("signal_grade")
+                or evidence.get("grade_state")
+                or evidence.get("trade_grade_state")
+            )
+            grade_reason = evidence.get("grade_reason")
+            if not signal_grade and not hard_gate_pass:
+                signal_grade = "rejected"
+                grade_reason = rejection_reasons[0] if rejection_reasons else "hard_gate_failed"
+            elif not signal_grade and code in removed_by_global_rule:
+                signal_grade = "rejected"
+                grade_reason = "global_live_rule_removed"
+            elif not signal_grade and final is not None:
+                score_value = final.get("score")
+                if threshold is not None and score_value is not None:
+                    signal_grade = (
+                        "eligible"
+                        if float(score_value) >= float(threshold)
+                        else "below_score_threshold"
+                    )
+                else:
+                    signal_grade = "eligible"
+
+            gate_results = dict(evidence.get("gate_results") or {})
+            if not gate_results:
+                gate_results = {
+                    "hard_gate_pass": hard_gate_pass,
+                    "hard_gate_reasons": rejection_reasons,
+                    "watch_gate_reasons": list(
+                        evidence.get("watch_gate_reasons") or []
+                    ),
+                    "grade_reason": grade_reason,
+                }
+
+            trace.append(
+                {
+                    "code": code,
+                    "name": evidence.get("name") or raw.get("name"),
+                    "industry": (
+                        evidence.get("industry")
+                        or evidence.get("industry_name")
+                        or raw.get("industry")
+                    ),
+                    "theme_name": (
+                        evidence.get("opinion_sector_name")
+                        or evidence.get("market_theme")
+                    ),
+                    "candidate_lane": evidence.get("candidate_lane"),
+                    "in_pre_filter": True,
+                    "in_eligible_pool": hard_gate_pass,
+                    "is_selected": code in selected_by_code,
+                    "hard_gate_pass": hard_gate_pass,
+                    "signal_grade": signal_grade,
+                    "score": (
+                        evidence.get("final_score")
+                        if evidence.get("final_score") is not None
+                        else evidence.get("score")
+                    ),
+                    "factor_json": dict(evidence.get("factors") or {}),
+                    "contribution_json": dict(
+                        evidence.get("factor_contributions")
+                        or evidence.get("score_breakdown")
+                        or {}
+                    ),
+                    "gate_json": gate_results,
+                    "rejection_reasons": rejection_reasons,
+                    "market_context": self._factor_trace_market_context(evidence),
+                }
+            )
+        return trace
+
     def run(self, data_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+        input_rows = list(data_bundle.get("candidates") or [])
         context = self.strategy.prepare_context(data_bundle)
         self.last_run_diagnostics = {
             key: value
@@ -1642,11 +1833,19 @@ class StockSelector:
             if key.endswith("_summary") or key.endswith("_diagnostics")
         }
         factor_rows = self.strategy.compute_factors(context)
-        scored = self.strategy.score(factor_rows)
-        scored = self.apply_global_live_selection_rules(scored)
+        core_scored = self.strategy.score(factor_rows)
+        scored = self.apply_global_live_selection_rules(core_scored)
         if hasattr(self.strategy, "score_diagnostics"):
             self.last_run_diagnostics["score_diagnostics"] = self.strategy.score_diagnostics(scored)
         selected = self.strategy.select(scored)
+        self.last_factor_evaluation_trace = self._build_factor_evaluation_trace(
+            input_rows=input_rows,
+            context=context,
+            factor_rows=factor_rows,
+            core_scored=core_scored,
+            final_scored=scored,
+            selected=selected,
+        )
         results = []
         for index, item in enumerate(selected, start=1):
             explain = self._enhance_explain(item)

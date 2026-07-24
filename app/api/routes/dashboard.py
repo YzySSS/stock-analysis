@@ -157,6 +157,97 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _project(item, ("factor", "status", "reason"))
         for item in (market_timing_source.get("article_factor_coverage") or [])[:8]
     ]
+    shadow_source = market_timing_source.get("shadow_v20") or {}
+    shadow_v20 = _project(
+        shadow_source,
+        (
+            "model_id",
+            "model_name",
+            "as_of",
+            "state",
+            "state_label",
+            "raw_state",
+            "timing_score",
+            "position_range",
+            "position_target_pct",
+            "position_upper_pct",
+            "confidence",
+            "action_label",
+            "reasons",
+            "risk_notes",
+            "emergency",
+            "hysteresis_action",
+            "research_only",
+        ),
+    )
+    shadow_v20["dimensions"] = [
+        _project(
+            item,
+            (
+                "dimension",
+                "dimension_label",
+                "score",
+                "available",
+                "source_coverage",
+                "weight",
+                "signal",
+                "source_status",
+            ),
+        )
+        for item in (shadow_source.get("dimensions") or {}).values()
+    ]
+    market_timing["shadow_v20"] = shadow_v20 or None
+
+    scenario_source = market_timing_source.get("scenario_forecast") or {}
+    scenario_forecast = _project(
+        scenario_source,
+        (
+            "model_id",
+            "model_name",
+            "version",
+            "as_of",
+            "trade_date",
+            "research_only",
+            "probability_not_direction_command",
+        ),
+    )
+    scenario_forecast["forecasts"] = [
+        _project(
+            item,
+            (
+                "horizon_days",
+                "probabilities",
+                "return_quantiles_pct",
+                "drawdown_probabilities",
+                "confidence",
+                "similar_history_count",
+                "evidence_status",
+                "validation_status",
+                "probability_display_allowed",
+                "bullish_triggers",
+                "bearish_triggers",
+                "action_plan",
+            ),
+        )
+        for item in (scenario_source.get("forecasts") or [])
+    ]
+    scenario_forecast["leadership"] = [
+        _project(
+            item,
+            (
+                "sector_type",
+                "sector_name",
+                "leadership_state",
+                "state_label",
+                "leadership_score",
+                "confidence",
+                "evidence",
+                "contradictions",
+            ),
+        )
+        for item in (scenario_source.get("leadership") or [])[:16]
+    ]
+    market_timing["scenario_forecast"] = scenario_forecast or None
 
     hot_themes_source = payload.get("hot_themes") or {}
     hot_themes = _project(hot_themes_source, ("as_of",))

@@ -7,6 +7,7 @@ from app.market_timing.calibration import (
     calibrate_indicator_score,
     compose_timing_state,
 )
+from app.market_timing.service import _json_loads
 
 
 def indicator(indicator_id: str, score: float) -> dict:
@@ -18,6 +19,13 @@ def indicator(indicator_id: str, score: float) -> dict:
 
 
 class MarketTimingCalibrationTests(unittest.TestCase):
+    def test_service_json_loader_preserves_existing_timing_payloads(self):
+        payload = {"position_target": 0.55}
+
+        self.assertIs(_json_loads(payload, {}), payload)
+        self.assertEqual(_json_loads('["趋势改善"]', []), ["趋势改善"])
+        self.assertEqual(_json_loads("not-json", {"fallback": True}), {"fallback": True})
+
     def test_structural_futures_short_baseline_is_centered_by_rolling_rank(self):
         history = [-0.090 + index * 0.001 for index in range(40)]
 

@@ -1,0 +1,43 @@
+{
+  "model_id": "market_scenario_forecast_v1",
+  "version": "v1",
+  "status": "research_only",
+  "horizons": [1, 5, 20],
+  "index_code": "000300.SH",
+  "scenario_definition": {
+    "up": "forward_return > 0.5 * expected_sigma_h",
+    "down": "forward_return < -0.5 * expected_sigma_h",
+    "range": "otherwise"
+  },
+  "features": [
+    "timing_score",
+    "trend",
+    "breadth",
+    "capital",
+    "tail_risk",
+    "leadership"
+  ],
+  "model": {
+    "family": "l2_regularized_multinomial_logistic_regression",
+    "regularization": 0.5,
+    "learning_rate": 0.05,
+    "iterations": 350,
+    "minimum_training_rows": 120,
+    "minimum_validation_rows": 30,
+    "temporal_validation": "expanding_walk_forward"
+  },
+  "validation": {
+    "metrics": ["multiclass_brier", "log_loss", "ece"],
+    "baselines": ["unconditional_probability", "state_persistence"],
+    "must_beat_both_baselines": true,
+    "probability_display_requires_baseline_win": true
+  },
+  "leadership_states": ["seed", "confirmed", "crowded", "decay"],
+  "guardrails": [
+    "Probabilities never override market timing position limits.",
+    "Insufficient or non-superior evidence hides precise probabilities in the UI.",
+    "The model never auto-trades and never modifies stock-selection scores.",
+    "Known May-July 2026 behavior is diagnostic history, never a hard-coded seasonal feature.",
+    "Large language models never generate probabilities, prices or positions."
+  ]
+}

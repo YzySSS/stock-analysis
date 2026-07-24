@@ -4,6 +4,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.stock_selection.forward_observation import ForwardObservationRepository, ForwardObservationService
+from app.stock_selection.factor_evaluation_v2 import (
+    StrategyFactorEvaluationRepository,
+)
 from app.strategies.service import StrategyService
 
 router = APIRouter(tags=["strategies"])
@@ -63,6 +66,26 @@ def get_forward_evidence(
 ) -> dict:
     return {
         "forward_evidence": ForwardObservationService().evidence_summary(strategy_id),
+    }
+
+
+@router.get("/strategies/factor-evaluation")
+def get_factor_evaluation(
+    strategy_id: str = Query(min_length=1, max_length=64),
+    strategy_version: str | None = Query(default=None, max_length=32),
+    horizon_days: int = Query(default=5, ge=1, le=60),
+    scope_name: str = Query(
+        default="eligible_pool",
+        pattern="^(eligible_pool|selected_top_k)$",
+    ),
+) -> dict:
+    return {
+        "factor_evaluation": StrategyFactorEvaluationRepository().latest_summary(
+            strategy_id,
+            strategy_version=strategy_version,
+            horizon_days=horizon_days,
+            scope_name=scope_name,
+        )
     }
 
 

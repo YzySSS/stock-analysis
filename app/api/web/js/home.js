@@ -283,6 +283,121 @@ function renderFactorCoverage(items = []) {
   `;
 }
 
+function researchEvidenceLabel(status) {
+  const labels = {
+    baseline_pass: '已优于基线 · 仍属研究',
+    provisional_baseline_pass: '初步优于基线',
+    not_better_than_baseline: '未优于朴素基线',
+    insufficient_evidence: '证据不足',
+  };
+  return labels[status] || status || '证据不足';
+}
+
+function renderTimingV20(shadow) {
+  const status = qs('#home-timing-v20-status');
+  const body = qs('#home-timing-v20-body');
+  if (!status || !body) return;
+  if (!shadow?.model_id) {
+    status.textContent = '等待首个影子快照';
+    status.className = 'research-status muted';
+    body.innerHTML = '<div class="empty-state">V1.9 继续作为正式信号；V2.0 尚未形成影子日快照。</div>';
+    return;
+  }
+  const range = shadow.position_range || {};
+  const low = range.low_pct ?? (range.low == null ? null : Number(range.low) * 100);
+  const high = range.high_pct ?? (range.high == null ? null : Number(range.high) * 100);
+  status.textContent = `${shadow.state_label || '-'} · 研究影子`;
+  status.className = `research-status ${shadow.emergency ? 'risk' : 'active'}`;
+  const dimensions = shadow.dimensions || [];
+  body.innerHTML = `
+    <div class="home-timing-v20-summary">
+      <div>
+        <span>建议仓位区间</span>
+        <strong>${low == null || high == null ? '-' : `${Number(low).toFixed(0)}–${Number(high).toFixed(0)}%`}</strong>
+        <small>目标 ${shadow.position_target_pct == null ? '-' : `${Number(shadow.position_target_pct).toFixed(0)}%`} · 上限 ${shadow.position_upper_pct == null ? '-' : `${Number(shadow.position_upper_pct).toFixed(0)}%`}</small>
+      </div>
+      <div>
+        <span>择时分 / 置信度</span>
+        <strong>${formatNumber(shadow.timing_score, 1)}</strong>
+        <small>${shadow.confidence == null ? '-' : `${(Number(shadow.confidence) * 100).toFixed(0)}%`} · ${escapeHtml(shadow.hysteresis_action || '-')}</small>
+      </div>
+    </div>
+    <div class="home-timing-v20-dimensions">
+      ${dimensions.map((item) => `
+        <div class="${item.available === false ? 'missing' : ''}">
+          <span>${escapeHtml(item.dimension_label || item.dimension || '-')}</span>
+          <b>${formatNumber(item.score, 1)}</b>
+          <i style="--dimension-score:${Math.max(0, Math.min(100, Number(item.score || 0)))}%"></i>
+        </div>
+      `).join('') || '<div class="empty-state">暂无维度数据</div>'}
+    </div>
+    <p>${escapeHtml(shadow.action_label || '-')}</p>
+    ${(shadow.risk_notes || []).length ? `<small class="home-research-warning">${(shadow.risk_notes || []).map(escapeHtml).join('；')}</small>` : ''}
+  `;
+}
+
+function renderScenarioForecast(scenario) {
+  const status = qs('#home-scenario-status');
+  const container = qs('#home-scenario-forecast');
+  const leadershipStatus = qs('#home-leadership-status');
+  const leadershipContainer = qs('#home-leadership-grid');
+  if (!status || !container || !leadershipContainer) return;
+  if (!scenario?.model_id) {
+    status.textContent = '等待择时 V2.0 样本';
+    status.className = 'research-status muted';
+    container.innerHTML = '<div class="empty-state">尚无概率情景快照。模型不会使用大模型自由生成概率。</div>';
+    leadershipContainer.innerHTML = '<div class="empty-state">尚无主线状态快照。</div>';
+    return;
+  }
+  const forecasts = scenario.forecasts || [];
+  const allowedCount = forecasts.filter((item) => item.probability_display_allowed).length;
+  status.textContent = allowedCount === forecasts.length && forecasts.length
+    ? '通过朴素基线门槛'
+    : '证据不足时隐藏精确概率';
+  status.className = `research-status ${allowedCount === forecasts.length && forecasts.length ? 'active' : 'warn'}`;
+  container.innerHTML = forecasts.map((item) => {
+    const probabilities = item.probabilities || {};
+    const quantiles = item.return_quantiles_pct || {};
+    const displayAllowed = Boolean(item.probability_display_allowed);
+    const probabilityMarkup = displayAllowed ? `
+      <div class="scenario-probability down"><span>跌</span><b>${probabilities.down == null ? '-' : formatPercent(Number(probabilities.down) * 100, 0)}</b></div>
+      <div class="scenario-probability range"><span>震荡</span><b>${probabilities.range == null ? '-' : formatPercent(Number(probabilities.range) * 100, 0)}</b></div>
+      <div class="scenario-probability up"><span>涨</span><b>${probabilities.up == null ? '-' : formatPercent(Number(probabilities.up) * 100, 0)}</b></div>
+    ` : `
+      <div class="scenario-evidence-gate">
+        <b>${escapeHtml(researchEvidenceLabel(item.validation_status || item.evidence_status))}</b>
+        <span>已保存内部研究结果，但不展示虚假精度</span>
+      </div>
+    `;
+    return `
+      <article class="home-scenario-card ${displayAllowed ? 'validated' : 'gated'}">
+        <header><strong>${item.horizon_days ?? '-'}日</strong><span>情景</span></header>
+        <div class="scenario-probabilities">${probabilityMarkup}</div>
+        <small>收益区间 P10/P50/P90：${quantiles.p10 == null ? '-' : formatNumber(quantiles.p10, 1)} / ${quantiles.p50 == null ? '-' : formatNumber(quantiles.p50, 1)} / ${quantiles.p90 == null ? '-' : formatNumber(quantiles.p90, 1)}%</small>
+        <p>${escapeHtml(Object.values(item.action_plan || {})[0] || '等待更多前向证据')}</p>
+      </article>
+    `;
+  }).join('') || '<div class="empty-state">暂无情景期限数据</div>';
+
+  const leadership = scenario.leadership || [];
+  const stateClass = (state) => ['seed', 'confirmed', 'crowded', 'decay'].includes(state) ? state : 'seed';
+  if (leadershipStatus) {
+    const counts = leadership.reduce((acc, item) => {
+      acc[item.leadership_state] = (acc[item.leadership_state] || 0) + 1;
+      return acc;
+    }, {});
+    leadershipStatus.textContent = `萌芽 ${counts.seed || 0} · 确认 ${counts.confirmed || 0} · 拥挤 ${counts.crowded || 0} · 退潮 ${counts.decay || 0}`;
+  }
+  leadershipContainer.innerHTML = leadership.map((item) => `
+    <article class="home-leadership-card ${stateClass(item.leadership_state)}">
+      <div><span>${escapeHtml(item.state_label || '-')}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
+      <strong>${escapeHtml(item.sector_name || '-')}</strong>
+      <small>${escapeHtml((item.evidence || []).slice(0, 2).join(' · ') || '等待证据')}</small>
+      ${(item.contradictions || []).length ? `<p>${escapeHtml((item.contradictions || []).join('；'))}</p>` : ''}
+    </article>
+  `).join('') || '<div class="empty-state">暂无主线状态数据</div>';
+}
+
 function renderMarketTiming(timing) {
   const summary = qs('#home-market-timing-summary');
   const main = qs('#home-market-timing-main');
@@ -295,6 +410,8 @@ function renderMarketTiming(timing) {
       signals.removeAttribute('data-signal-count');
       signals.innerHTML = '<div class="empty-state">暂无择时信号</div>';
     }
+    renderTimingV20(null);
+    renderScenarioForecast(null);
     return;
   }
 
@@ -331,6 +448,8 @@ function renderMarketTiming(timing) {
       ${riskList.length ? `<div class="home-market-timing-risk">${riskList.map(escapeHtml).join('；')}</div>` : ''}
     `;
   }
+  renderTimingV20(timing.shadow_v20 || null);
+  renderScenarioForecast(timing.scenario_forecast || null);
 }
 
 function renderTrackingCards(items = []) {

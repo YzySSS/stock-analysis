@@ -11,6 +11,8 @@ from app.market_timing.calibration import (
     REALTIME_WEIGHTS,
     compose_timing_state,
 )
+from app.market_timing.scenario_forecast import MarketScenarioForecastRepository
+from app.market_timing.v20 import MarketTimingV20Repository
 from app.shared.db import mysql_conn
 
 
@@ -100,6 +102,19 @@ def _json_loads(value: Any, fallback: Any) -> Any:
         return json.loads(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _attach_research_layers(signal: dict[str, Any]) -> dict[str, Any]:
+    result = dict(signal)
+    try:
+        result["shadow_v20"] = MarketTimingV20Repository().latest()
+    except Exception:
+        result["shadow_v20"] = None
+    try:
+        result["scenario_forecast"] = MarketScenarioForecastRepository().latest()
+    except Exception:
+        result["scenario_forecast"] = None
+    return result
 
 
 def _latest_stored_timing_signal(index_code: str = "000300.SH") -> dict[str, Any] | None:
@@ -441,7 +456,9 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
 
     stored_signal = _latest_stored_timing_signal()
     if stored_signal:
-        return _refresh_stored_with_realtime_overview(stored_signal, overview)
+        return _attach_research_layers(
+            _refresh_stored_with_realtime_overview(stored_signal, overview)
+        )
 
     overview = overview or {}
     market_strength = _to_float(overview.get("market_strength"))
@@ -506,7 +523,7 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
     if market_strength is None:
         risk_notes.append("市场强度缺失，择时信号按中性降级")
 
-    return {
+    return _attach_research_layers({
         "model_id": "market_timing_v1_realtime_proxy",
         "model_name": "市场择时 V1",
         "version": "v1",
@@ -581,4 +598,4 @@ def build_market_timing_signal(overview: dict[str, Any] | None) -> dict[str, Any
             "V1 尚未接入 ERP、期权 PCR/IV、股指期货会员持仓等完整华泰四维指标",
             "该信号用于研究和仓位约束，不代表实盘买卖建议",
         ],
-    }
+    })

@@ -1,6 +1,9 @@
 let currentStrategyId = null;
+let currentStrategyVersion = null;
 let strategiesCache = [];
 let strategyLoadToken = 0;
+let currentFactorEvaluation = null;
+let currentFactorView = 'quality';
 
 
 function strategyDisplayNameById(strategyId) {
@@ -197,6 +200,212 @@ function renderStrategyFactors(strategy = null) {
   renderStrategyTable(strategiesCache);
 }
 
+function factorMaturityLabel(value) {
+  return ({
+    data_only: '仅数据',
+    directional_hint: '方向提示',
+    provisional: '暂定证据',
+    research_candidate: '研究候选',
+  })[value] || value || '仅数据';
+}
+
+function factorValidationLabel(value) {
+  return ({
+    insufficient_evidence: '证据不足',
+    directional_evidence_only: '仅方向证据',
+    research_candidate_positive: '正向研究候选',
+  })[value] || value || '-';
+}
+
+function factorConclusionLabel(value) {
+  return ({
+    insufficient_evidence: '证据不足',
+    incremental_positive: '有增量贡献',
+    possible_negative_or_suppressor: '可能负贡献/抑制',
+    redundant_or_neutral: '冗余或中性',
+  })[value] || value || '-';
+}
+
+function formatFactorRatio(value, digits = 1) {
+  if (value == null || Number.isNaN(Number(value))) return '-';
+  return `${(Number(value) * 100).toFixed(digits)}%`;
+}
+
+function factorValueClass(value) {
+  if (value == null || Number.isNaN(Number(value))) return '';
+  return Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : '';
+}
+
+function renderFactorTraceSummary(data = null) {
+  const container = qs('#strategy-factor-trace-summary');
+  if (!container) return;
+  const rows = data?.trace_summary || [];
+  const full = rows.find((item) => item.trace_mode === 'full_forward_trace') || {};
+  const historical = rows.find((item) => item.trace_mode === 'selected_only_historical') || {};
+  container.innerHTML = `
+    <article class="stat-card"><div class="stat-label">完整前向快照</div><div class="stat-value">${full.snapshot_days ?? 0} 日</div><small>${full.first_trade_date || '-'} → ${full.last_trade_date || '-'}</small></article>
+    <article class="stat-card"><div class="stat-label">硬门槛候选样本</div><div class="stat-value">${full.eligible_rows ?? 0}</div><small>可用于横截面 IC</small></article>
+    <article class="stat-card"><div class="stat-label">最终入选样本</div><div class="stat-value">${Number(full.selected_rows || 0) + Number(historical.selected_rows || 0)}</div><small>旧样本只做入选后复盘</small></article>
+    <article class="stat-card"><div class="stat-label">研究状态</div><div class="stat-value">${escapeHtml(data?.status === 'ready' ? '已有成熟标签' : '采集中')}</div><small>不自动改权重</small></article>
+  `;
+}
+
+function renderFactorQuality(data) {
+  const rows = data?.evaluations || [];
+  if (!rows.length) {
+    return '<div class="empty-state">已冻结研究协议，正在等待新的完整快照和成熟收益标签。旧 Top K 样本不会冒充全市场 IC。</div>';
+  }
+  return `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>因子</th><th>成熟度</th><th>观察日</th><th>有效样本</th><th>覆盖率</th><th>缺失率</th><th>当前结论</th></tr></thead>
+        <tbody>${rows.map((item) => `
+          <tr>
+            <td><b>${escapeHtml(item.factor_key || '-')}</b></td>
+            <td><span class="badge ${item.maturity_state === 'research_candidate' ? 'status-ok' : 'status-warn'}">${escapeHtml(factorMaturityLabel(item.maturity_state))}</span></td>
+            <td>${item.observation_days ?? 0}</td>
+            <td>${item.valid_sample_size ?? 0} / ${item.sample_size ?? 0}</td>
+            <td>${formatFactorRatio(item.coverage)}</td>
+            <td>${formatFactorRatio(item.missing_rate)}</td>
+            <td>${escapeHtml(factorValidationLabel(item.validation_status))}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderFactorIc(data) {
+  const rows = data?.evaluations || [];
+  if (!rows.length) return renderFactorQuality(data);
+  return `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>因子</th><th>Rank IC</th><th>ICIR</th><th>IC 正比例</th><th>NW t</th><th>p 值</th><th>95% Block Bootstrap</th><th>FDR q</th></tr></thead>
+        <tbody>${rows.map((item) => `
+          <tr>
+            <td><b>${escapeHtml(item.factor_key || '-')}</b></td>
+            <td class="${factorValueClass(item.rank_ic_mean)}">${formatNumber(item.rank_ic_mean, 4)}</td>
+            <td class="${factorValueClass(item.rank_ic_ir)}">${formatNumber(item.rank_ic_ir, 3)}</td>
+            <td>${formatFactorRatio(item.positive_ic_ratio)}</td>
+            <td>${formatNumber(item.newey_west_t, 3)}</td>
+            <td>${formatNumber(item.p_value, 4)}</td>
+            <td>${formatNumber(item.bootstrap_ci_low, 4)} ～ ${formatNumber(item.bootstrap_ci_high, 4)}</td>
+            <td>${formatNumber(item.fdr_q_value, 4)}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+    <div class="strategy-factor-method-note">Rank IC 按信号日逐日计算；显著性使用 Newey-West 与固定种子的移动区块 Bootstrap。多因子检验使用 BH-FDR 控制偶然发现。</div>
+  `;
+}
+
+function renderFactorGroups(data) {
+  const rows = data?.groups || [];
+  if (!rows.length) {
+    return '<div class="empty-state">分组样本尚未达到每组至少 20 条；不会为了画出漂亮曲线强行分组。</div>';
+  }
+  return `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>因子</th><th>组别</th><th>样本</th><th>因子区间</th><th>平均收益</th><th>中位收益</th><th>胜率</th><th>扣成本收益</th></tr></thead>
+        <tbody>${rows.map((item) => `
+          <tr>
+            <td>${escapeHtml(item.factor_key || '-')}</td>
+            <td><b>${escapeHtml(item.group_label || '-')}</b></td>
+            <td>${item.sample_size ?? 0}</td>
+            <td>${formatNumber(item.factor_min, 2)} ～ ${formatNumber(item.factor_max, 2)}</td>
+            <td class="${factorValueClass(item.average_return_pct)}">${formatPercent(item.average_return_pct)}</td>
+            <td class="${factorValueClass(item.median_return_pct)}">${formatPercent(item.median_return_pct)}</td>
+            <td>${formatFactorRatio(item.win_rate)}</td>
+            <td class="${factorValueClass(item.cost_adjusted_return_pct)}">${formatPercent(item.cost_adjusted_return_pct)}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderFactorAblation(data) {
+  const rows = data?.ablations || [];
+  if (!rows.length) {
+    return '<div class="empty-state">完整候选池样本不足，暂不输出消融结论。Top K 历史样本明确排除在消融测试之外。</div>';
+  }
+  return `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>因子</th><th>样本</th><th>基准 Rank IC</th><th>去除后 Rank IC</th><th>增量</th><th>最大相关</th><th>结论</th></tr></thead>
+        <tbody>${rows.map((item) => `
+          <tr>
+            <td><b>${escapeHtml(item.factor_key || '-')}</b></td>
+            <td>${item.sample_size ?? 0}</td>
+            <td>${formatNumber(item.baseline_rank_ic, 4)}</td>
+            <td>${formatNumber(item.ablated_rank_ic, 4)}</td>
+            <td class="${factorValueClass(item.rank_ic_delta)}">${formatNumber(item.rank_ic_delta, 4)}</td>
+            <td>${formatNumber(item.redundancy_max_abs_corr, 3)}</td>
+            <td>${escapeHtml(factorConclusionLabel(item.conclusion))}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderFactorResearch(data = null) {
+  currentFactorEvaluation = data;
+  const status = qs('#strategy-factor-research-status');
+  const protocol = qs('#strategy-factor-protocol');
+  const body = qs('#strategy-factor-research-body');
+  if (!status || !protocol || !body) return;
+  if (!data) {
+    status.className = 'badge status-muted';
+    status.textContent = '未选择';
+    protocol.textContent = '等待研究快照';
+    renderFactorTraceSummary(null);
+    body.className = 'strategy-factor-research-body empty-state';
+    body.textContent = '请选择策略';
+    return;
+  }
+  const hasRows = (data.evaluations || []).length > 0;
+  status.className = `badge ${hasRows ? 'status-warn' : 'status-muted'}`;
+  status.textContent = hasRows ? '研究数据 · 未验证' : '采集中';
+  protocol.innerHTML = `<b>${escapeHtml(data.protocol_id || '-')}</b><span>${escapeHtml(data.scope_name || '-')} · T+${data.horizon_days ?? '-'}</span><small>Spec ${escapeHtml(String(data.spec_hash || '').slice(0, 12))}</small>`;
+  renderFactorTraceSummary(data);
+  body.className = 'strategy-factor-research-body';
+  body.innerHTML = currentFactorView === 'ic'
+    ? renderFactorIc(data)
+    : currentFactorView === 'groups'
+      ? renderFactorGroups(data)
+      : currentFactorView === 'ablation'
+        ? renderFactorAblation(data)
+        : renderFactorQuality(data);
+}
+
+function renderFactorResearchError(message) {
+  renderFactorResearch(null);
+  const status = qs('#strategy-factor-research-status');
+  const body = qs('#strategy-factor-research-body');
+  if (status) {
+    status.className = 'badge status-error';
+    status.textContent = '加载失败';
+  }
+  if (body) renderError(body, `因子研究加载失败: ${message}`);
+}
+
+async function loadFactorEvaluation(strategyId, strategyVersion, token) {
+  const scope = qs('#strategy-factor-scope')?.value || 'eligible_pool';
+  const horizon = qs('#strategy-factor-horizon')?.value || '5';
+  const params = new URLSearchParams({
+    strategy_id: strategyId,
+    horizon_days: horizon,
+    scope_name: scope,
+  });
+  if (strategyVersion) params.set('strategy_version', strategyVersion);
+  const data = await fetchJson(`/api/strategies/factor-evaluation?${params.toString()}`);
+  if (token !== strategyLoadToken) return;
+  renderFactorResearch(data.factor_evaluation || null);
+}
+
 function renderStrategyFactorCards(items = []) {
   const container = qs('#strategy-factor-cards');
   if (!container) return;
@@ -212,7 +421,7 @@ function renderStrategyFactorCards(items = []) {
     const ci = item.ci == null ? null : Number(item.ci);
     const coverage = item.coverage == null ? null : Number(item.coverage);
     const missing = item.missing_rate == null ? null : Number(item.missing_rate);
-    const ciClass = ci == null ? 'neutral' : ci >= 0.03 ? 'strong' : ci < 0 ? 'weak' : 'neutral';
+    const ciClass = ci == null ? 'neutral' : ci < 0 ? 'weak' : 'neutral';
     return `
       <div class="factor-metric-row ${ciClass}">
         <div class="factor-metric-main">
@@ -221,7 +430,7 @@ function renderStrategyFactorCards(items = []) {
           <b>${weight == null || Number.isNaN(weight) ? '-' : `${formatNumber(weight, 0)}%`}</b>
         </div>
         <div class="factor-metric-detail">
-          <span>CI <b>${ci == null || Number.isNaN(ci) ? '-' : formatNumber(ci, 4)}</b></span>
+          <span>旧 CI 探针 <b>${ci == null || Number.isNaN(ci) ? '-' : formatNumber(ci, 4)}</b></span>
           <span>覆盖 <b>${coverage == null || Number.isNaN(coverage) ? '-' : formatPercent(coverage)}</b></span>
           <span>缺失 <b>${missing == null || Number.isNaN(missing) ? '-' : formatPercent(missing)}</b></span>
           <span>有效样本 <b>${item.valid_sample_size ?? item.sample_size ?? '-'}</b></span>
@@ -463,11 +672,17 @@ async function loadStrategyDetail(strategyId) {
   const data = await fetchJson(`/api/strategies/detail?strategy_id=${encodeURIComponent(strategyId)}`);
   if (token !== strategyLoadToken) return;
   currentStrategyId = strategyId;
+  currentStrategyVersion = data.strategy?.version || null;
   qsa('[data-strategy-card]').forEach((card) => {
     card.classList.toggle('selected', card.getAttribute('data-strategy-card') === strategyId);
   });
   renderStrategyDetail(data.strategy || null);
   renderStrategyFactors(data.strategy || null);
+  try {
+    await loadFactorEvaluation(strategyId, currentStrategyVersion, token);
+  } catch (error) {
+    if (token === strategyLoadToken) renderFactorResearchError(error.message);
+  }
   try {
     await loadForwardEvidence(strategyId, token);
   } catch (error) {
@@ -485,13 +700,34 @@ async function loadStrategiesPage() {
   } else {
     renderStrategyDetail(null);
     renderStrategyFactors(null);
+    renderFactorResearch(null);
     renderForwardEvidence(null);
   }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
   qs('#refresh-strategies-page')?.addEventListener('click', loadStrategiesPage);
+  const reloadFactorView = async () => {
+    if (!currentStrategyId) return;
+    const token = strategyLoadToken;
+    try {
+      await loadFactorEvaluation(currentStrategyId, currentStrategyVersion, token);
+    } catch (error) {
+      if (token === strategyLoadToken) renderFactorResearchError(error.message);
+    }
+  };
+  qs('#strategy-factor-scope')?.addEventListener('change', reloadFactorView);
+  qs('#strategy-factor-horizon')?.addEventListener('change', reloadFactorView);
   document.addEventListener('click', async (event) => {
+    const factorView = event.target.closest('[data-factor-view]');
+    if (factorView) {
+      currentFactorView = factorView.getAttribute('data-factor-view') || 'quality';
+      qsa('[data-factor-view]').forEach((button) => {
+        button.classList.toggle('active', button === factorView);
+      });
+      renderFactorResearch(currentFactorEvaluation);
+      return;
+    }
     const target = event.target.closest('[data-strategy-pick]');
     if (target) {
       await loadStrategyDetail(target.getAttribute('data-strategy-pick'));
@@ -514,6 +750,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     qs('#strategies-validated-count').textContent = '-';
     renderStrategyDetail(null);
     renderStrategyFactors(null);
+    renderFactorResearch(null);
     renderForwardEvidence(null);
   }
 });

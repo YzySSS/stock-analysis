@@ -10,6 +10,9 @@ from decimal import Decimal
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from app.shared.db import mysql_conn
+from app.stock_selection.factor_evaluation_v2 import (
+    StrategyFactorEvaluationRepository,
+)
 from app.stock_selection.dataset_scope import (
     filter_rows_to_code_prefixes,
     required_dataset_code_prefixes,
@@ -1325,12 +1328,16 @@ class SentimentSnapshotMaterializationService:
         strategy_service: StrategyService | None = None,
         selector_factory: SelectorFactory | None = None,
         local_clock_mode: Callable[[], str] | None = None,
+        factor_evaluation_repository: StrategyFactorEvaluationRepository | None = None,
     ) -> None:
         self.input_repository = input_repository or MySQLSentimentSnapshotInputRepository()
         self.snapshot_repository = snapshot_repository or SentimentCandidateSnapshotRepository()
         self.strategy_service = strategy_service or StrategyService()
         self.selector_factory = selector_factory or _selector_factory
         self.local_clock_mode = local_clock_mode or StockSelector._selection_clock_mode
+        self.factor_evaluation_repository = (
+            factor_evaluation_repository or StrategyFactorEvaluationRepository()
+        )
 
     @staticmethod
     def _dynamic_source_batches(
@@ -1523,6 +1530,7 @@ class SentimentSnapshotMaterializationService:
             realtime_batch_ids = self._decision_realtime_batch_ids(base_batches)
             if realtime_batch_ids:
                 overrides["decision_realtime_batch_ids"] = realtime_batch_ids
+            overrides["capture_factor_evaluation_trace"] = True
             selector = self.selector_factory(
                 strategy_id,
                 overrides,
@@ -1640,7 +1648,18 @@ class SentimentSnapshotMaterializationService:
                 },
             )
 
-        return self._result_payload(published, audit, len(candidate_rows))
+        payload = self._result_payload(published, audit, len(candidate_rows))
+        if published.status == "ready":
+            payload["factor_research_snapshot"] = self._persist_factor_trace(
+                published_snapshot_id=published.snapshot_id,
+                selector=selector,
+                audit=audit,
+                strategy_meta=strategy_meta,
+                strategy_config_hash=strategy_config_hash,
+                source_lineage=audit.source_lineage,
+                metadata={"paired_run": False},
+            )
+        return payload
 
     def materialize_dual(self, *, max_picks: int | None = None) -> dict[str, Any]:
         """Compatibility wrapper for the current stable/v0.5 shadow pair."""
@@ -1699,6 +1718,7 @@ class SentimentSnapshotMaterializationService:
             "capability": {"required_datasets": list(dict.fromkeys(required_datasets))},
         }
 
+        factor_trace_queue: list[dict[str, Any]] = []
         with self.input_repository.open_consistent_inputs(
             strategy_meta=dual_meta,
             minimum_coverage_ratio=minimum_coverage,
@@ -1762,6 +1782,27 @@ class SentimentSnapshotMaterializationService:
                     strategy_audit,
                     len(output["candidate_rows"]),
                 )
+                if published.status == "ready":
+                    factor_trace_queue.append(
+                        {
+                            "published_snapshot_id": published.snapshot_id,
+                            "selector": output["selector"],
+                            "audit": strategy_audit,
+                            "strategy_meta": output["strategy_meta"],
+                            "strategy_config_hash": output["strategy_config_hash"],
+                            "source_lineage": strategy_audit.source_lineage,
+                            "metadata": {
+                                "paired_run": True,
+                                "paired_input_hash": common_input_hash,
+                            },
+                        }
+                    )
+
+        for item in factor_trace_queue:
+            strategy_key = str(item["strategy_meta"]["id"])
+            run_payloads[strategy_key][
+                "factor_research_snapshot"
+            ] = self._persist_factor_trace(**item)
 
         return {
             "status": (
@@ -1800,6 +1841,7 @@ class SentimentSnapshotMaterializationService:
         realtime_batch_ids = self._decision_realtime_batch_ids(base_batches)
         if realtime_batch_ids:
             overrides["decision_realtime_batch_ids"] = realtime_batch_ids
+        overrides["capture_factor_evaluation_trace"] = True
         selector = self.selector_factory(
             strategy_id,
             overrides,
@@ -1872,6 +1914,45 @@ class SentimentSnapshotMaterializationService:
             "output_hash": output_hash,
             "input_metadata": input_metadata,
         }
+
+    def _persist_factor_trace(
+        self,
+        *,
+        published_snapshot_id: str,
+        selector: StockSelector,
+        audit: MaterializationInputAudit,
+        strategy_meta: Mapping[str, Any],
+        strategy_config_hash: str,
+        source_lineage: Sequence[Mapping[str, Any]],
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        trace_rows = list(
+            getattr(selector, "last_factor_evaluation_trace", None) or []
+        )
+        if not trace_rows:
+            return {
+                "status": "skipped",
+                "reason": "selector_factor_trace_empty",
+                "snapshot_id": published_snapshot_id,
+            }
+        return self.factor_evaluation_repository.persist_snapshot(
+            snapshot_id=published_snapshot_id,
+            source_snapshot_id=published_snapshot_id,
+            strategy_id=str(strategy_meta.get("id") or ""),
+            strategy_version=str(strategy_meta.get("version") or ""),
+            strategy_config_hash=strategy_config_hash,
+            trade_date=audit.reference_trade_date,
+            decision_as_of=audit.decision_as_of,
+            expected_entity_count=audit.expected_entity_count,
+            trace_rows=trace_rows,
+            source_lineage=source_lineage,
+            trace_mode="full_forward_trace",
+            metadata={
+                "selection_result_written": False,
+                "selection_core": "StockSelector.run",
+                **dict(metadata or {}),
+            },
+        )
 
     def _publish_strategy_output(
         self,
