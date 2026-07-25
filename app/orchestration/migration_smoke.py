@@ -57,6 +57,12 @@ REQUIRED_TABLES = {
     "task_run_daily_summary",
     "job_error_daily_summary",
     "durable_task",
+    "etf_rotation_sector_daily",
+    "etf_rotation_trade_calendar",
+    "etf_rotation_fund_daily",
+    "etf_rotation_signal_run",
+    "etf_rotation_signal_candidate",
+    "etf_rotation_forward_outcome",
 }
 
 

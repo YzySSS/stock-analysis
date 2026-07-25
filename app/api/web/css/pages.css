@@ -8935,3 +8935,125 @@ body[data-page="backtest"] .backtest-terminal-form input[type="number"]::-webkit
     grid-template-columns: 1fr;
   }
 }
+/* Research-only industry ETF rotation */
+body[data-page="etf-rotation"] .etf-rotation-hero {
+  align-items: flex-start;
+}
+
+body[data-page="etf-rotation"] .etf-rotation-hero > div {
+  max-width: 820px;
+}
+
+.etf-rotation-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.etf-rotation-metrics .stat-card {
+  min-width: 0;
+}
+
+.etf-rotation-metrics .stat-value {
+  display: block;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.etf-rotation-table-wrap {
+  overflow-x: auto;
+}
+
+.etf-rotation-table {
+  width: 100%;
+  min-width: 1040px;
+  border-collapse: collapse;
+}
+
+.etf-rotation-table th,
+.etf-rotation-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--table-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.etf-rotation-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.etf-rotation-table td strong,
+.etf-rotation-table td small {
+  display: block;
+}
+
+.etf-rotation-table td small {
+  max-width: 280px;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.etf-rotation-table tr.is-selected {
+  background: rgba(34, 197, 94, 0.07);
+}
+
+.etf-outcome-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.etf-outcome-list article {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.etf-outcome-list article span,
+.etf-outcome-list article small {
+  color: var(--muted);
+}
+
+.etf-rotation-notes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.etf-rotation-notes .card {
+  margin-bottom: 0;
+}
+
+.plain-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.plain-list li + li {
+  margin-top: 8px;
+}
+
+@media (max-width: 1180px) {
+  .etf-rotation-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .etf-outcome-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .etf-rotation-metrics,
+  .etf-rotation-notes,
+  .etf-outcome-list {
+    grid-template-columns: 1fr;
+  }
+}

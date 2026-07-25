@@ -13,6 +13,7 @@ from app.api.auth import SiteAuthenticator, SiteAuthMiddleware, SiteAuthSettings
 from app.api.routes.auth import router as auth_router
 from app.api.routes.backtest import router as backtest_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.etf_rotation import router as etf_rotation_router
 from app.api.routes.health import router as health_router
 from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.selection import router as selection_router
@@ -81,6 +82,7 @@ app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(health_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
+app.include_router(etf_rotation_router, prefix="/api")
 app.include_router(system_router, prefix="/api")
 app.include_router(strategies_router, prefix="/api")
 app.include_router(selection_router, prefix="/api")

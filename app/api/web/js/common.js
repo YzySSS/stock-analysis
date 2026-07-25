@@ -74,6 +74,22 @@ function setActiveNav() {
   });
 }
 
+function ensureEtfRotationNav() {
+  qsa('.nav').forEach((nav) => {
+    if (nav.querySelector('[data-nav="etf-rotation"]')) return;
+    const link = document.createElement('a');
+    link.href = '/etf-rotation';
+    link.dataset.nav = 'etf-rotation';
+    link.textContent = 'ETF 轮动';
+    const anchor = nav.querySelector('[data-nav="trade-strategies"]');
+    if (anchor) {
+      anchor.insertAdjacentElement('afterend', link);
+    } else {
+      nav.appendChild(link);
+    }
+  });
+}
+
 function formatPercent(value, digits = 2) {
   if (value == null || Number.isNaN(Number(value))) return '-';
   return `${Number(value).toFixed(digits)}%`;
@@ -243,6 +259,7 @@ function bindTooltips() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  ensureEtfRotationNav();
   setActiveNav();
   bindGlobalStockSearch();
   bindLogoutControl();

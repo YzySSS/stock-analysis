@@ -1,0 +1,261 @@
+{
+  "model_id": "industry_etf_rotation_v1",
+  "model_name": "行业轮动 ETF V1",
+  "version": "1.0.0",
+  "status": "research_only_shadow",
+  "instrument_type": "etf",
+  "decision_timing": "post_close",
+  "earliest_execution": "next_trade_day_open",
+  "allow_cash": true,
+  "maximum_selections": 3,
+  "data_contract": {
+    "sector_source": "tushare.moneyflow_ind_ths",
+    "sector_lookback_trade_days": 20,
+    "sector_persistence_trade_days": 5,
+    "minimum_sector_history_days": 20,
+    "etf_sources": [
+      "tushare.fund_basic",
+      "tushare.fund_daily",
+      "tushare.fund_share",
+      "tushare.fund_nav"
+    ],
+    "etf_lookback_trade_days": 60,
+    "liquidity_lookback_trade_days": 20,
+    "share_change_lookback_trade_days": 20,
+    "minimum_etf_history_days": 60,
+    "minimum_complete_universe_ratio": 1.0,
+    "minimum_listing_days": 180,
+    "minimum_average_amount_20d_yuan": 50000000,
+    "maximum_absolute_premium_discount_pct": 2.0,
+    "maximum_nav_staleness_calendar_days": 3,
+    "opinion_source": "sector_opinion_daily",
+    "timing_source": "market_timing_signal_daily.market_timing_v20",
+    "missing_numeric_score": 50.0
+  },
+  "scoring": {
+    "formula_contract": {
+      "flow_strength": "cross_section_percentile_of_latest_mean_net_amount",
+      "flow_persistence": "50pct_positive_flow_days_plus_50pct_days_at_or_above_60th_cross_section_percentile",
+      "sector_price_trend": "clip_0_100(50 + 3 * compounded_return_5d_pct + 1.5 * compounded_return_20d_pct)",
+      "opinion": "mean_latest_exact_alias_sector_score",
+      "liquidity": "cross_section_percentile_of_average_amount_20d_yuan",
+      "etf_price_trend": "clip_0_100(50 + 3 * return_5d_pct + 1.5 * return_20d_pct)",
+      "share_change": "clip_0_100(50 + 2 * share_change_20d_pct)",
+      "tracking": "clip_0_100(100 - 25 * absolute_premium_discount_pct)"
+    },
+    "sector_weights": {
+      "flow_strength": 0.35,
+      "flow_persistence": 0.25,
+      "price_trend": 0.2,
+      "opinion": 0.2
+    },
+    "etf_weights": {
+      "liquidity": 0.35,
+      "price_trend": 0.3,
+      "share_change": 0.15,
+      "tracking": 0.2
+    },
+    "combined_weights": {
+      "sector": 0.7,
+      "etf": 0.3
+    },
+    "minimum_sector_score": 58.0,
+    "minimum_combined_score": 62.0
+  },
+  "risk_overlay": {
+    "timing_model_id": "market_timing_v20",
+    "timing_state_max_selections": {
+      "cash": 0,
+      "defensive": 1,
+      "cautious": 1,
+      "neutral": 2,
+      "risk_on": 3,
+      "strong_risk_on": 3,
+      "missing": 0
+    }
+  },
+  "forward_observation": {
+    "entry_price": "next_trade_day_open",
+    "exit_price": "horizon_trade_day_close",
+    "horizons_trade_days": [1, 3, 5, 10, 20],
+    "automatic_promotion": false
+  },
+  "guardrails": [
+    "The ETF universe and every industry alias are explicit; runtime fuzzy matching is forbidden.",
+    "This model never writes selection_result and never enters stock-selection statistics.",
+    "This model never places orders or changes portfolio positions.",
+    "A zero-selection day is a valid research observation.",
+    "Missing sector, ETF, NAV, or timing evidence fails closed instead of being guessed.",
+    "Historical observations may diagnose the model but never auto-tune weights or thresholds."
+  ],
+  "sectors": [
+    {
+      "sector_id": "bank",
+      "sector_name": "银行",
+      "fund_flow_industries": ["银行"],
+      "opinion_industries": ["银行"],
+      "etf": {
+        "ts_code": "512800.SH",
+        "name": "华宝中证银行ETF",
+        "list_date": "20170803",
+        "benchmark": "中证银行指数×100%"
+      }
+    },
+    {
+      "sector_id": "securities",
+      "sector_name": "证券",
+      "fund_flow_industries": ["证券"],
+      "opinion_industries": ["证券"],
+      "etf": {
+        "ts_code": "512880.SH",
+        "name": "国泰中证全指证券公司ETF",
+        "list_date": "20160808",
+        "benchmark": "中证全指证券公司指数×100%"
+      }
+    },
+    {
+      "sector_id": "power",
+      "sector_name": "电力",
+      "fund_flow_industries": ["电力"],
+      "opinion_industries": ["火力发电", "水力发电", "新型电力"],
+      "etf": {
+        "ts_code": "159611.SZ",
+        "name": "广发中证全指电力公用事业ETF",
+        "list_date": "20220107",
+        "benchmark": "中证全指电力公用事业指数×100%"
+      }
+    },
+    {
+      "sector_id": "innovative_drug",
+      "sector_name": "创新药",
+      "fund_flow_industries": ["化学制药", "生物制品"],
+      "opinion_industries": ["化学制药", "生物制药"],
+      "etf": {
+        "ts_code": "159992.SZ",
+        "name": "银华中证创新药产业ETF",
+        "list_date": "20200410",
+        "benchmark": "中证创新药产业指数收益率×100%"
+      }
+    },
+    {
+      "sector_id": "semiconductor",
+      "sector_name": "半导体",
+      "fund_flow_industries": ["半导体"],
+      "opinion_industries": ["半导体"],
+      "etf": {
+        "ts_code": "512480.SH",
+        "name": "国联安中证全指半导体产品与设备ETF",
+        "list_date": "20190612",
+        "benchmark": "中证全指半导体产品与设备指数收益率×100%"
+      }
+    },
+    {
+      "sector_id": "oil_gas",
+      "sector_name": "油气",
+      "fund_flow_industries": ["油气开采及服务", "石油加工贸易"],
+      "opinion_industries": ["石油开采", "石油加工"],
+      "etf": {
+        "ts_code": "159697.SZ",
+        "name": "鹏华国证石油天然气ETF",
+        "list_date": "20230504",
+        "benchmark": "国证石油天然气指数收益率×100%"
+      }
+    },
+    {
+      "sector_id": "coal",
+      "sector_name": "煤炭",
+      "fund_flow_industries": ["煤炭开采加工"],
+      "opinion_industries": ["煤炭开采", "焦炭加工"],
+      "etf": {
+        "ts_code": "515220.SH",
+        "name": "国泰中证煤炭ETF",
+        "list_date": "20200302",
+        "benchmark": "中证煤炭指数收益率×100%"
+      }
+    },
+    {
+      "sector_id": "military",
+      "sector_name": "军工",
+      "fund_flow_industries": ["军工电子", "军工装备"],
+      "opinion_industries": ["航空", "船舶", "运输设备"],
+      "etf": {
+        "ts_code": "512660.SH",
+        "name": "国泰中证军工ETF",
+        "list_date": "20160808",
+        "benchmark": "中证军工指数×100%"
+      }
+    },
+    {
+      "sector_id": "liquor",
+      "sector_name": "酒类",
+      "fund_flow_industries": ["白酒"],
+      "opinion_industries": ["白酒", "啤酒"],
+      "etf": {
+        "ts_code": "512690.SH",
+        "name": "鹏华中证酒ETF",
+        "list_date": "20190506",
+        "benchmark": "中证酒指数收益率×100%"
+      }
+    },
+    {
+      "sector_id": "nonferrous",
+      "sector_name": "有色金属",
+      "fund_flow_industries": ["小金属", "工业金属", "能源金属", "金属新材料", "贵金属"],
+      "opinion_industries": ["小金属", "铅锌", "铜", "铝", "黄金"],
+      "etf": {
+        "ts_code": "512400.SH",
+        "name": "南方中证申万有色金属ETF",
+        "list_date": "20170901",
+        "benchmark": "中证申万有色金属指数×100%"
+      }
+    },
+    {
+      "sector_id": "consumer",
+      "sector_name": "主要消费",
+      "fund_flow_industries": ["食品加工制造", "饮料制造", "农产品加工"],
+      "opinion_industries": ["食品", "乳制品", "软饮料"],
+      "etf": {
+        "ts_code": "159928.SZ",
+        "name": "汇添富中证主要消费ETF",
+        "list_date": "20130916",
+        "benchmark": "中证主要消费指数×100%"
+      }
+    },
+    {
+      "sector_id": "media",
+      "sector_name": "传媒",
+      "fund_flow_industries": ["文化传媒", "影视院线", "游戏"],
+      "opinion_industries": ["出版业", "影视音像", "广告包装"],
+      "etf": {
+        "ts_code": "512980.SH",
+        "name": "广发中证传媒ETF",
+        "list_date": "20180119",
+        "benchmark": "中证传媒指数×100%"
+      }
+    },
+    {
+      "sector_id": "real_estate",
+      "sector_name": "房地产",
+      "fund_flow_industries": ["房地产"],
+      "opinion_industries": ["全国地产", "区域地产", "园区开发", "房产服务"],
+      "etf": {
+        "ts_code": "512200.SH",
+        "name": "南方中证全指房地产ETF",
+        "list_date": "20170925",
+        "benchmark": "中证全指房地产指数×100%"
+      }
+    },
+    {
+      "sector_id": "infrastructure",
+      "sector_name": "基建",
+      "fund_flow_industries": ["建筑材料", "建筑装饰", "工程机械"],
+      "opinion_industries": ["建筑工程", "水泥", "装修装饰", "工程机械"],
+      "etf": {
+        "ts_code": "516970.SH",
+        "name": "广发中证基建工程ETF",
+        "list_date": "20210705",
+        "benchmark": "中证基建工程指数收益率×100%"
+      }
+    }
+  ]
+}

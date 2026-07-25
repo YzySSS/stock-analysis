@@ -36,6 +36,9 @@ class SystemTaskRegistryTests(unittest.TestCase):
                 "stock_technical_feature_daily_refresh",
                 "sentiment_candidate_snapshot_materialize",
                 "operational_read_models_refresh",
+                "etf_rotation_data_sync",
+                "etf_rotation_signal_materialize",
+                "etf_rotation_forward_outcomes",
             }.issubset(TRACKED_TASKS)
         )
 
@@ -56,6 +59,12 @@ class SystemTaskRegistryTests(unittest.TestCase):
         self.assertIn("run_automatic_strategy_observation.py", source)
         self.assertIn("automatic_strategy_observation.log", source)
         self.assertIn('"$AUTOMATIC_OBSERVATION_JOB"', source)
+        self.assertIn("run_etf_rotation_data_sync.py", source)
+        self.assertIn("run_etf_rotation_signal.py", source)
+        self.assertIn("run_etf_rotation_outcomes.py", source)
+        self.assertIn('"$ETF_ROTATION_DATA_JOB"', source)
+        self.assertIn('"$ETF_ROTATION_SIGNAL_JOB"', source)
+        self.assertIn('"$ETF_ROTATION_OUTCOME_JOB"', source)
         self.assertNotIn('FORWARD_OBSERVATION_JOB="20 16', source)
 
     def test_old_running_task_is_exposed_as_stale(self):

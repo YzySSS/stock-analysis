@@ -54,6 +54,11 @@ def trade_strategies_page() -> FileResponse:
     return serve_page("trade-strategies.html")
 
 
+@router.get("/etf-rotation", include_in_schema=False)
+def etf_rotation_page() -> FileResponse:
+    return serve_page("etf-rotation.html")
+
+
 @router.get("/system", include_in_schema=False)
 def system_page() -> FileResponse:
     return serve_page("system.html")

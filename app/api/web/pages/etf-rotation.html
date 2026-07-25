@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <title>股票分析控制台 - ETF 轮动</title>
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <link rel="stylesheet" href="/static/css/pages.css?v=20260725etf1" />
+</head>
+<body data-page="etf-rotation">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">股票分析控制台</div>
+      <nav class="nav">
+        <a href="/" data-nav="home">首页</a>
+        <a href="/selection" data-nav="selection">选股中心</a>
+        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
+        <a href="/portfolio" data-nav="portfolio">持仓管理</a>
+        <a href="/backtest" data-nav="backtest">回测中心</a>
+        <a href="/strategies" data-nav="strategies">选股策略</a>
+        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
+        <a href="/etf-rotation" data-nav="etf-rotation" class="active">ETF 轮动</a>
+        <a href="/system" data-nav="system">数据状态</a>
+      </nav>
+    </aside>
+
+    <main class="main-content etf-rotation-page">
+      <header class="page-header etf-rotation-hero">
+        <div>
+          <p class="eyebrow">Research-only Shadow</p>
+          <h1>行业轮动 ETF</h1>
+          <p>收盘后评估行业与明确映射的 ETF，下一交易日开盘起只做前向观察。允许空仓，不自动下单，也不写入个股选股统计。</p>
+        </div>
+        <span id="etf-rotation-model-badge" class="badge status-muted">加载模型...</span>
+      </header>
+
+      <section id="etf-rotation-empty" class="card empty-state" hidden>
+        尚无 ETF 轮动信号。数据任务完成后，这里会显示第一份不可变影子观察。
+      </section>
+
+      <section id="etf-rotation-content" hidden>
+        <div class="etf-rotation-metrics">
+          <article class="stat-card">
+            <span class="stat-label">信号日期</span>
+            <strong id="etf-signal-date" class="stat-value">-</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">运行状态</span>
+            <strong id="etf-signal-status" class="stat-value">-</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">市场状态</span>
+            <strong id="etf-timing-state" class="stat-value">-</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">完整候选</span>
+            <strong id="etf-universe-coverage" class="stat-value">-</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">达标 / 入选</span>
+            <strong id="etf-selection-count" class="stat-value">-</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">最早观察</span>
+            <strong id="etf-earliest-execution" class="stat-value">-</strong>
+          </article>
+        </div>
+
+        <section class="card">
+          <div class="card-header with-actions">
+            <div>
+              <p class="card-kicker">Candidate Matrix</p>
+              <h2>行业与 ETF 候选</h2>
+            </div>
+            <span class="muted">硬门槛失败会保留证据，但不会入选</span>
+          </div>
+          <div class="table-wrap etf-rotation-table-wrap">
+            <table class="etf-rotation-table">
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>行业 / ETF</th>
+                  <th>综合分</th>
+                  <th>行业分</th>
+                  <th>ETF 分</th>
+                  <th>20日均成交额</th>
+                  <th>份额变化</th>
+                  <th>折溢价</th>
+                  <th>结论</th>
+                </tr>
+              </thead>
+              <tbody id="etf-candidate-body">
+                <tr><td colspan="9" class="muted">加载中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <p class="card-kicker">Forward Evidence</p>
+            <h2>下一开盘前向观察</h2>
+          </div>
+          <div id="etf-outcome-list" class="etf-outcome-list muted">尚无成熟观察。</div>
+        </section>
+
+        <section class="etf-rotation-notes">
+          <article class="card">
+            <div class="card-header">
+              <p class="card-kicker">Frozen Contract</p>
+              <h2>固定口径</h2>
+            </div>
+            <ul id="etf-contract-list" class="plain-list"></ul>
+          </article>
+          <article class="card">
+            <div class="card-header">
+              <p class="card-kicker">Diagnostics</p>
+              <h2>阻断与覆盖</h2>
+            </div>
+            <div id="etf-diagnostics" class="note-block muted">-</div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/common.js?v=20260725etf1"></script>
+  <script src="/static/js/etf-rotation.js?v=20260725etf1"></script>
+</body>
+</html>

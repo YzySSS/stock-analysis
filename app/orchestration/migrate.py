@@ -13,6 +13,7 @@ from app.orchestration.adj_factor_schema import ensure_adj_factor_manifest_schem
 from app.orchestration.automatic_observation_schema import ensure_automatic_observation_schema
 from app.jobs.schema import ensure_job_ops_schema
 from app.orchestration.durable_task_schema import ensure_durable_task_schema
+from app.orchestration.etf_rotation_schema import ensure_etf_rotation_schema
 from app.orchestration.backtest_validation_schema import ensure_backtest_validation_schema
 from app.orchestration.feature_cache_schema import ensure_feature_cache_schema
 from app.orchestration.forward_observation_schema import ensure_forward_observation_schema
@@ -128,6 +129,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0030", "selection trade-plan V4 shadow and immutable industry snapshot schema", ensure_selection_trade_plan_v4_schema),
     Migration("0031", "point-in-time strategy factor evaluation V2 schema", ensure_strategy_factor_evaluation_v2_schema),
     Migration("0032", "market probability scenario and leadership state schema", ensure_market_scenario_forecast_schema),
+    Migration("0033", "research-only industry ETF rotation shadow schema", ensure_etf_rotation_schema),
 )
 
 
