@@ -33,6 +33,7 @@ from app.orchestration.portfolio_schema import ensure_portfolio_schema
 from app.orchestration.realtime_moneyflow_schema import ensure_realtime_moneyflow_schema
 from app.orchestration.realtime_lifecycle_schema import ensure_realtime_lifecycle_schema
 from app.orchestration.realtime_schema import ensure_realtime_schema
+from app.orchestration.redundant_index_schema import drop_exact_duplicate_indexes
 from app.orchestration.selection_result_schema import ensure_selection_result_version_schema
 from app.orchestration.selection_run_schema import ensure_selection_run_schema
 from app.orchestration.selection_trade_plan_v4_schema import (
@@ -130,6 +131,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0031", "point-in-time strategy factor evaluation V2 schema", ensure_strategy_factor_evaluation_v2_schema),
     Migration("0032", "market probability scenario and leadership state schema", ensure_market_scenario_forecast_schema),
     Migration("0033", "research-only industry ETF rotation shadow schema", ensure_etf_rotation_schema),
+    Migration("0034", "drop exact duplicate secondary indexes", drop_exact_duplicate_indexes),
 )
 
 

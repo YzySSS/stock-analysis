@@ -65,7 +65,6 @@ FORWARD_OBSERVATION_DDL = (
         UNIQUE KEY uniq_strategy_forward_protocol_date (protocol_id, signal_trade_date),
         UNIQUE KEY uniq_strategy_forward_selection_run (selection_run_id),
         KEY idx_strategy_forward_observation_status (status, signal_trade_date),
-        KEY idx_strategy_forward_observation_protocol (protocol_id, signal_trade_date),
         KEY idx_strategy_forward_observation_campaign (campaign_id, signal_trade_date, status),
         KEY idx_strategy_forward_observation_snapshot (source_snapshot_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

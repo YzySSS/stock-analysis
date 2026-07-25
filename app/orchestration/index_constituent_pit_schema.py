@@ -20,9 +20,6 @@ INDEX_CONSTITUENT_PIT_DDL = (
         UNIQUE KEY uniq_index_constituent_pit (
             index_code, effective_date, code
         ),
-        KEY idx_index_constituent_pit_asof (
-            index_code, effective_date, code
-        ),
         KEY idx_index_constituent_pit_code (
             code, effective_date, index_code
         )

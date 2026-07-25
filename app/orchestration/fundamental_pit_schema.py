@@ -27,9 +27,6 @@ FUNDAMENTAL_PIT_DDL = (
         UNIQUE KEY uniq_fundamental_pit_version (
             code, period_end_date, announcement_date, update_flag
         ),
-        KEY idx_fundamental_pit_asof (
-            code, period_end_date, announcement_date, update_flag
-        ),
         KEY idx_fundamental_pit_announcement (announcement_date, code),
         KEY idx_fundamental_pit_period (period_end_date, code)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
