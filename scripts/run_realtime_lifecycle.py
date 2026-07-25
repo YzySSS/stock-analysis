@@ -11,6 +11,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.data_ingestion.realtime_lifecycle import (
+    FULL_MARKET_RAW_TRADE_DAYS,
+    ROLLUP_TRADE_DAYS,
+    TRACKED_RAW_TRADE_DAYS,
     RealtimeLifecyclePolicy,
     build_lifecycle_plan,
     run_lifecycle,
@@ -23,9 +26,9 @@ TASK_NAME = "stock_realtime_lifecycle"
 def main() -> None:
     parser = argparse.ArgumentParser(description="Roll up and retain full-market realtime minute snapshots")
     parser.add_argument("--apply", action="store_true", help="write rollups and apply retention; default is dry-run")
-    parser.add_argument("--raw-trade-days", type=int, default=2)
-    parser.add_argument("--rollup-trade-days", type=int, default=90)
-    parser.add_argument("--tracked-trade-days", type=int, default=90)
+    parser.add_argument("--raw-trade-days", type=int, default=FULL_MARKET_RAW_TRADE_DAYS)
+    parser.add_argument("--rollup-trade-days", type=int, default=ROLLUP_TRADE_DAYS)
+    parser.add_argument("--tracked-trade-days", type=int, default=TRACKED_RAW_TRADE_DAYS)
     args = parser.parse_args()
 
     policy = RealtimeLifecyclePolicy(

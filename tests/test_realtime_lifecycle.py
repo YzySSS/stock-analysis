@@ -30,7 +30,7 @@ class RealtimeLifecyclePolicyTests(unittest.TestCase):
     def test_policy_preserves_two_raw_trade_days_and_longer_rollups(self):
         policy = RealtimeLifecyclePolicy().validate()
         self.assertEqual(policy.raw_trade_days, 2)
-        self.assertEqual(policy.rollup_trade_days, 90)
+        self.assertEqual(policy.rollup_trade_days, 20)
         self.assertEqual(policy.tracked_trade_days, 90)
         with self.assertRaises(ValueError):
             RealtimeLifecyclePolicy(raw_trade_days=1).validate()

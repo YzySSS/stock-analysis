@@ -6,6 +6,12 @@ import time
 from datetime import date, datetime, time as datetime_time
 from fastapi import APIRouter
 
+from app.data_ingestion.realtime_lifecycle import (
+    FULL_MARKET_RAW_TRADE_DAYS,
+    ROLLUP_INTERVALS,
+    ROLLUP_TRADE_DAYS,
+    TRACKED_RAW_TRADE_DAYS,
+)
 from app.jobs.readiness import build_operational_readiness, recent_error_summaries
 from app.shared.cache import get_cache_backend
 from app.shared.db import mysql_read_conn, ping_mysql
@@ -14,7 +20,7 @@ from app.shared.instrument_policy import STOCK_DAILY_COMPLETENESS_RATIO, STOCK_I
 router = APIRouter(tags=["system"])
 
 SYSTEM_STATUS_CACHE_TTL_SECONDS = 60
-SYSTEM_STATUS_CACHE_KEY = "system:status:v3"
+SYSTEM_STATUS_CACHE_KEY = "system:status:v4"
 
 
 TASK_SCHEDULES = [
@@ -970,6 +976,16 @@ def _realtime_lifecycle_summary() -> dict:
                 """
             )
             raw_partitions = cursor.fetchall() or []
+            cursor.execute(
+                """
+                SELECT partition_name, table_rows
+                FROM information_schema.partitions
+                WHERE table_schema=DATABASE() AND table_name='stock_realtime_bar_rollup'
+                  AND partition_name IS NOT NULL
+                ORDER BY partition_ordinal_position
+                """
+            )
+            rollup_partitions = cursor.fetchall() or []
             daily_partition_dates: set[date] = set()
             p_future_approx_rows = 0
             raw_partition_approx_rows = 0
@@ -1023,6 +1039,18 @@ def _realtime_lifecycle_summary() -> dict:
                     p_future_dates.add(date.fromisoformat(str(value)))
 
             raw_dates = sorted(daily_partition_dates | p_future_dates, reverse=True)
+            rollup_partition_dates: set[date] = set()
+            rollup_p_future_approx_rows = 0
+            for row in rollup_partitions:
+                partition_name = str(row.get("partition_name") or row.get("PARTITION_NAME") or "")
+                if partition_name == "p_future":
+                    rollup_p_future_approx_rows = int(row.get("table_rows") or row.get("TABLE_ROWS") or 0)
+                    continue
+                if len(partition_name) == 9 and partition_name.startswith("p") and partition_name[1:].isdigit():
+                    try:
+                        rollup_partition_dates.add(datetime.strptime(partition_name[1:], "%Y%m%d").date())
+                    except ValueError:
+                        pass
             cursor.execute(
                 """
                 SELECT trade_date, interval_minutes, status, source_rows, source_codes,
@@ -1112,10 +1140,10 @@ def _realtime_lifecycle_summary() -> dict:
         "health": health,
         "message": message,
         "policy": {
-            "full_market_raw_trade_days": 2,
-            "rollup_trade_days": 90,
-            "tracked_raw_trade_days": 90,
-            "rollup_intervals_minutes": [5, 15],
+            "full_market_raw_trade_days": FULL_MARKET_RAW_TRADE_DAYS,
+            "rollup_trade_days": ROLLUP_TRADE_DAYS,
+            "tracked_raw_trade_days": TRACKED_RAW_TRADE_DAYS,
+            "rollup_intervals_minutes": list(ROLLUP_INTERVALS),
         },
         "raw": {
             **table_rows.get("stock_realtime_intraday", {}),
@@ -1134,7 +1162,14 @@ def _realtime_lifecycle_summary() -> dict:
             "p_future_dates": [item.isoformat() for item in sorted(p_future_dates)],
             "p_future_approx_rows": p_future_approx_rows,
         },
-        "rollup": table_rows.get("stock_realtime_bar_rollup", {}),
+        "rollup": {
+            **table_rows.get("stock_realtime_bar_rollup", {}),
+            "trade_days": len(rollup_partition_dates),
+            "min_trade_date": min(rollup_partition_dates).isoformat() if rollup_partition_dates else None,
+            "max_trade_date": max(rollup_partition_dates).isoformat() if rollup_partition_dates else None,
+            "daily_partitions": len(rollup_partition_dates),
+            "p_future_approx_rows": rollup_p_future_approx_rows,
+        },
         "tracked": table_rows.get("stock_realtime_intraday_tracked", {}),
         "latest_manifests": [latest_by_interval[item] for item in sorted(latest_by_interval)],
         "failed_manifests": failed_manifests,
@@ -1248,9 +1283,9 @@ def system_status() -> dict:
             "portfolio_raw_response_days": 30,
             "portfolio_snapshot_days": 90,
             "structured_error_summary_days": 365,
-            "realtime_full_market_raw_trade_days": 2,
-            "realtime_rollup_trade_days": 90,
-            "realtime_tracked_raw_trade_days": 90,
+            "realtime_full_market_raw_trade_days": FULL_MARKET_RAW_TRADE_DAYS,
+            "realtime_rollup_trade_days": ROLLUP_TRADE_DAYS,
+            "realtime_tracked_raw_trade_days": TRACKED_RAW_TRADE_DAYS,
             "market_opinion_intraday_trade_days": 5,
             "market_opinion_daily_trade_days": 90,
             "tracking_stats_days": 14,

@@ -226,7 +226,7 @@ function renderRealtimeLifecycle(item = {}) {
       <p>全市场保留 ${escapeHtml(policy.full_market_raw_trade_days ?? '-')} 日 · ${escapeHtml(partitionLabel)} · 约 ${escapeHtml(raw.allocated_mb ?? '-')} MiB</p>
     </div>
     <div class="system-gap-list">
-      <span>5m/15m 汇总保留 ${escapeHtml(policy.rollup_trade_days ?? '-')} 个交易日，当前约 ${escapeHtml(rollup.approx_rows ?? 0)} 行。</span>
+      <span>5m/15m 汇总保留 ${escapeHtml(policy.rollup_trade_days ?? '-')} 个交易日，当前 ${escapeHtml(rollup.trade_days ?? 0)} 日 · 约 ${escapeHtml(rollup.approx_rows ?? 0)} 行 · ${escapeHtml(rollup.allocated_mb ?? '-')} MiB。</span>
       <span>持仓/跟踪股 1m 保留 ${escapeHtml(policy.tracked_raw_trade_days ?? '-')} 个交易日，当前约 ${escapeHtml(tracked.approx_rows ?? 0)} 行。</span>
     </div>
     ${issueRows ? `<div class="system-error-summary-list">${issueRows}</div>` : ''}

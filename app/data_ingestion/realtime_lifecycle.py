@@ -12,7 +12,9 @@ from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_adv
 
 ROLLUP_INTERVALS = (5, 15)
 FULL_MARKET_RAW_TRADE_DAYS = 2
-ROLLUP_TRADE_DAYS = 90
+# One trading month preserves recent diagnostics without retaining a full
+# quarter of high-volume, full-market 5m/15m research data.
+ROLLUP_TRADE_DAYS = 20
 TRACKED_RAW_TRADE_DAYS = 90
 ROLLUP_CODE_BATCH_SIZE = 200
 LIFECYCLE_LOCK_NAME = "stock_realtime_lifecycle_lock"

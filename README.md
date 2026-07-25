@@ -161,6 +161,8 @@ PYTHONPATH=. .venv/bin/python scripts/run_job_retention.py --apply
 PYTHONPATH=. .venv/bin/python scripts/run_automatic_strategy_observation.py --dry-run
 ```
 
+实时行情生命周期默认保留全市场原始 1m 两个交易日、全市场 5m/15m 汇总 20 个交易日、持仓/跟踪股原始 1m 九十个交易日。汇总超过一个交易月后按交易日日分区淘汰；需要长期分钟历史时应使用独立研究存储，而不是继续扩张生产库。
+
 ## 部署
 
 建议让 FastAPI 只监听本机地址，由 Nginx 提供公网入口：
