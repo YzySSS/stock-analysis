@@ -30,6 +30,9 @@ from app.data_ingestion.market_opinion_semantics import (  # noqa: E402
     opinion_direction_multiplier,
     stock_sector_relation,
 )
+from app.data_ingestion.market_opinion_task_log import (  # noqa: E402
+    compact_market_opinion_task_metadata,
+)
 from app.shared.db import mysql_conn  # noqa: E402
 from app.shared.market_opinion_taxonomy import THEME_INDUSTRY_HINTS, THEME_KEYWORDS  # noqa: E402
 from app.shared.task_log import TaskRunLogger  # noqa: E402
@@ -1008,23 +1011,25 @@ def main() -> None:
                 aggregate_as_of.date().isoformat(),
                 aggregate_as_of.strftime("%Y-%m-%d %H:%M:%S"),
             )
-        payload = {
-            "run_id": run_id,
-            "status": "success" if failed_sources == 0 else "partial_success",
-            "as_of": aggregate_as_of.strftime("%Y-%m-%d %H:%M:%S"),
-            "lookback_days": args.lookback_days,
-            "sources": sources,
-            "fetched_items": fetched,
-            "saved_items": saved,
-            "stock_matches": matched_stocks,
-            "sector_matches": matched_sectors,
-            "sector_summary_count": len(summaries),
-            "top_sectors": summaries[:8],
-            "failed_sources": failed_sources,
-            "errors": errors,
-            "elapsed_seconds": round(time.time() - started, 2),
-            "anti_lookahead_rule": "COALESCE(published_at, crawl_time) <= as_of_datetime; future source pubDate is capped at crawl_time; timeliness_score is recomputed by event type at aggregate time",
-        }
+        payload = compact_market_opinion_task_metadata(
+            {
+                "run_id": run_id,
+                "status": "success" if failed_sources == 0 else "partial_success",
+                "as_of": aggregate_as_of.strftime("%Y-%m-%d %H:%M:%S"),
+                "lookback_days": args.lookback_days,
+                "sources": sources,
+                "fetched_items": fetched,
+                "saved_items": saved,
+                "stock_matches": matched_stocks,
+                "sector_matches": matched_sectors,
+                "sector_summary_count": len(summaries),
+                "top_sectors": summaries[:8],
+                "failed_sources": failed_sources,
+                "errors": errors,
+                "elapsed_seconds": round(time.time() - started, 2),
+                "anti_lookahead_rule": "COALESCE(published_at, crawl_time) <= as_of_datetime; future source pubDate is capped at crawl_time; timeliness_score is recomputed by event type at aggregate time",
+            }
+        )
         logger.finish(TASK_NAME, run_id, payload["status"], f"market opinion updated, saved={saved}, sectors={len(summaries)}", payload)
         print(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception as exc:

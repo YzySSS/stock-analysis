@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import date, datetime
+from unittest.mock import patch
 
 from app.api.routes.system import LATEST_DATES_SQL, LATEST_KLINE_COUNTS_SQL, _latest_dates
 from app.jobs.errors import error_fingerprint, infer_error_code, sanitize_error_message
@@ -13,8 +14,16 @@ from app.jobs.readiness import (
     classify_worker_snapshot,
 )
 from app.jobs.retention import JobRetentionPolicy, JobRetentionService
+from app.jobs.task_log_compaction import (
+    TaskRunMetadataCompactionService,
+    prepare_market_opinion_metadata_compaction,
+)
 from app.jobs.worker_runtime import WorkerRuntimeHeartbeat
-from app.shared.task_log import _serialize_metadata
+from app.shared.task_log import (
+    TASK_RUN_METADATA_MARKER,
+    TASK_RUN_METADATA_MAX_BYTES,
+    _serialize_metadata,
+)
 
 
 class TaskRunLoggerSerializationTests(unittest.TestCase):
@@ -30,6 +39,103 @@ class TaskRunLoggerSerializationTests(unittest.TestCase):
 
         self.assertEqual(payload["summary_date"], "2026-07-21")
         self.assertEqual(payload["captured_at"], "2026-07-21 22:00:01")
+
+    def test_oversized_metadata_is_valid_bounded_json_with_scalar_lineage(self):
+        payload = json.loads(
+            _serialize_metadata(
+                {
+                    "run_id": "market_opinion_20260725_150000",
+                    "status": "success",
+                    "top_sectors": [
+                        {
+                            "sector_name": f"行业{index}",
+                            "top_stocks": [
+                                {"code": f"sh.{stock:06d}", "evidence": "证据" * 2000}
+                                for stock in range(30)
+                            ],
+                        }
+                        for index in range(8)
+                    ],
+                }
+            )
+        )
+
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.assertLessEqual(len(encoded), TASK_RUN_METADATA_MAX_BYTES)
+        self.assertEqual(payload["run_id"], "market_opinion_20260725_150000")
+        self.assertEqual(payload["status"], "success")
+        self.assertIsInstance(payload["top_sectors"], list)
+        self.assertTrue(payload[TASK_RUN_METADATA_MARKER]["truncated"])
+        self.assertGreater(
+            payload[TASK_RUN_METADATA_MARKER]["original_bytes"],
+            TASK_RUN_METADATA_MAX_BYTES,
+        )
+
+    def test_market_opinion_compaction_prepares_small_summary(self):
+        serialized, serialized_bytes = prepare_market_opinion_metadata_compaction(
+            {
+                "run_id": "market_opinion_1",
+                "status": "success",
+                "top_sectors": [
+                    {
+                        "sector_name": "银行",
+                        "sector_type": "industry",
+                        "sector_score": 88.2,
+                        "news_count": 12,
+                        "source_count": 5,
+                        "top_stocks": [{"blob": "x" * 100_000}],
+                        "top_news": [{"blob": "y" * 100_000}],
+                    }
+                ],
+            }
+        )
+        payload = json.loads(serialized)
+
+        self.assertLess(serialized_bytes, TASK_RUN_METADATA_MAX_BYTES)
+        self.assertEqual(payload["top_sectors"][0]["sector_name"], "银行")
+        self.assertNotIn("top_stocks", payload["top_sectors"][0])
+        self.assertNotIn("top_news", payload["top_sectors"][0])
+        self.assertEqual(payload["detail_storage"], "normalized_market_opinion_tables")
+
+    def test_compaction_service_rejects_unbounded_batch_size(self):
+        with self.assertRaises(ValueError):
+            TaskRunMetadataCompactionService(batch_size=501)
+
+    def test_compaction_service_releases_lock_after_success(self):
+        service = TaskRunMetadataCompactionService()
+        preview = {
+            "task_name": "market_opinion_update",
+            "max_bytes": TASK_RUN_METADATA_MAX_BYTES,
+            "total_rows": 0,
+            "total_bytes": 0,
+            "oversized_rows": 0,
+            "oversized_bytes": 0,
+            "first_started_at": None,
+            "last_started_at": None,
+        }
+        lock_handle = object()
+
+        with (
+            patch(
+                "app.jobs.task_log_compaction.acquire_mysql_advisory_lock",
+                return_value=lock_handle,
+            ),
+            patch(
+                "app.jobs.task_log_compaction.release_mysql_advisory_lock",
+                return_value=None,
+            ) as release_lock,
+            patch.object(service, "preview", side_effect=[preview, preview]),
+            patch.object(service, "_upper_bound_id", return_value=0),
+            patch.object(service, "_fetch_batch", return_value=[]),
+        ):
+            result = service.apply()
+
+        self.assertEqual(result["status"], "success")
+        release_lock.assert_called_once_with(lock_handle)
 
 
 class WorkerReadinessTests(unittest.TestCase):

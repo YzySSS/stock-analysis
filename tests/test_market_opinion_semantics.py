@@ -9,6 +9,10 @@ from app.data_ingestion.market_opinion_semantics import (
     opinion_direction_multiplier,
     stock_sector_relation,
 )
+from app.data_ingestion.market_opinion_task_log import (
+    MARKET_OPINION_TASK_SUMMARY_VERSION,
+    compact_market_opinion_task_metadata,
+)
 from app.stock_selection.selector import StockSelector
 from scripts.run_market_opinion_update import (
     has_stock_entity_evidence,
@@ -89,6 +93,38 @@ class MarketOpinionDirectionTests(unittest.TestCase):
 
         self.assertEqual(evidence["event_type"], "market_attention")
         self.assertLess(evidence["timeliness_score"], 70)
+
+    def test_task_log_summary_keeps_operational_fields_without_normalized_details(self):
+        compacted = compact_market_opinion_task_metadata(
+            {
+                "status": "success",
+                "top_sectors": [
+                    {
+                        "sector_name": "半导体",
+                        "sector_type": "industry",
+                        "sector_score": 77.5,
+                        "news_count": 8,
+                        "source_count": 4,
+                        "top_stocks": [{"code": "sh.600000"}],
+                        "top_news": [{"title": "detail"}],
+                        "sources": ["source-a"],
+                    }
+                ],
+            }
+        )
+
+        sector = compacted["top_sectors"][0]
+        self.assertEqual(sector["sector_name"], "半导体")
+        self.assertEqual(sector["sector_score"], 77.5)
+        self.assertEqual(sector["news_count"], 8)
+        self.assertEqual(sector["source_count"], 4)
+        self.assertNotIn("top_stocks", sector)
+        self.assertNotIn("top_news", sector)
+        self.assertNotIn("sources", sector)
+        self.assertEqual(
+            compacted["metadata_summary_version"],
+            MARKET_OPINION_TASK_SUMMARY_VERSION,
+        )
 
 
 class StockSectorRelationTests(unittest.TestCase):
