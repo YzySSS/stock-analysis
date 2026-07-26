@@ -150,18 +150,48 @@ function renderJobErrors(items = [], policy = {}) {
     `错误汇总 ${policy.structured_error_summary_days ?? '-'} 天`,
   ].join(' · ');
   const errorRows = items.length
-    ? items.slice(0, 8).map((item) => `
+    ? items.slice(0, 8).map((item) => {
+      const recoveryEvidenceText = item.recovery_run_status
+        ? ` · 恢复证据 ${formatTaskRunStatus(item.recovery_run_status)} ${item.recovery_run_at || '-'}`
+        : item.latest_run_status
+          ? ` · 后续 ${formatTaskRunStatus(item.latest_run_status)} ${item.latest_run_at || '-'}`
+          : '';
+      return `
         <div class="system-error-summary-row">
-          <b>${escapeHtml(item.job_type || '-')} · ${escapeHtml(item.error_code || '-')}</b>
-          <span>${escapeHtml(item.occurrence_count ?? 0)} 次 · 最近 ${escapeHtml(item.last_seen_at || '-')}</span>
+          <div class="system-error-summary-head">
+            <b>${escapeHtml(item.job_type || '-')} · ${escapeHtml(item.error_code || '-')}</b>
+            <span class="badge ${errorRecoveryClass(item.recovery_status)}">${escapeHtml(item.recovery_label || '状态未知')}</span>
+          </div>
+          <span>${escapeHtml(item.occurrence_count ?? 0)} 次 · 最近错误 ${escapeHtml(item.last_seen_at || '-')}${escapeHtml(recoveryEvidenceText)}</span>
           <small>${escapeHtml(item.last_message || '-')}</small>
         </div>
-      `).join('')
+      `;
+    }).join('')
     : '<div class="empty-state">近 7 天暂无已聚合错误。</div>';
   return `
     <div class="system-gap-callout"><strong>保留口径</strong><p>${escapeHtml(policyText)}</p></div>
     <div class="system-error-summary-list">${errorRows}</div>
   `;
+}
+
+function formatTaskRunStatus(status) {
+  return ({
+    success: '成功',
+    partial_success: '部分成功',
+    running: '运行中',
+    failed: '失败',
+    killed: '已终止',
+  })[status] || status || '未知';
+}
+
+function errorRecoveryClass(status) {
+  return ({
+    recovered: 'error-recovery-ok',
+    partially_recovered: 'error-recovery-warn',
+    running_after_error: 'error-recovery-warn',
+    unresolved: 'error-recovery-error',
+    historical: 'error-recovery-history',
+  })[status] || 'error-recovery-history';
 }
 
 function renderRealtimeLifecycle(item = {}) {

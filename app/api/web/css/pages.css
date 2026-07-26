@@ -6155,6 +6155,39 @@ body[data-page="system"] .system-ops-main {
   font-size: 12px;
 }
 
+.system-error-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.system-error-summary-head .badge {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+}
+
+.system-error-summary-head .error-recovery-ok {
+  color: #86efac;
+  background: rgba(34, 197, 94, .18);
+}
+
+.system-error-summary-head .error-recovery-warn {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, .18);
+}
+
+.system-error-summary-head .error-recovery-error {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, .18);
+}
+
+.system-error-summary-head .error-recovery-history {
+  color: #cbd5e1;
+  background: rgba(100, 116, 139, .18);
+}
+
 .system-error-summary-row span,
 .system-error-summary-row small {
   color: #8fa3bd;

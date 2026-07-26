@@ -20,7 +20,7 @@ from app.shared.instrument_policy import STOCK_DAILY_COMPLETENESS_RATIO, STOCK_I
 router = APIRouter(tags=["system"])
 
 SYSTEM_STATUS_CACHE_TTL_SECONDS = 60
-SYSTEM_STATUS_CACHE_KEY = "system:status:v4"
+SYSTEM_STATUS_CACHE_KEY = "system:status:v6"
 
 
 TASK_SCHEDULES = [

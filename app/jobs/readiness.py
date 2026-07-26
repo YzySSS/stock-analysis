@@ -267,6 +267,88 @@ def _data_snapshots() -> dict[str, Any]:
     return _serialize_data_snapshot(row)
 
 
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _classify_error_recovery(
+    error_summary: dict[str, Any],
+    latest_run: dict[str, Any] | None,
+) -> dict[str, Any]:
+    latest_status = str((latest_run or {}).get("status") or "")
+    latest_at_value = (latest_run or {}).get("finished_at") or (latest_run or {}).get("started_at")
+    latest_at = _as_datetime(latest_at_value)
+    latest_success_at_value = (latest_run or {}).get("latest_success_at")
+    latest_partial_at_value = (latest_run or {}).get("latest_partial_success_at")
+    latest_success_at = _as_datetime(latest_success_at_value)
+    latest_partial_at = _as_datetime(latest_partial_at_value)
+    error_at = _as_datetime(error_summary.get("last_seen_at"))
+    base = {
+        "latest_run_status": latest_status or None,
+        "latest_run_at": str(latest_at_value) if latest_at_value else None,
+        "recovery_run_status": None,
+        "recovery_run_at": None,
+    }
+
+    if error_summary.get("source_kind") != "scheduled_task":
+        return {
+            **base,
+            "recovery_status": "historical",
+            "recovery_label": "历史记录",
+        }
+    if latest_run is None:
+        return {
+            **base,
+            "recovery_status": "unresolved",
+            "recovery_label": "未见后续运行",
+        }
+    if error_at is None:
+        return {
+            **base,
+            "recovery_status": "unresolved",
+            "recovery_label": "未见后续成功",
+        }
+
+    successful_recovery = latest_success_at is not None and latest_success_at >= error_at
+    partial_recovery = latest_partial_at is not None and latest_partial_at >= error_at
+    if successful_recovery and (
+        not partial_recovery or latest_success_at >= latest_partial_at
+    ):
+        return {
+            **base,
+            "recovery_run_status": "success",
+            "recovery_run_at": str(latest_success_at_value),
+            "recovery_status": "recovered",
+            "recovery_label": "已恢复",
+        }
+    if partial_recovery:
+        return {
+            **base,
+            "recovery_run_status": "partial_success",
+            "recovery_run_at": str(latest_partial_at_value),
+            "recovery_status": "partially_recovered",
+            "recovery_label": "后续部分成功",
+        }
+    if latest_status == "running" and latest_at is not None and latest_at >= error_at:
+        return {
+            **base,
+            "recovery_status": "running_after_error",
+            "recovery_label": "后续运行中",
+        }
+    return {
+        **base,
+        "recovery_status": "unresolved",
+        "recovery_label": "未恢复",
+    }
+
+
 def recent_error_summaries(days: int = 7, limit: int = 12) -> list[dict[str, Any]]:
     with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
@@ -286,16 +368,59 @@ def recent_error_summaries(days: int = 7, limit: int = 12) -> list[dict[str, Any
                 (max(days - 1, 0), limit),
             )
             rows = cursor.fetchall() or []
-    return [
-        {
+            task_names = sorted(
+                {
+                    str(row.get("job_type"))
+                    for row in rows
+                    if row.get("source_kind") == "scheduled_task" and row.get("job_type")
+                }
+            )
+            latest_runs: dict[str, dict[str, Any]] = {}
+            if task_names:
+                placeholders = ", ".join(["%s"] * len(task_names))
+                cursor.execute(
+                    f"""
+                    SELECT latest.task_name, latest.status, latest.started_at, latest.finished_at,
+                           task_ids.latest_success_at, task_ids.latest_partial_success_at
+                    FROM task_run_log latest
+                    INNER JOIN (
+                        SELECT task_name,
+                               MAX(id) AS max_id,
+                               MAX(
+                                   CASE WHEN status='success'
+                                   THEN COALESCE(finished_at, started_at)
+                                   ELSE NULL END
+                               ) AS latest_success_at,
+                               MAX(
+                                   CASE WHEN status='partial_success'
+                                   THEN COALESCE(finished_at, started_at)
+                                   ELSE NULL END
+                               ) AS latest_partial_success_at
+                        FROM task_run_log
+                        WHERE task_name IN ({placeholders})
+                        GROUP BY task_name
+                    ) task_ids ON latest.id = task_ids.max_id
+                    """,
+                    task_names,
+                )
+                latest_runs = {
+                    str(row.get("task_name")): row
+                    for row in (cursor.fetchall() or [])
+                    if row.get("task_name")
+                }
+
+    items = []
+    for row in rows:
+        item = {
             **row,
             "occurrence_count": int(row.get("occurrence_count") or 0),
             "first_seen_at": str(row.get("first_seen_at")) if row.get("first_seen_at") else None,
             "last_seen_at": str(row.get("last_seen_at")) if row.get("last_seen_at") else None,
             "last_message": sanitize_error_message(row.get("last_message")),
         }
-        for row in rows
-    ]
+        item.update(_classify_error_recovery(item, latest_runs.get(str(row.get("job_type")))))
+        items.append(item)
+    return items
 
 
 def build_operational_readiness() -> dict[str, Any]:
