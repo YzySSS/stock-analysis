@@ -33,6 +33,14 @@ LEADERSHIP_LABELS = {
 }
 
 
+def _forecast_id(trade_date: date | str, horizon_days: int) -> str:
+    as_of_date = date.fromisoformat(str(trade_date))
+    return (
+        f"msfv1_{as_of_date.strftime('%Y%m%d')}_"
+        f"{INDEX_CODE.replace('.', '')}_h{int(horizon_days)}"
+    )
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(
         value,
@@ -627,17 +635,13 @@ class MarketScenarioForecastRepository:
         bullish, bearish = self._triggers(current["feature_map"])
         as_of_date = date.fromisoformat(str(trade_date))
         as_of_datetime = datetime.combine(as_of_date, time(15, 30))
-        forecast_id = (
-            f"msfv1_{as_of_date.strftime('%Y%m%d')}_"
-            f"{INDEX_CODE.replace('.', '')}_h{horizon_days}"
-        )
         feature_payload = {
             "keys": FEATURE_KEYS,
             "values": current["feature_map"],
             "timing_state": current["state"],
         }
         result = {
-            "forecast_id": forecast_id,
+            "forecast_id": _forecast_id(as_of_date, horizon_days),
             "model_id": MODEL_ID,
             "model_name": "市场概率情景 V1",
             "version": MODEL_VERSION,
@@ -848,17 +852,83 @@ class MarketScenarioForecastRepository:
             result.append(payload)
         return result
 
+    def _existing_forecasts(
+        self,
+        trade_date: date | str,
+        horizons: Sequence[int],
+    ) -> dict[int, dict[str, Any]]:
+        if not horizons:
+            return {}
+        expected_ids = {
+            _forecast_id(trade_date, horizon): int(horizon)
+            for horizon in horizons
+        }
+        placeholders = ",".join(["%s"] * len(expected_ids))
+        with self._read_connection_factory() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    SELECT forecast_id, model_id, version, spec_hash,
+                           trade_date, horizon_days, validation_status,
+                           validation_json, payload_hash
+                    FROM market_scenario_forecast_daily
+                    WHERE forecast_id IN ({placeholders})
+                    """,
+                    list(expected_ids),
+                )
+                rows = cursor.fetchall() or []
+        existing: dict[int, dict[str, Any]] = {}
+        expected_trade_date = str(trade_date)
+        for row in rows:
+            forecast_id = str(row.get("forecast_id") or "")
+            horizon = expected_ids.get(forecast_id)
+            if (
+                horizon is None
+                or row.get("model_id") != MODEL_ID
+                or row.get("version") != MODEL_VERSION
+                or row.get("spec_hash") != self.spec_hash
+                or str(row.get("trade_date")) != expected_trade_date
+                or int(row.get("horizon_days") or 0) != horizon
+            ):
+                raise RuntimeError(
+                    f"immutable forecast contract mismatch: {forecast_id}"
+                )
+            validation = _json_value(row.get("validation_json"), {})
+            existing[horizon] = {
+                "forecast_id": forecast_id,
+                "horizon_days": horizon,
+                "validation_status": row.get("validation_status"),
+                "probability_display_allowed": bool(
+                    validation.get("beats_both_baselines")
+                ),
+                "payload_hash": row.get("payload_hash"),
+                "materialization_status": "reused",
+            }
+        return existing
+
     def materialize(
         self,
         trade_date: date | str,
         *,
         horizons: Iterable[int] = (1, 5, 20),
     ) -> dict[str, Any]:
+        horizon_values = sorted({int(horizon) for horizon in horizons})
+        existing_forecasts = self._existing_forecasts(
+            trade_date,
+            horizon_values,
+        )
         leadership = self._leadership_rows(trade_date)
-        forecasts = [
-            self.build_forecast(trade_date, int(horizon))
-            for horizon in sorted(set(horizons))
-        ]
+        new_forecasts: list[dict[str, Any]] = []
+        forecasts: list[dict[str, Any]] = []
+        for horizon in horizon_values:
+            existing = existing_forecasts.get(horizon)
+            if existing:
+                forecasts.append(existing)
+                continue
+            created = self.build_forecast(trade_date, horizon)
+            created["materialization_status"] = "created"
+            forecasts.append(created)
+            new_forecasts.append(created)
         with self._connection_factory(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
                 for row in leadership:
@@ -914,7 +984,7 @@ class MarketScenarioForecastRepository:
                             row["payload_hash"],
                         ),
                     )
-                for row in forecasts:
+                for row in new_forecasts:
                     cursor.execute(
                         """
                         SELECT payload_hash
@@ -1003,6 +1073,8 @@ class MarketScenarioForecastRepository:
             "status": "success",
             "trade_date": str(trade_date),
             "forecast_count": len(forecasts),
+            "created_forecast_count": len(new_forecasts),
+            "reused_forecast_count": len(existing_forecasts),
             "leadership_count": len(leadership),
             "forecasts": forecasts,
             "leadership": leadership,

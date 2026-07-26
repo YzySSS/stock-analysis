@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import MagicMock
 
 from app.market_timing.scenario_forecast import (
+    MarketScenarioForecastRepository,
     classify_scenario,
     fit_multinomial_logistic,
     multiclass_brier,
@@ -48,6 +50,38 @@ class MarketScenarioForecastTest(unittest.TestCase):
 
         self.assertLess(good, bad)
 
+    def test_materialize_reuses_immutable_forecast_without_rebuilding(self) -> None:
+        write_factory = MagicMock()
+        cursor = (
+            write_factory.return_value.__enter__.return_value
+            .cursor.return_value.__enter__.return_value
+        )
+        cursor.fetchone.return_value = None
+        repository = MarketScenarioForecastRepository(
+            connection_factory=write_factory,
+        )
+        stored = {
+            "forecast_id": "msfv1_20260724_000300SH_h1",
+            "horizon_days": 1,
+            "validation_status": "insufficient_evidence",
+            "probability_display_allowed": False,
+            "materialization_status": "reused",
+        }
+        repository._existing_forecasts = MagicMock(  # type: ignore[method-assign]
+            return_value={1: stored}
+        )
+        repository._leadership_rows = MagicMock(  # type: ignore[method-assign]
+            return_value=[]
+        )
+        repository.build_forecast = MagicMock()  # type: ignore[method-assign]
+
+        result = repository.materialize("2026-07-24", horizons=(1,))
+
+        repository.build_forecast.assert_not_called()
+        self.assertEqual(result["forecast_count"], 1)
+        self.assertEqual(result["created_forecast_count"], 0)
+        self.assertEqual(result["reused_forecast_count"], 1)
+        self.assertEqual(result["forecasts"], [stored])
 
 if __name__ == "__main__":
     unittest.main()

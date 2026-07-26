@@ -56,6 +56,12 @@ def run(
         "materialized": {
             "trade_date": materialized["trade_date"],
             "forecast_count": materialized["forecast_count"],
+            "created_forecast_count": materialized[
+                "created_forecast_count"
+            ],
+            "reused_forecast_count": materialized[
+                "reused_forecast_count"
+            ],
             "leadership_count": materialized["leadership_count"],
             "validation": [
                 {
