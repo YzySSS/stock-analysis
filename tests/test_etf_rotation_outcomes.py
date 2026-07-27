@@ -80,6 +80,46 @@ class EtfRotationOutcomeTests(unittest.TestCase):
         self.assertEqual("blocked", outcome["outcome_status"])
         self.assertEqual("next_trade_day_open_missing", outcome["block_reason"])
 
+    def test_unit_split_inside_horizon_uses_provider_return(self) -> None:
+        outcome = compute_forward_outcome(
+            signal_trade_date="2026-07-01",
+            horizon_days=3,
+            future_rows=[
+                {
+                    "trade_date": "2026-07-02",
+                    "open": 2.0,
+                    "high": 2.04,
+                    "low": 1.98,
+                    "close": 2.0,
+                    "pct_chg": 0.0,
+                },
+                {
+                    "trade_date": "2026-07-03",
+                    "open": 1.0,
+                    "high": 1.02,
+                    "low": 0.99,
+                    "close": 1.0,
+                    "pct_chg": 0.0,
+                },
+                {
+                    "trade_date": "2026-07-06",
+                    "open": 1.0,
+                    "high": 1.03,
+                    "low": 0.99,
+                    "close": 1.01,
+                    "pct_chg": 1.0,
+                },
+            ],
+        )
+
+        self.assertEqual("mature", outcome["outcome_status"])
+        self.assertAlmostEqual(1.0, outcome["gross_return_pct"])
+        self.assertEqual(
+            "entry_open_then_provider_pct_chg_compounded",
+            outcome["metadata"]["return_basis"],
+        )
+        self.assertEqual(1, len(outcome["metadata"]["unit_adjustments"]))
+
 
 if __name__ == "__main__":
     unittest.main()

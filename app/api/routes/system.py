@@ -40,7 +40,7 @@ TASK_SCHEDULES = [
     {"task_name": "market_context_daily_update", "task_label": "市场强度日更", "schedule": "每天 03:35"},
     {"task_name": "market_timing_daily_update", "task_label": "市场择时日更", "schedule": "每天 03:40；交易日 15:35"},
     {"task_name": "market_timing_v20_shadow_update", "task_label": "市场择时 V2.0 影子日更", "schedule": "每天 03:42；交易日 15:42"},
-    {"task_name": "market_scenario_forecast_shadow_update", "task_label": "市场概率情景与主线状态", "schedule": "每天 03:47；交易日 15:47"},
+    {"task_name": "market_scenario_forecast_shadow_update", "task_label": "市场概率情景与主线强度/周期", "schedule": "每天 03:47；交易日 15:47"},
     {"task_name": "strategy_factor_ci_daily_update", "task_label": "策略因子 CI 日更", "schedule": "每天 03:45；交易日 15:50"},
     {"task_name": "stock_sentiment_daily_update", "task_label": "真实舆情日更", "schedule": "每天 03:50"},
     {"task_name": "stock_status_pit_backfill", "task_label": "历史股票状态真相层", "schedule": "每天 04:35；交易日 18:35 补当日停牌；全量回填按需后台运行"},

@@ -1,0 +1,114 @@
+{
+  "model_id": "market_leadership_cycle_v2",
+  "model_name": "主线强度与周期位置 V2",
+  "version": "2.0.0",
+  "status": "research_only",
+  "maximum_sectors": 30,
+  "price_trade_days": 90,
+  "minimum_price_history_days": 60,
+  "minimum_component_coverage": 0.6,
+  "minimum_breadth_members": 5,
+  "minimum_breadth_coverage": 0.8,
+  "strength_weights": {
+    "heat": 0.3,
+    "capital": 0.25,
+    "breadth": 0.2,
+    "persistence": 0.15,
+    "price": 0.1
+  },
+  "sector_mappings": {
+    "theme:医药": {
+      "price_industries": ["中药", "化学制药", "生物制品", "医疗器械", "医疗服务", "医药商业"],
+      "stock_industries": ["中成药", "化学制药", "生物制药", "医疗保健", "医药商业"]
+    },
+    "theme:有色金属": {
+      "price_industries": ["小金属", "工业金属", "能源金属", "金属新材料", "贵金属"],
+      "stock_industries": ["小金属", "铝", "铜", "黄金"]
+    },
+    "theme:机器人": {
+      "price_industries": ["自动化设备", "专用设备", "通用设备", "电机"],
+      "stock_industries": ["专用机械", "机械基件", "电机"]
+    },
+    "theme:锂电池": {
+      "price_industries": ["电池", "能源金属"],
+      "stock_industries": ["电池", "锂矿"]
+    },
+    "theme:军工航天": {
+      "price_industries": ["军工电子", "军工装备"],
+      "stock_industries": ["航空", "船舶", "运输设备"]
+    },
+    "theme:新能源车": {
+      "price_industries": ["汽车整车", "汽车零部件", "电池"],
+      "stock_industries": ["汽车整车", "汽车配件", "电池"]
+    },
+    "theme:半导体": {
+      "price_industries": ["半导体"],
+      "stock_industries": ["半导体"]
+    },
+    "theme:AI算力": {
+      "price_industries": ["通信设备", "计算机设备", "IT服务"],
+      "stock_industries": ["通信设备", "IT设备", "软件服务"]
+    },
+    "theme:消费": {
+      "price_industries": ["白酒", "食品加工制造", "饮料制造", "白色家电", "零售"],
+      "stock_industries": ["白酒", "食品", "家用电器", "百货"]
+    },
+    "theme:金融": {
+      "price_industries": ["银行", "证券", "保险", "多元金融"],
+      "stock_industries": ["银行", "证券", "保险", "多元金融"]
+    },
+    "theme:油气": {
+      "price_industries": ["油气开采及服务", "石油加工贸易"],
+      "stock_industries": ["石油开采", "石油加工"]
+    },
+    "theme:房地产": {
+      "price_industries": ["房地产"],
+      "stock_industries": ["全国地产", "区域地产"]
+    },
+    "theme:绿电": {
+      "price_industries": ["电力", "光伏设备", "风电设备", "电网设备"],
+      "stock_industries": ["火力发电", "水力发电", "新型电力", "电气设备"]
+    },
+    "theme:传媒游戏": {
+      "price_industries": ["游戏", "文化传媒", "影视院线"],
+      "stock_industries": ["影视音像", "出版业", "互联网"]
+    },
+    "theme:化工农业": {
+      "price_industries": ["化学原料", "化学制品", "农化制品", "种植业与林业", "养殖业"],
+      "stock_industries": ["化工原料", "农药化肥", "种植业", "渔业", "农业综合"]
+    },
+    "industry:机场": {
+      "price_industries": ["机场航运"],
+      "stock_industries": ["机场"]
+    },
+    "industry:元器件": {
+      "price_industries": ["元件"],
+      "stock_industries": ["元器件"]
+    },
+    "industry:铁路": {
+      "price_industries": ["公路铁路运输"],
+      "stock_industries": ["铁路"]
+    },
+    "industry:煤炭开采": {
+      "price_industries": ["煤炭开采加工"],
+      "stock_industries": ["煤炭开采"]
+    },
+    "industry:医疗保健": {
+      "price_industries": ["医疗器械", "医疗服务"],
+      "stock_industries": ["医疗保健"]
+    },
+    "industry:汽车服务": {
+      "price_industries": ["汽车服务及其他"],
+      "stock_industries": ["汽车服务"]
+    }
+  },
+  "guardrails": [
+    "Strength and price-cycle position are separate axes.",
+    "Seed is not a lifecycle label and is not used by this model.",
+    "News-covered stock count is never used as market breadth.",
+    "Price cycles use THS industry indices or explicit equal-weight industry proxies, never raw ETF closes.",
+    "B-wave and C-wave labels are measurable hypotheses, never deterministic Elliott-wave claims.",
+    "Existing daily snapshots are immutable and are never rewritten with late-arriving data.",
+    "The model is research-only and never places orders or changes selection scores."
+  ]
+}

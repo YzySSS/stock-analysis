@@ -346,7 +346,7 @@ function renderScenarioForecast(scenario) {
     status.textContent = '等待择时 V2.0 样本';
     status.className = 'research-status muted';
     container.innerHTML = '<div class="empty-state">尚无概率情景快照。模型不会使用大模型自由生成概率。</div>';
-    leadershipContainer.innerHTML = '<div class="empty-state">尚无主线状态快照。</div>';
+    leadershipContainer.innerHTML = '<div class="empty-state">尚无主线强度与周期快照。</div>';
     return;
   }
   const forecasts = scenario.forecasts || [];
@@ -380,22 +380,41 @@ function renderScenarioForecast(scenario) {
   }).join('') || '<div class="empty-state">暂无情景期限数据</div>';
 
   const leadership = scenario.leadership || [];
-  const stateClass = (state) => ['seed', 'confirmed', 'crowded', 'decay'].includes(state) ? state : 'seed';
+  const strengthClass = (state) => {
+    const normalized = state === 'seed' ? 'watch' : state === 'decay' ? 'fading' : state;
+    return ['watch', 'confirmed', 'core', 'crowded', 'fading'].includes(normalized)
+      ? normalized
+      : 'watch';
+  };
+  const cycleClass = (state) => [
+    'base',
+    'first_impulse',
+    'main_up',
+    'late_acceleration',
+    'pullback',
+    'rebound_candidate',
+    'secondary_decline_risk',
+    'downtrend',
+    'range',
+    'insufficient_data',
+  ].includes(state) ? state : 'insufficient_data';
   if (leadershipStatus) {
     const counts = leadership.reduce((acc, item) => {
-      acc[item.leadership_state] = (acc[item.leadership_state] || 0) + 1;
+      const key = strengthClass(item.leadership_state);
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {});
-    leadershipStatus.textContent = `萌芽 ${counts.seed || 0} · 确认 ${counts.confirmed || 0} · 拥挤 ${counts.crowded || 0} · 退潮 ${counts.decay || 0}`;
+    leadershipStatus.textContent = `观察 ${counts.watch || 0} · 确认 ${counts.confirmed || 0} · 核心 ${counts.core || 0} · 拥挤 ${counts.crowded || 0} · 退潮 ${counts.fading || 0}`;
   }
   leadershipContainer.innerHTML = leadership.map((item) => `
-    <article class="home-leadership-card ${stateClass(item.leadership_state)}">
-      <div><span>${escapeHtml(item.state_label || '-')}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
+    <article class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)}">
+      <div><span>强度 · ${escapeHtml(item.state_label || '-')}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
       <strong>${escapeHtml(item.sector_name || '-')}</strong>
-      <small>${escapeHtml((item.evidence || []).slice(0, 2).join(' · ') || '等待证据')}</small>
+      <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">${escapeHtml(item.cycle_label || '周期待补证')}</em>
+      <small>${escapeHtml((item.evidence || []).slice(0, 4).join(' · ') || '等待证据')}</small>
       ${(item.contradictions || []).length ? `<p>${escapeHtml((item.contradictions || []).join('；'))}</p>` : ''}
     </article>
-  `).join('') || '<div class="empty-state">暂无主线状态数据</div>';
+  `).join('') || '<div class="empty-state">暂无主线强度与周期数据</div>';
 }
 
 function renderMarketTiming(timing) {

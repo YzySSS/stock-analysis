@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import date, datetime, time
 from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping, Sequence
 
+from app.market_timing.leadership_cycle import (
+    MODEL_ID as LEADERSHIP_MODEL_ID,
+    LeadershipCycleBuilder,
+)
 from app.market_timing.v20 import INDEX_CODE, MODEL_ID as TIMING_MODEL_ID
 from app.shared.db import mysql_conn, mysql_read_conn
 
@@ -25,14 +29,6 @@ FEATURE_KEYS = (
     "tail_risk",
     "leadership",
 )
-LEADERSHIP_LABELS = {
-    "seed": "萌芽",
-    "confirmed": "确认",
-    "crowded": "拥挤",
-    "decay": "退潮",
-}
-
-
 def _forecast_id(trade_date: date | str, horizon_days: int) -> str:
     as_of_date = date.fromisoformat(str(trade_date))
     return (
@@ -76,10 +72,6 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
-
-
-def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
-    return max(low, min(high, value))
 
 
 def _quantile(values: Sequence[float], probability: float) -> float | None:
@@ -383,6 +375,9 @@ class MarketScenarioForecastRepository:
         self._read_connection_factory = read_connection_factory or mysql_read_conn
         self.spec = load_market_scenario_spec()
         self.spec_hash = market_scenario_spec_hash()
+        self.leadership_builder = LeadershipCycleBuilder(
+            read_connection_factory=self._read_connection_factory
+        )
 
     def _timing_rows(self, through_date: date | str) -> list[dict[str, Any]]:
         with self._read_connection_factory() as conn:
@@ -539,7 +534,7 @@ class MarketScenarioForecastRepository:
         if feature_map["capital"] < 58:
             bullish.append("资金量维度升至58分以上且不背离")
         if feature_map["leadership"] < 60:
-            bullish.append("至少一个主线从萌芽进入确认")
+            bullish.append("至少一个观察主线进入确认")
         bearish.extend(
             [
                 "宽度跌至35分以下时停止加仓",
@@ -694,163 +689,7 @@ class MarketScenarioForecastRepository:
         return result
 
     def _leadership_rows(self, trade_date: date | str) -> list[dict[str, Any]]:
-        through = date.fromisoformat(str(trade_date))
-        with self._read_connection_factory() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT trade_date, as_of_datetime, sector_type, sector_name,
-                           sector_score, weighted_impact_score, news_count,
-                           source_count, stock_count, positive_news_count,
-                           negative_news_count
-                    FROM sector_opinion_daily
-                    WHERE trade_date BETWEEN DATE_SUB(%s, INTERVAL 14 DAY) AND %s
-                    ORDER BY trade_date, as_of_datetime
-                    """,
-                    (through, through),
-                )
-                opinion_rows = cursor.fetchall() or []
-                cursor.execute(
-                    """
-                    SELECT sector_type, sector_name, net_amount, pct_chg,
-                           company_count, quote_time
-                    FROM market_sector_fund_flow_intraday
-                    WHERE trade_date=%s
-                    ORDER BY quote_time
-                    """,
-                    (through,),
-                )
-                flow_rows = cursor.fetchall() or []
-        latest_opinion: dict[tuple[Any, str, str], Mapping[str, Any]] = {}
-        for row in opinion_rows:
-            key = (row["trade_date"], str(row["sector_type"]), str(row["sector_name"]))
-            latest_opinion[key] = row
-        current_rows = [
-            row
-            for (row_date, _, _), row in latest_opinion.items()
-            if row_date == through
-        ]
-        flow_latest: dict[tuple[str, str], Mapping[str, Any]] = {}
-        for row in flow_rows:
-            flow_latest[(str(row["sector_type"]), str(row["sector_name"]))] = row
-        history_by_sector: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
-        for (_, sector_type, sector_name), row in latest_opinion.items():
-            history_by_sector[(sector_type, sector_name)].append(row)
-        result = []
-        for row in sorted(
-            current_rows,
-            key=lambda item: _to_float(item.get("sector_score")) or 0,
-            reverse=True,
-        )[:30]:
-            sector_key = (str(row["sector_type"]), str(row["sector_name"]))
-            history = sorted(
-                history_by_sector[sector_key],
-                key=lambda item: item["trade_date"],
-            )
-            current_score = _to_float(row.get("sector_score")) or 0.0
-            prior_score = (
-                _to_float(history[-2].get("sector_score"))
-                if len(history) >= 2
-                else None
-            )
-            score_change = current_score - prior_score if prior_score is not None else 0.0
-            source_count = int(row.get("source_count") or 0)
-            stock_count = int(row.get("stock_count") or 0)
-            positive = int(row.get("positive_news_count") or 0)
-            negative = int(row.get("negative_news_count") or 0)
-            flow = flow_latest.get(sector_key)
-            net_amount = _to_float(flow.get("net_amount")) if flow else None
-            heat_score = _clamp(current_score / 100, 0, 1) * 100
-            capital_score = (
-                50 + max(-45, min(45, net_amount / 5))
-                if net_amount is not None
-                else 50.0
-            )
-            breadth_score = min(100.0, 35 + stock_count * 3)
-            persistence_score = min(100.0, 30 + len(history) * 12 + max(0, score_change) * 2)
-            crowding_score = min(
-                100.0,
-                max(0.0, current_score - 65) * 2.2
-                + max(0, positive - max(stock_count, 1)) * 2,
-            )
-            leadership_score = (
-                heat_score * 0.35
-                + capital_score * 0.25
-                + breadth_score * 0.20
-                + persistence_score * 0.20
-            )
-            contradictions = []
-            if negative > positive:
-                contradictions.append("负面新闻多于正面新闻")
-            if net_amount is not None and net_amount < 0:
-                contradictions.append("行业资金为净流出")
-            if score_change <= -8:
-                contradictions.append("行业评分较前次明显下降")
-            if score_change <= -8 or (negative > positive and current_score < 70):
-                state = "decay"
-            elif current_score >= 82 and crowding_score >= 55:
-                state = "crowded"
-            elif (
-                current_score >= 68
-                and source_count >= 2
-                and positive >= negative
-                and (net_amount is None or net_amount >= 0)
-            ):
-                state = "confirmed"
-            else:
-                state = "seed"
-            evidence = [
-                f"行业评分 {current_score:.1f}",
-                f"来源 {source_count} 个、覆盖股票 {stock_count} 只",
-                f"评分变化 {score_change:+.1f}",
-            ]
-            if net_amount is not None:
-                evidence.append(f"当日资金净额 {net_amount:+.2f}")
-            as_of = row.get("as_of_datetime") or datetime.combine(through, time(15, 30))
-            payload = {
-                "model_id": MODEL_ID,
-                "version": MODEL_VERSION,
-                "spec_hash": self.spec_hash,
-                "trade_date": str(through),
-                "as_of": str(as_of),
-                "data_cutoff": str(as_of),
-                "sector_type": sector_key[0],
-                "sector_name": sector_key[1],
-                "leadership_state": state,
-                "state_label": LEADERSHIP_LABELS[state],
-                "leadership_score": round(leadership_score, 2),
-                "confidence": round(
-                    min(1.0, 0.30 + source_count * 0.10 + min(len(history), 5) * 0.08),
-                    4,
-                ),
-                "heat_score": round(heat_score, 2),
-                "capital_score": round(capital_score, 2),
-                "breadth_score": round(breadth_score, 2),
-                "persistence_score": round(persistence_score, 2),
-                "crowding_score": round(crowding_score, 2),
-                "evidence": evidence,
-                "contradictions": contradictions,
-                "upgrade_triggers": [
-                    "资金连续流入且行业宽度继续扩散",
-                    "热度、资金、趋势至少三项共振",
-                ],
-                "downgrade_triggers": [
-                    "资金转负并连续减弱",
-                    "行业宽度收缩或评分连续下降",
-                ],
-                "source_lineage": {
-                    "opinion": "sector_opinion_daily",
-                    "capital": (
-                        "market_sector_fund_flow_intraday"
-                        if flow
-                        else "missing_neutral"
-                    ),
-                },
-                "research_only": True,
-            }
-            payload["payload_hash"] = _sha256(payload)
-            result.append(payload)
-        return result
+        return self.leadership_builder.build_rows(trade_date)
 
     def _existing_forecasts(
         self,
@@ -938,22 +777,25 @@ class MarketScenarioForecastRepository:
                             model_id, version, spec_hash, trade_date,
                             as_of_datetime, data_cutoff_datetime,
                             sector_type, sector_name, leadership_state,
-                            state_label, leadership_score, confidence,
+                            state_label, cycle_state, cycle_label,
+                            leadership_score, confidence,
                             heat_score, capital_score, breadth_score,
-                            persistence_score, crowding_score, evidence_json,
+                            persistence_score, crowding_score, price_score,
+                            price_evidence_status, price_metrics_json,
+                            breadth_metrics_json, evidence_json,
                             contradiction_json, upgrade_triggers_json,
                             downgrade_triggers_json, source_lineage_json,
-                            payload_hash
+                            data_quality_json, payload_hash
                         ) VALUES (
                             %s,%s,%s,%s,
                             %s,%s,
-                            %s,%s,%s,
-                            %s,%s,%s,
-                            %s,%s,%s,
-                            %s,%s,%s,
+                            %s,%s,%s,%s,
                             %s,%s,
-                            %s,%s,
-                            %s
+                            %s,%s,%s,%s,
+                            %s,%s,%s,%s,
+                            %s,%s,%s,%s,
+                            %s,%s,%s,%s,
+                            %s,%s
                         )
                         ON DUPLICATE KEY UPDATE
                             payload_hash=payload_hash
@@ -969,6 +811,8 @@ class MarketScenarioForecastRepository:
                             row["sector_name"],
                             row["leadership_state"],
                             row["state_label"],
+                            row["cycle_state"],
+                            row["cycle_label"],
                             row["leadership_score"],
                             row["confidence"],
                             row["heat_score"],
@@ -976,11 +820,16 @@ class MarketScenarioForecastRepository:
                             row["breadth_score"],
                             row["persistence_score"],
                             row["crowding_score"],
+                            row["price_score"],
+                            row["price_evidence_status"],
+                            _canonical_json(row["price_metrics"]),
+                            _canonical_json(row["breadth_metrics"]),
                             _canonical_json(row["evidence"]),
                             _canonical_json(row["contradictions"]),
                             _canonical_json(row["upgrade_triggers"]),
                             _canonical_json(row["downgrade_triggers"]),
                             _canonical_json(row["source_lineage"]),
+                            _canonical_json(row["data_quality"]),
                             row["payload_hash"],
                         ),
                     )
@@ -1190,16 +1039,30 @@ class MarketScenarioForecastRepository:
                 trade_date = forecast_rows[0]["trade_date"]
                 cursor.execute(
                     """
+                    SELECT MAX(trade_date) AS trade_date
+                    FROM market_leadership_state_daily
+                    WHERE model_id=%s
+                    """,
+                    (LEADERSHIP_MODEL_ID,),
+                )
+                leadership_date = (cursor.fetchone() or {}).get("trade_date")
+                leadership_model_id = LEADERSHIP_MODEL_ID
+                if leadership_date is None:
+                    leadership_date = trade_date
+                    leadership_model_id = MODEL_ID
+                cursor.execute(
+                    """
                     SELECT *
                     FROM market_leadership_state_daily
                     WHERE model_id=%s AND trade_date=%s
                     ORDER BY FIELD(
                         leadership_state,
-                        'confirmed','seed','crowded','decay'
+                        'core','confirmed','crowded','watch','fading',
+                        'seed','decay'
                     ), leadership_score DESC
                     LIMIT 24
                     """,
-                    (MODEL_ID, trade_date),
+                    (leadership_model_id, leadership_date),
                 )
                 leadership_rows = cursor.fetchall() or []
         forecasts = []
@@ -1238,12 +1101,24 @@ class MarketScenarioForecastRepository:
                 "sector_name": row.get("sector_name"),
                 "leadership_state": row.get("leadership_state"),
                 "state_label": row.get("state_label"),
+                "cycle_state": row.get("cycle_state"),
+                "cycle_label": row.get("cycle_label"),
                 "leadership_score": _to_float(row.get("leadership_score")),
                 "confidence": _to_float(row.get("confidence")),
+                "heat_score": _to_float(row.get("heat_score")),
+                "capital_score": _to_float(row.get("capital_score")),
+                "breadth_score": _to_float(row.get("breadth_score")),
+                "persistence_score": _to_float(row.get("persistence_score")),
+                "crowding_score": _to_float(row.get("crowding_score")),
+                "price_score": _to_float(row.get("price_score")),
+                "price_evidence_status": row.get("price_evidence_status"),
+                "price_metrics": _json_value(row.get("price_metrics_json"), {}),
+                "breadth_metrics": _json_value(row.get("breadth_metrics_json"), {}),
                 "evidence": _json_value(row.get("evidence_json"), []),
                 "contradictions": _json_value(row.get("contradiction_json"), []),
                 "upgrade_triggers": _json_value(row.get("upgrade_triggers_json"), []),
                 "downgrade_triggers": _json_value(row.get("downgrade_triggers_json"), []),
+                "data_quality": _json_value(row.get("data_quality_json"), {}),
             }
             for row in leadership_rows
         ]
@@ -1256,6 +1131,8 @@ class MarketScenarioForecastRepository:
             "as_of": str(forecast_rows[0].get("as_of_datetime")),
             "forecasts": forecasts,
             "leadership": leadership,
+            "leadership_model_id": leadership_model_id,
+            "leadership_trade_date": str(leadership_date),
             "research_only": True,
             "probability_not_direction_command": True,
         }

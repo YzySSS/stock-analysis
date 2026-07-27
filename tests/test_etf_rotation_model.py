@@ -21,7 +21,7 @@ class EtfRotationSpecTests(unittest.TestCase):
             len({item["etf"]["ts_code"] for item in spec["sectors"]}),
         )
         self.assertEqual(
-            "baab514e7d96736fac1bfc5383c62ef37aefa8f2c2bc194c28327c493a435a16",
+            "8e9457d495c4852fc05f9c5eeb93428e0bcd0f6a40107c85c278e276852c997a",
             etf_rotation_spec_hash(),
         )
 
@@ -34,7 +34,7 @@ class EtfRotationModelTests(unittest.TestCase):
             for index in range(61)
         ]
         self.trade_date = self.fund_dates[-1].isoformat()
-        sector_dates = self.fund_dates[-20:]
+        sector_dates = self.fund_dates
 
         self.sector_rows: list[dict] = []
         self.fund_rows_by_code: dict[str, list[dict]] = {}
@@ -48,7 +48,7 @@ class EtfRotationModelTests(unittest.TestCase):
                             "trade_date": current_date.isoformat(),
                             "industry_name": alias,
                             "net_amount": 100.0 if is_leader else -10.0 - sector_index,
-                            "pct_change": 1.0 if is_leader else -0.2,
+                            "pct_change": 0.5 if is_leader else -0.2,
                         }
                     )
 
@@ -155,6 +155,77 @@ class EtfRotationModelTests(unittest.TestCase):
         self.assertFalse(infrastructure["is_eligible"])
         self.assertEqual(1, result["selected_count"])
         self.assertEqual("bank", result["candidates"][0]["sector_id"])
+
+    def test_unit_split_does_not_fake_price_crash_or_share_inflow(self) -> None:
+        semiconductor = next(
+            item
+            for item in self.spec["sectors"]
+            if item["sector_id"] == "semiconductor"
+        )
+        code = semiconductor["etf"]["ts_code"]
+        rows = self.fund_rows_by_code[code]
+        for index, row in enumerate(rows):
+            row["close"] = 2.0
+            row["pct_chg"] = 0.0
+            row["fund_share_10k"] = 1_000_000
+            if index >= 45:
+                row["close"] = 1.0
+                row["fund_share_10k"] = 2_000_000
+
+        result = self.build("defensive")
+        candidate = next(
+            item
+            for item in result["candidates"]
+            if item["sector_id"] == "semiconductor"
+        )
+
+        self.assertAlmostEqual(0.0, candidate["evidence"]["etf_return_20d_pct"])
+        self.assertAlmostEqual(0.0, candidate["share_change_20d_pct"])
+        self.assertEqual(
+            "provider_pct_chg_compounded",
+            candidate["evidence"]["etf_return_20d_basis"],
+        )
+        self.assertTrue(candidate["evidence"]["etf_unit_adjustments"])
+
+    def test_post_impulse_rebound_fails_cycle_entry_gate(self) -> None:
+        self.spec["scoring"]["minimum_sector_score"] = 0
+        self.spec["scoring"]["minimum_combined_score"] = 0
+        semiconductor = next(
+            item
+            for item in self.spec["sectors"]
+            if item["sector_id"] == "semiconductor"
+        )
+        aliases = set(semiconductor["fund_flow_industries"])
+        semiconductor_rows = [
+            row
+            for row in self.sector_rows
+            if row["industry_name"] in aliases
+        ]
+        for index, row in enumerate(semiconductor_rows):
+            row["net_amount"] = 100.0
+            if index < 35:
+                row["pct_change"] = 1.2
+            elif index < 55:
+                row["pct_change"] = -2.0
+            else:
+                row["pct_change"] = 1.2
+        self.opinion_scores["semiconductor"]["score"] = 95.0
+
+        result = self.build("risk_on")
+        candidate = next(
+            item
+            for item in result["candidates"]
+            if item["sector_id"] == "semiconductor"
+        )
+
+        self.assertTrue(candidate["gates"]["sector_cycle_evidence_ready"])
+        self.assertFalse(candidate["gates"]["sector_cycle_allows_entry"])
+        self.assertFalse(candidate["is_eligible"])
+        self.assertEqual(
+            "rebound_candidate",
+            candidate["evidence"]["sector_cycle_state"],
+        )
+        self.assertIn("B浪候选", candidate["evidence"]["sector_cycle_label"])
 
 
 if __name__ == "__main__":

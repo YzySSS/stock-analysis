@@ -7743,11 +7743,16 @@ body[data-page="home"] .home-leadership-card {
   background: rgba(3, 12, 24, 0.42);
 }
 
+body[data-page="home"] .home-leadership-card.watch,
 body[data-page="home"] .home-leadership-card.seed {
   border-left-color: #38bdf8;
 }
 
 body[data-page="home"] .home-leadership-card.confirmed {
+  border-left-color: #22c55e;
+}
+
+body[data-page="home"] .home-leadership-card.core {
   border-left-color: #f87171;
 }
 
@@ -7755,8 +7760,9 @@ body[data-page="home"] .home-leadership-card.crowded {
   border-left-color: #f59e0b;
 }
 
+body[data-page="home"] .home-leadership-card.fading,
 body[data-page="home"] .home-leadership-card.decay {
-  border-left-color: #4ade80;
+  border-left-color: #64748b;
 }
 
 body[data-page="home"] .home-leadership-card > div {
@@ -7785,6 +7791,52 @@ body[data-page="home"] .home-leadership-card > strong {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+body[data-page="home"] .home-leadership-cycle {
+  display: inline-flex;
+  margin-bottom: 5px;
+  padding: 2px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  color: #9fb2ca;
+  background: rgba(100, 116, 139, 0.10);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+body[data-page="home"] .home-leadership-cycle.first_impulse,
+body[data-page="home"] .home-leadership-cycle.main_up {
+  border-color: rgba(34, 197, 94, 0.32);
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.10);
+}
+
+body[data-page="home"] .home-leadership-cycle.late_acceleration {
+  border-color: rgba(245, 158, 11, 0.34);
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.10);
+}
+
+body[data-page="home"] .home-leadership-cycle.pullback,
+body[data-page="home"] .home-leadership-cycle.rebound_candidate {
+  border-color: rgba(56, 189, 248, 0.34);
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.10);
+}
+
+body[data-page="home"] .home-leadership-cycle.secondary_decline_risk,
+body[data-page="home"] .home-leadership-cycle.downtrend {
+  border-color: rgba(248, 113, 113, 0.34);
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.10);
+}
+
+body[data-page="home"] .home-leadership-card > small {
+  display: block;
+  line-height: 1.45;
 }
 
 body[data-page="home"] .home-leadership-card > p {

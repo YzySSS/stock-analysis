@@ -21,6 +21,7 @@ from app.orchestration.fundamental_pit_schema import ensure_fundamental_pit_sche
 from app.orchestration.init_project import init_mysql_schema
 from app.orchestration.intraday_bar_schema import ensure_intraday_bar_schema
 from app.orchestration.index_constituent_pit_schema import ensure_index_constituent_pit_schema
+from app.orchestration.leadership_cycle_schema import ensure_leadership_cycle_schema
 from app.orchestration.market_fund_flow_schema import ensure_market_fund_flow_schema
 from app.orchestration.market_opinion_schema import ensure_market_opinion_schema
 from app.orchestration.market_scenario_forecast_schema import (
@@ -132,6 +133,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0032", "market probability scenario and leadership state schema", ensure_market_scenario_forecast_schema),
     Migration("0033", "research-only industry ETF rotation shadow schema", ensure_etf_rotation_schema),
     Migration("0034", "drop exact duplicate secondary indexes", drop_exact_duplicate_indexes),
+    Migration("0035", "leadership strength and price-cycle evidence schema", ensure_leadership_cycle_schema),
 )
 
 

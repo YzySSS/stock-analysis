@@ -3,7 +3,12 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Mapping
+
+from app.market_timing.leadership_cycle import (
+    classify_cycle,
+    compute_price_metrics,
+)
 
 
 def _number(value: Any) -> float | None:
@@ -79,6 +84,103 @@ def _price_return_pct(rows: list[dict[str, Any]], days: int) -> float | None:
     return (latest / previous - 1) * 100
 
 
+def _provider_pct_change(row: Mapping[str, Any]) -> float | None:
+    return _number(row.get("pct_chg", row.get("pct_change")))
+
+
+def _unit_adjustments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Detect ETF unit splits/consolidations from price-vs-provider returns."""
+
+    adjustments = []
+    for index, (previous, current) in enumerate(zip(rows, rows[1:]), start=1):
+        previous_close = _number(previous.get("close"))
+        current_close = _number(current.get("close"))
+        declared_change = _provider_pct_change(current)
+        if (
+            previous_close in {None, 0}
+            or current_close in {None, 0}
+            or declared_change is None
+        ):
+            continue
+        actual_ratio = current_close / previous_close
+        expected_ratio = 1 + declared_change / 100
+        if actual_ratio <= 0 or expected_ratio <= 0:
+            continue
+        unit_factor = expected_ratio / actual_ratio
+        if 0.77 <= unit_factor <= 1.30:
+            continue
+        previous_share = _number(previous.get("fund_share_10k"))
+        current_share = _number(current.get("fund_share_10k"))
+        share_ratio = (
+            current_share / previous_share
+            if previous_share not in {None, 0} and current_share is not None
+            else None
+        )
+        share_aligned = (
+            share_ratio is not None
+            and abs(share_ratio / unit_factor - 1) <= 0.25
+        )
+        adjustments.append(
+            {
+                "index": index,
+                "trade_date": _date_text(current.get("trade_date")),
+                "unit_factor": unit_factor,
+                "share_ratio": share_ratio,
+                "share_aligned": share_aligned,
+            }
+        )
+    return adjustments
+
+
+def _fund_return_pct(
+    rows: list[dict[str, Any]],
+    days: int,
+) -> tuple[float | None, str, list[dict[str, Any]]]:
+    window = rows[-(days + 1) :]
+    adjustments = _unit_adjustments(window)
+    changes = [_provider_pct_change(row) for row in rows[-days:]]
+    if len(changes) == days and all(value is not None for value in changes):
+        result = 1.0
+        for value in changes:
+            result *= 1 + float(value) / 100
+        return (result - 1) * 100, "provider_pct_chg_compounded", adjustments
+    if adjustments:
+        return None, "blocked_raw_price_adjustment_break", adjustments
+    return _price_return_pct(rows, days), "raw_close_fallback", adjustments
+
+
+def _adjusted_share_change_pct(
+    rows: list[dict[str, Any]],
+    days: int,
+) -> tuple[float | None, str, list[dict[str, Any]]]:
+    window = rows[-(days + 1) :]
+    share_points = [
+        (index, value)
+        for index, row in enumerate(window)
+        if (value := _number(row.get("fund_share_10k"))) is not None
+    ]
+    if len(share_points) < 2 or share_points[0][1] == 0:
+        return None, "missing_share_history", []
+    start_index, start_share = share_points[0]
+    end_index, end_share = share_points[-1]
+    adjustments = [
+        item
+        for item in _unit_adjustments(window)
+        if start_index < int(item["index"]) <= end_index
+    ]
+    unit_factor = math.prod(float(item["unit_factor"]) for item in adjustments)
+    normalized_start = start_share * unit_factor
+    if normalized_start == 0:
+        return None, "missing_share_history", adjustments
+    if adjustments and all(item["share_aligned"] for item in adjustments):
+        basis = "price_and_share_confirmed_unit_adjusted_fund_share"
+    elif adjustments:
+        basis = "price_inferred_unit_adjusted_fund_share"
+    else:
+        basis = "raw_fund_share_no_adjustment"
+    return (end_share / normalized_start - 1) * 100, basis, adjustments
+
+
 def aggregate_sector_history(
     sector_rows: list[dict[str, Any]],
     sectors: list[dict[str, Any]],
@@ -136,6 +238,38 @@ def aggregate_sector_history(
     return histories
 
 
+def _sector_cycle_evidence(
+    rows: list[dict[str, Any]],
+    *,
+    minimum_history_days: int,
+) -> dict[str, Any]:
+    level = 100.0
+    series = []
+    for row in rows:
+        pct_change = _number(row.get("pct_change"))
+        if pct_change is None or pct_change <= -100:
+            continue
+        level *= 1 + pct_change / 100
+        series.append(
+            {
+                "trade_date": row["trade_date"],
+                "value": level,
+            }
+        )
+    metrics = compute_price_metrics(
+        series,
+        minimum_days=minimum_history_days,
+    )
+    cycle = classify_cycle(metrics)
+    return {
+        "status": metrics.get("status"),
+        "cycle_state": cycle["cycle_state"],
+        "cycle_label": cycle["cycle_label"],
+        "metrics": metrics,
+        "reasons": cycle["reasons"],
+    }
+
+
 def _sector_scores(
     *,
     histories: dict[str, list[dict[str, Any]]],
@@ -147,6 +281,7 @@ def _sector_scores(
     weights = spec["scoring"]["sector_weights"]
     lookback = int(contract["sector_lookback_trade_days"])
     persistence_days = int(contract["sector_persistence_trade_days"])
+    cycle_history_days = int(contract["minimum_sector_cycle_history_days"])
     missing_score = float(contract["missing_numeric_score"])
 
     dates = sorted(
@@ -188,7 +323,16 @@ def _sector_scores(
     results: dict[str, dict[str, Any]] = {}
     for item in spec["sectors"]:
         sector_id = item["sector_id"]
-        rows = [row for row in histories.get(sector_id, []) if row["trade_date"] <= trade_date][-lookback:]
+        all_rows = [
+            row
+            for row in histories.get(sector_id, [])
+            if row["trade_date"] <= trade_date
+        ]
+        cycle_evidence = _sector_cycle_evidence(
+            all_rows,
+            minimum_history_days=cycle_history_days,
+        )
+        rows = all_rows[-lookback:]
         latest = rows[-1] if rows else {}
         recent = rows[-persistence_days:]
         positive_count = sum(
@@ -229,6 +373,7 @@ def _sector_scores(
             "return_5d_pct": return_5d,
             "return_20d_pct": return_20d,
             "opinion": opinion,
+            "cycle_evidence": cycle_evidence,
         }
     return results
 
@@ -264,21 +409,16 @@ def _etf_scores(
             if (value := _number(row.get("amount_yuan"))) is not None
         ]
         average_amount = _mean(amount_values)
-        ret5 = _price_return_pct(rows, 5)
-        ret20 = _price_return_pct(rows, 20)
+        ret5, return_5d_basis, adjustments5 = _fund_return_pct(rows, 5)
+        ret20, return_20d_basis, adjustments20 = _fund_return_pct(rows, 20)
         trend_score = (
             _clip(50 + 3 * ret5 + 1.5 * ret20)
             if ret5 is not None and ret20 is not None
             else missing_score
         )
-        share_rows = [
-            (row["trade_date"], value)
-            for row in rows[-(share_days + 1):]
-            if (value := _number(row.get("fund_share_10k"))) is not None
-        ]
-        share_change = None
-        if len(share_rows) >= 2 and share_rows[0][1] != 0:
-            share_change = (share_rows[-1][1] / share_rows[0][1] - 1) * 100
+        share_change, share_change_basis, share_adjustments = (
+            _adjusted_share_change_pct(rows, share_days)
+        )
         premium_discount = _number(latest.get("premium_discount_pct"))
         prepared[ts_code] = {
             "rows": rows,
@@ -286,8 +426,13 @@ def _etf_scores(
             "average_amount_20d_yuan": average_amount,
             "return_5d_pct": ret5,
             "return_20d_pct": ret20,
+            "return_5d_basis": return_5d_basis,
+            "return_20d_basis": return_20d_basis,
+            "unit_adjustments": adjustments20 or adjustments5,
             "trend_score": trend_score,
             "share_change_20d_pct": share_change,
+            "share_change_basis": share_change_basis,
+            "share_unit_adjustments": share_adjustments,
             "share_change_score": (
                 _clip(50 + 2 * share_change)
                 if share_change is not None
@@ -348,6 +493,9 @@ def build_rotation_candidates(
 
     timing_state = str((timing_signal or {}).get("state") or "missing")
     timing_caps = spec["risk_overlay"]["timing_state_max_selections"]
+    allowed_cycle_states = set(
+        spec["risk_overlay"]["sector_cycle_allowed_states"]
+    )
     selection_cap = min(
         int(spec["maximum_selections"]),
         int(timing_caps.get(timing_state, timing_caps["missing"])),
@@ -380,6 +528,13 @@ def build_rotation_candidates(
                 sector_item["latest_alias_coverage"] is not None
                 and sector_item["latest_alias_coverage"] >= 1
             ),
+            "sector_cycle_evidence_ready": (
+                sector_item["cycle_evidence"]["status"] == "ready"
+            ),
+            "sector_cycle_allows_entry": (
+                sector_item["cycle_evidence"]["cycle_state"]
+                in allowed_cycle_states
+            ),
             "opinion_available": _number(sector_item["opinion"].get("score")) is not None,
             "opinion_aligned": _date_text(
                 sector_item["opinion"].get("trade_date")
@@ -391,6 +546,11 @@ def build_rotation_candidates(
             "etf_latest_aligned": _date_text(latest.get("trade_date")) == trade_date,
             "etf_history_sufficient": etf_item["history_days"]
             >= int(contract["minimum_etf_history_days"]),
+            "etf_return_adjustment_safe": (
+                etf_item["return_5d_pct"] is not None
+                and etf_item["return_20d_pct"] is not None
+                and not str(etf_item["return_20d_basis"]).startswith("blocked_")
+            ),
             "listing_age_sufficient": listing_days
             >= int(contract["minimum_listing_days"]),
             "liquidity_sufficient": (
@@ -419,11 +579,13 @@ def build_rotation_candidates(
             "sector_latest_aligned",
             "sector_history_sufficient",
             "sector_alias_coverage_complete",
+            "sector_cycle_evidence_ready",
             "opinion_available",
             "opinion_aligned",
             "opinion_alias_coverage_complete",
             "etf_latest_aligned",
             "etf_history_sufficient",
+            "etf_return_adjustment_safe",
             "share_history_available",
             "nav_available",
             "nav_fresh",
@@ -467,8 +629,27 @@ def build_rotation_candidates(
                     "sector_alias_coverage": sector_item["latest_alias_coverage"],
                     "sector_return_5d_pct": sector_item["return_5d_pct"],
                     "sector_return_20d_pct": sector_item["return_20d_pct"],
+                    "sector_cycle_state": sector_item["cycle_evidence"][
+                        "cycle_state"
+                    ],
+                    "sector_cycle_label": sector_item["cycle_evidence"][
+                        "cycle_label"
+                    ],
+                    "sector_cycle_metrics": sector_item["cycle_evidence"][
+                        "metrics"
+                    ],
+                    "sector_cycle_reasons": sector_item["cycle_evidence"][
+                        "reasons"
+                    ],
                     "etf_return_5d_pct": etf_item["return_5d_pct"],
                     "etf_return_20d_pct": etf_item["return_20d_pct"],
+                    "etf_return_5d_basis": etf_item["return_5d_basis"],
+                    "etf_return_20d_basis": etf_item["return_20d_basis"],
+                    "etf_unit_adjustments": etf_item["unit_adjustments"],
+                    "share_change_basis": etf_item["share_change_basis"],
+                    "share_unit_adjustments": etf_item[
+                        "share_unit_adjustments"
+                    ],
                     "opinion": sector_item["opinion"],
                     "score_gate_pass": score_gate_pass,
                 },

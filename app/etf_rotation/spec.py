@@ -8,6 +8,11 @@ from typing import Any
 
 
 SPEC_PATH = Path(__file__).resolve().parent / "specs" / "industry_etf_rotation_v1.json"
+OVERLAY_PATH = (
+    Path(__file__).resolve().parent
+    / "specs"
+    / "industry_etf_rotation_v1_1_overlay.json"
+)
 
 
 def _canonical_json(value: Any) -> str:
@@ -72,11 +77,33 @@ def _validate_spec(spec: dict[str, Any]) -> None:
         raise ValueError("timing state caps must cover the complete V2.0 state set")
     if int(timing_caps["cash"]) != 0 or int(timing_caps["missing"]) != 0:
         raise ValueError("cash and missing timing states must fail closed")
+    allowed_cycle_states = set(
+        (spec.get("risk_overlay") or {}).get(
+            "sector_cycle_allowed_states",
+            [],
+        )
+    )
+    if allowed_cycle_states != {"first_impulse", "main_up", "pullback"}:
+        raise ValueError(
+            "ETF rotation cycle gate must only allow first impulse, "
+            "main uptrend, and primary-uptrend pullback"
+        )
 
 
 @lru_cache(maxsize=1)
 def load_etf_rotation_spec() -> dict[str, Any]:
     spec = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    overlay = json.loads(OVERLAY_PATH.read_text(encoding="utf-8"))
+    spec["version"] = overlay["version"]
+    spec["data_contract"].update(overlay.get("data_contract") or {})
+    spec["scoring"]["formula_contract"].update(
+        (overlay.get("scoring") or {}).get("formula_contract") or {}
+    )
+    spec["risk_overlay"].update(overlay.get("risk_overlay") or {})
+    spec["guardrails"] = [
+        *spec.get("guardrails", []),
+        *(overlay.get("guardrails_append") or []),
+    ]
     _validate_spec(spec)
     return spec
 

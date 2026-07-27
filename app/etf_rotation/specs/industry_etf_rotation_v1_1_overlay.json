@@ -1,0 +1,29 @@
+{
+  "version": "1.1.0",
+  "data_contract": {
+    "etf_return_basis": "provider_pct_chg_compounded",
+    "fund_share_adjustment": "remove_price-implied_unit_split_or_consolidation",
+    "minimum_sector_cycle_history_days": 60
+  },
+  "scoring": {
+    "formula_contract": {
+      "etf_price_trend": "clip_0_100(50 + 3 * provider_pct_chg_compounded_5d + 1.5 * provider_pct_chg_compounded_20d)",
+      "share_change": "clip_0_100(50 + 2 * unit_adjusted_share_change_20d_pct)"
+    }
+  },
+  "risk_overlay": {
+    "sector_cycle_allowed_states": [
+      "first_impulse",
+      "main_up",
+      "pullback"
+    ]
+  },
+  "guardrails_append": [
+    "Raw ETF close ratios never drive trend when complete provider pct_chg history is available.",
+    "ETF unit splits and consolidations are removed from fund-share changes instead of being treated as subscriptions or redemptions.",
+    "Unresolved price adjustment breaks fail closed.",
+    "ETF entry requires at least 60 trading days of sector price-cycle evidence.",
+    "Rebound/B-wave candidates, secondary-decline/C-wave risk, downtrends, ranges, bases, and late acceleration do not pass the entry gate.",
+    "A zero-candidate cash result is valid when no sector is in first impulse, main uptrend, or primary-uptrend pullback."
+  ]
+}

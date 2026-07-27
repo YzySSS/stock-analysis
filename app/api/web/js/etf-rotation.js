@@ -33,11 +33,14 @@ function failedGateText(gates = {}) {
     sector_latest_aligned: '行业数据未对齐',
     sector_history_sufficient: '行业历史不足',
     sector_alias_coverage_complete: '行业映射覆盖不足',
+    sector_cycle_evidence_ready: '行业周期历史不足',
+    sector_cycle_allows_entry: '行业不在启动/主升/主升回踩',
     opinion_available: '舆情评分缺失',
     opinion_aligned: '舆情日期未对齐',
     opinion_alias_coverage_complete: '舆情映射覆盖不足',
     etf_latest_aligned: 'ETF 行情未对齐',
     etf_history_sufficient: 'ETF 历史不足',
+    etf_return_adjustment_safe: 'ETF 复权断点未解决',
     listing_age_sufficient: '上市时间不足',
     liquidity_sufficient: '流动性不足',
     share_history_available: '份额历史缺失',
@@ -70,6 +73,7 @@ function renderCandidates(items = []) {
         <td>
           <strong>${escapeHtml(item.sector_name)}</strong>
           <small>${escapeHtml(item.ts_code)} · ${escapeHtml(item.fund_name)}</small>
+          <small>${escapeHtml(item.evidence?.sector_cycle_label || '周期待补证')}</small>
         </td>
         <td><b>${formatNumber(item.combined_score, 1)}</b></td>
         <td>${formatNumber(item.sector_score, 1)}</td>
@@ -124,6 +128,7 @@ function renderContract(spec = {}) {
   list.innerHTML = [
     `固定 ${spec.sectors?.length || 0} 个行业篮子，每个篮子只映射 1 只 ETF`,
     `行业至少 ${data.minimum_sector_history_days || '-'} 个交易日，ETF 至少 ${data.minimum_etf_history_days || '-'} 个交易日`,
+    `行业周期至少 ${data.minimum_sector_cycle_history_days || '-'} 个交易日；只允许启动、主升或主升回踩`,
     `20 日平均成交额不低于 ${moneyText(data.minimum_average_amount_20d_yuan)}`,
     `收盘决策，下一交易日开盘开始观察；最多 ${spec.maximum_selections || 0} 只`,
     '零候选是合法结果；缺数据不补值、不自动调参、不自动交易',
