@@ -19,6 +19,35 @@ DEFAULT_BENCHMARK_CODE = "000300.SH"
 DEFAULT_ROUND_TRIP_COST_PCT = 0.25
 
 
+def mature_horizon_cutoffs(
+    market_dates: Sequence[date],
+    horizons: Sequence[int],
+) -> list[tuple[int, date]]:
+    """Return the latest signal date whose requested horizon is observable."""
+
+    ordered_dates = sorted(set(market_dates))
+    result: list[tuple[int, date]] = []
+    for horizon in sorted({int(value) for value in horizons if int(value) > 0}):
+        cutoff_index = len(ordered_dates) - 1 - horizon
+        if cutoff_index >= 0:
+            result.append((horizon, ordered_dates[cutoff_index]))
+    return result
+
+
+def missing_factor_rows(
+    factor_rows: Sequence[Mapping[str, Any]],
+    existing_outcomes: set[tuple[int, int]],
+    horizon_days: int,
+) -> list[Mapping[str, Any]]:
+    """Keep only factor snapshots without a materialized horizon outcome."""
+
+    return [
+        row
+        for row in factor_rows
+        if (int(row["id"]), int(horizon_days)) not in existing_outcomes
+    ]
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(
         value,
@@ -943,6 +972,51 @@ class StrategyFactorEvaluationRepository:
         with self._read_connection_factory() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
+                    """
+                    SELECT DISTINCT trade_date
+                    FROM daily_kline
+                    ORDER BY trade_date
+                    """
+                )
+                market_dates = [
+                    row["trade_date"] for row in (cursor.fetchall() or [])
+                ]
+                maturity_cutoffs = mature_horizon_cutoffs(
+                    market_dates,
+                    horizon_values,
+                )
+                if not maturity_cutoffs:
+                    return {
+                        "status": "success",
+                        "manifest_count": 0,
+                        "outcomes_written": 0,
+                        "pending": 0,
+                        "blocked": 0,
+                    }
+                maturity_clauses: list[str] = []
+                maturity_params: list[Any] = []
+                for horizon, cutoff_date in maturity_cutoffs:
+                    maturity_clauses.append(
+                        """
+                        (
+                            m.trade_date <= %s
+                            AND EXISTS (
+                                SELECT 1
+                                FROM strategy_factor_snapshot ms
+                                WHERE ms.manifest_id=m.id
+                                  AND ms.in_eligible_pool=1
+                                  AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM strategy_factor_outcome mo
+                                      WHERE mo.factor_snapshot_id=ms.id
+                                        AND mo.horizon_days=%s
+                                  )
+                            )
+                        )
+                        """
+                    )
+                    maturity_params.extend((cutoff_date, horizon))
+                cursor.execute(
                     f"""
                     SELECT m.*
                     FROM strategy_factor_snapshot_manifest m
@@ -952,37 +1026,16 @@ class StrategyFactorEvaluationRepository:
                         WHERE s.manifest_id=m.id
                           AND s.in_eligible_pool=1
                     )
-                      AND (
-                          SELECT COUNT(*)
-                          FROM strategy_factor_outcome o
-                          INNER JOIN strategy_factor_snapshot os
-                              ON os.id=o.factor_snapshot_id
-                          WHERE os.manifest_id=m.id
-                            AND o.horizon_days IN ({horizon_placeholders})
-                      ) < (
-                          SELECT COUNT(*)
-                          FROM strategy_factor_snapshot es
-                          WHERE es.manifest_id=m.id
-                            AND es.in_eligible_pool=1
-                      ) * %s
+                      AND ({" OR ".join(maturity_clauses)})
                     ORDER BY m.trade_date, m.id
                     LIMIT %s
                     """,
                     (
-                        *horizon_values,
-                        len(horizon_values),
+                        *maturity_params,
                         max(1, int(manifest_limit)),
                     ),
                 )
                 manifests = cursor.fetchall() or []
-                cursor.execute(
-                    """
-                    SELECT DISTINCT trade_date
-                    FROM daily_kline
-                    ORDER BY trade_date
-                    """
-                )
-                market_dates = [row["trade_date"] for row in (cursor.fetchall() or [])]
         date_index = {value: index for index, value in enumerate(market_dates)}
         inserted_or_updated = 0
         pending = 0
@@ -1004,16 +1057,41 @@ class StrategyFactorEvaluationRepository:
                         (manifest["id"],),
                     )
                     factor_rows = cursor.fetchall() or []
+                    cursor.execute(
+                        f"""
+                        SELECT o.factor_snapshot_id, o.horizon_days
+                        FROM strategy_factor_outcome o
+                        INNER JOIN strategy_factor_snapshot os
+                            ON os.id=o.factor_snapshot_id
+                        WHERE os.manifest_id=%s
+                          AND o.horizon_days IN ({horizon_placeholders})
+                        """,
+                        (manifest["id"], *horizon_values),
+                    )
+                    existing_outcomes = {
+                        (
+                            int(row["factor_snapshot_id"]),
+                            int(row["horizon_days"]),
+                        )
+                        for row in (cursor.fetchall() or [])
+                    }
             for horizon in horizon_values:
+                missing_rows = missing_factor_rows(
+                    factor_rows,
+                    existing_outcomes,
+                    horizon,
+                )
+                if not missing_rows:
+                    continue
                 exit_index = index + int(horizon)
                 entry_index = index + 1
                 if entry_index >= len(market_dates) or exit_index >= len(market_dates):
-                    pending += len(factor_rows)
+                    pending += len(missing_rows)
                     continue
                 entry_date = market_dates[entry_index]
                 exit_date = market_dates[exit_index]
                 outcome_rows = self._build_outcomes_for_horizon(
-                    factor_rows=factor_rows,
+                    factor_rows=missing_rows,
                     signal_date=signal_date,
                     entry_date=entry_date,
                     exit_date=exit_date,

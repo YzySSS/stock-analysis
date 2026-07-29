@@ -1,17 +1,45 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from app.stock_selection.factor_evaluation_v2 import (
     benjamini_hochberg,
     evaluate_factor_records,
+    mature_horizon_cutoffs,
     maturity_state,
+    missing_factor_rows,
     pearson,
     spearman,
 )
 
 
 class StrategyFactorEvaluationV2Test(unittest.TestCase):
+    def test_mature_horizon_cutoffs_use_market_day_offsets(self) -> None:
+        market_dates = [date(2026, 7, day) for day in range(21, 27)]
+
+        self.assertEqual(
+            mature_horizon_cutoffs(market_dates, [1, 3, 5, 10]),
+            [
+                (1, date(2026, 7, 25)),
+                (3, date(2026, 7, 23)),
+                (5, date(2026, 7, 21)),
+            ],
+        )
+
+    def test_missing_factor_rows_excludes_materialized_horizon_only(self) -> None:
+        factor_rows = [{"id": 10}, {"id": 11}, {"id": 12}]
+        existing = {(10, 1), (11, 3)}
+
+        self.assertEqual(
+            missing_factor_rows(factor_rows, existing, 1),
+            [{"id": 11}, {"id": 12}],
+        )
+        self.assertEqual(
+            missing_factor_rows(factor_rows, existing, 3),
+            [{"id": 10}, {"id": 12}],
+        )
+
     def test_correlation_helpers(self) -> None:
         self.assertAlmostEqual(pearson([1, 2, 3], [2, 4, 6]), 1.0)
         self.assertAlmostEqual(spearman([10, 20, 30], [3, 2, 1]), -1.0)
