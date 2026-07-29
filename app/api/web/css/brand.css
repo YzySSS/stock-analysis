@@ -1,0 +1,31 @@
+.brand {
+  position: relative;
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  padding-left: 42px;
+}
+
+.brand::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 9px;
+  background: url("/static/assets/stock-research-icon.png?v=20260729brand1") center / cover no-repeat;
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.16);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.login-brand-mark {
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  background: url("/static/assets/stock-research-icon.png?v=20260729brand1") center / cover no-repeat;
+  color: transparent;
+  font-size: 0;
+  text-indent: -9999px;
+}

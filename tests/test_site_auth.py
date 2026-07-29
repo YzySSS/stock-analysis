@@ -205,6 +205,38 @@ class AuthBoundaryTests(unittest.TestCase):
             source = (pages_dir / filename).read_text(encoding="utf-8")
             self.assertIn("/static/js/common.js?v=20260723auth3", source)
 
+    def test_product_pages_use_the_stock_research_brand_icon(self):
+        web_dir = PROJECT_ROOT / "app" / "api" / "web"
+        pages_dir = web_dir / "pages"
+        branded_pages = {
+            "home.html",
+            "selection.html",
+            "tracking.html",
+            "portfolio.html",
+            "backtest.html",
+            "strategies.html",
+            "trade-strategies.html",
+            "etf-rotation.html",
+            "stock-detail.html",
+            "system.html",
+            "login.html",
+        }
+
+        for filename in branded_pages:
+            source = (pages_dir / filename).read_text(encoding="utf-8")
+            self.assertIn("/favicon.ico?v=20260729brand1", source)
+            self.assertIn("/static/css/brand.css?v=20260729brand1", source)
+            self.assertIn("stock-research-apple-touch.png?v=20260729brand1", source)
+
+        for filename in (
+            "stock-research-icon.png",
+            "stock-research-favicon.png",
+            "stock-research-apple-touch.png",
+        ):
+            asset = web_dir / "assets" / filename
+            self.assertTrue(asset.is_file())
+            self.assertGreater(asset.stat().st_size, 1_000)
+
 
 class AuthHttpIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

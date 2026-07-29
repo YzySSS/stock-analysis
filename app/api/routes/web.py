@@ -21,7 +21,11 @@ def home() -> FileResponse:
 
 @router.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 def favicon() -> FileResponse:
-    return FileResponse(WEB_DIR / "assets" / "favicon.png", media_type="image/png")
+    return FileResponse(
+        WEB_DIR / "assets" / "stock-research-favicon.png",
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.get("/selection", include_in_schema=False)
