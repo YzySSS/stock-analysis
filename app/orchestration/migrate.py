@@ -48,6 +48,9 @@ from app.orchestration.strategy_factor_ci_schema import ensure_strategy_factor_c
 from app.orchestration.strategy_factor_evaluation_v2_schema import (
     ensure_strategy_factor_evaluation_v2_schema,
 )
+from app.orchestration.strategy_factor_evaluation_performance_schema import (
+    ensure_strategy_factor_evaluation_performance_index,
+)
 from app.orchestration.ths_concept_hot_schema import ensure_ths_concept_hot_schema
 from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.db import mysql_conn, ping_mysql
@@ -134,6 +137,11 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0033", "research-only industry ETF rotation shadow schema", ensure_etf_rotation_schema),
     Migration("0034", "drop exact duplicate secondary indexes", drop_exact_duplicate_indexes),
     Migration("0035", "leadership strength and price-cycle evidence schema", ensure_leadership_cycle_schema),
+    Migration(
+        "0036",
+        "strategy factor evaluation manifest-scope performance index",
+        ensure_strategy_factor_evaluation_performance_index,
+    ),
 )
 
 

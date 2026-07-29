@@ -45,7 +45,7 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
         self.assertEqual(versions, sorted(versions))
         self.assertEqual(len(versions), len(set(versions)))
         self.assertEqual(versions[0], "0001")
-        self.assertEqual(versions[-1], "0035")
+        self.assertEqual(versions[-1], "0036")
         self.assertTrue(any("market opinion" in name for name in names))
         self.assertTrue(any("realtime" in name for name in names))
         self.assertTrue(any("job state" in name for name in names))
@@ -66,6 +66,7 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
         self.assertTrue(any("industry ETF rotation" in name for name in names))
         self.assertTrue(any("duplicate secondary indexes" in name for name in names))
         self.assertTrue(any("price-cycle evidence" in name for name in names))
+        self.assertTrue(any("manifest-scope performance index" in name for name in names))
 
     def test_core_checksum_is_stable_when_module_is_imported(self):
         core = migrate.MIGRATIONS[0]

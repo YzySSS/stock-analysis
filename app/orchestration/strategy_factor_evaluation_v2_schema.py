@@ -65,6 +65,9 @@ DDL = [
         payload_hash CHAR(64) NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_strategy_factor_snapshot (snapshot_id, code),
+        KEY idx_factor_snapshot_manifest_scope (
+            manifest_id, in_eligible_pool, code
+        ),
         KEY idx_factor_snapshot_strategy_date (
             strategy_id, strategy_version, trade_date
         ),
