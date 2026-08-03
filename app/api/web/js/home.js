@@ -346,7 +346,8 @@ function renderScenarioForecast(scenario) {
     status.textContent = '等待择时 V2.0 样本';
     status.className = 'research-status muted';
     container.innerHTML = '<div class="empty-state">尚无概率情景快照。模型不会使用大模型自由生成概率。</div>';
-    leadershipContainer.innerHTML = '<div class="empty-state">尚无主线强度与周期快照。</div>';
+    if (leadershipStatus) leadershipStatus.textContent = '市场主线：暂无';
+    leadershipContainer.innerHTML = '<div class="empty-state">尚无行业强度与价格周期快照。</div>';
     return;
   }
   const forecasts = scenario.forecasts || [];
@@ -398,23 +399,72 @@ function renderScenarioForecast(scenario) {
     'range',
     'insufficient_data',
   ].includes(state) ? state : 'insufficient_data';
+  const cycleDisplayLabel = (item) => ({
+    insufficient_data: '待补证',
+    base: '筑底观察',
+    first_impulse: '初步启动',
+    main_up: '主升阶段',
+    late_acceleration: '加速末段',
+    pullback: '主升回踩',
+    rebound_candidate: '反弹修复·B浪候选',
+    secondary_decline_risk: '二次下探·C浪风险',
+    downtrend: '下降趋势',
+    range: '震荡整理',
+  }[item.cycle_state] || item.cycle_label || '待补证');
+  const constructiveCycles = new Set(['first_impulse', 'main_up', 'late_acceleration', 'pullback']);
+  const mainlineStates = new Set(['confirmed', 'core', 'crowded']);
+  const fallbackMainline = leadership
+    .filter((item) => (
+      mainlineStates.has(item.leadership_state)
+      && constructiveCycles.has(item.cycle_state)
+      && item.price_evidence_status === 'ready'
+      && item.breadth_metrics?.status === 'ready'
+      && Number(item.confidence || 0) >= 0.8
+    ))
+    .sort((left, right) => Number(right.leadership_score || 0) - Number(left.leadership_score || 0))[0] || null;
+  const mainlineSummary = scenario.market_mainline || {};
+  const marketMainline = mainlineSummary.status === 'present'
+    ? mainlineSummary.sector
+    : fallbackMainline;
+  const isMarketMainline = (item) => Boolean(
+    marketMainline
+    && item.sector_type === marketMainline.sector_type
+    && item.sector_name === marketMainline.sector_name
+  );
+  const fallbackStrengtheningCount = leadership.filter((item) => (
+    constructiveCycles.has(item.cycle_state)
+    && !['fading', 'decay'].includes(item.leadership_state)
+  )).length;
+  const strengtheningCount = Number.isFinite(Number(mainlineSummary.price_strengthening_count))
+    ? Number(mainlineSummary.price_strengthening_count)
+    : fallbackStrengtheningCount;
   if (leadershipStatus) {
-    const counts = leadership.reduce((acc, item) => {
-      const key = strengthClass(item.leadership_state);
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    leadershipStatus.textContent = `观察 ${counts.watch || 0} · 确认 ${counts.confirmed || 0} · 核心 ${counts.core || 0} · 拥挤 ${counts.crowded || 0} · 退潮 ${counts.fading || 0}`;
+    leadershipStatus.textContent = marketMainline
+      ? `市场主线：${marketMainline.sector_name} · 价格转强 ${strengtheningCount}`
+      : `市场主线：暂无 · 价格转强 ${strengtheningCount}`;
+    leadershipStatus.title = mainlineSummary.qualification_note || '市场主线最多一条，未达完整门槛时允许为空';
+    leadershipStatus.className = `research-status ${marketMainline ? 'active' : 'muted'}`;
   }
-  leadershipContainer.innerHTML = leadership.map((item) => `
-    <article class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)}">
-      <div><span>强度 · ${escapeHtml(item.state_label || '-')}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
-      <strong>${escapeHtml(item.sector_name || '-')}</strong>
-      <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">${escapeHtml(item.cycle_label || '周期待补证')}</em>
-      <small>${escapeHtml((item.evidence || []).slice(0, 4).join(' · ') || '等待证据')}</small>
-      ${(item.contradictions || []).length ? `<p>${escapeHtml((item.contradictions || []).join('；'))}</p>` : ''}
-    </article>
-  `).join('') || '<div class="empty-state">暂无主线强度与周期数据</div>';
+  const orderedLeadership = [...leadership].sort((left, right) => (
+    Number(isMarketMainline(right)) - Number(isMarketMainline(left))
+    || Number(right.leadership_score || 0) - Number(left.leadership_score || 0)
+  ));
+  leadershipContainer.innerHTML = orderedLeadership.map((item) => {
+    const primary = isMarketMainline(item);
+    const evidence = (item.evidence || [])
+      .slice(0, 4)
+      .map((text) => String(text).replace(/^主线强度/, '行业综合强度'))
+      .join(' · ');
+    return `
+      <article class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)} ${primary ? 'market-mainline' : ''}">
+        <div><span>${primary ? '市场主线' : '行业强度'} · ${escapeHtml(item.state_label || '-')}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
+        <strong>${escapeHtml(item.sector_name || '-')}</strong>
+        <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">价格周期 · ${escapeHtml(cycleDisplayLabel(item))}</em>
+        <small>${escapeHtml(evidence || '等待证据')}</small>
+        ${(item.contradictions || []).length ? `<p>${escapeHtml((item.contradictions || []).join('；'))}</p>` : ''}
+      </article>
+    `;
+  }).join('') || '<div class="empty-state">暂无行业强度与价格周期数据</div>';
 }
 
 function renderMarketTiming(timing) {

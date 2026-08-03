@@ -29,6 +29,13 @@ FEATURE_KEYS = (
     "tail_risk",
     "leadership",
 )
+MARKET_MAINLINE_STRENGTH_STATES = frozenset({"confirmed", "core", "crowded"})
+MARKET_MAINLINE_CYCLE_STATES = frozenset(
+    {"first_impulse", "main_up", "late_acceleration", "pullback"}
+)
+MARKET_MAINLINE_MIN_CONFIDENCE = 0.8
+
+
 def _forecast_id(trade_date: date | str, horizon_days: int) -> str:
     as_of_date = date.fromisoformat(str(trade_date))
     return (
@@ -72,6 +79,89 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def summarize_market_mainline(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Choose at most one market mainline without rewriting research snapshots.
+
+    Leadership rows remain an industry radar.  A market-level mainline must
+    have confirmed strength, a constructive price cycle, and complete price
+    and breadth evidence.  When nothing qualifies, an explicit empty result
+    is preferable to promoting the strongest observation row by default.
+    """
+
+    strengthening_rows = [
+        row
+        for row in rows
+        if row.get("cycle_state") in MARKET_MAINLINE_CYCLE_STATES
+        and row.get("leadership_state") not in {"fading", "decay"}
+    ]
+    strength_qualified_rows = [
+        row
+        for row in rows
+        if row.get("leadership_state") in MARKET_MAINLINE_STRENGTH_STATES
+    ]
+    qualified_rows = [
+        row
+        for row in strength_qualified_rows
+        if row.get("cycle_state") in MARKET_MAINLINE_CYCLE_STATES
+        and row.get("price_evidence_status") == "ready"
+        and (row.get("breadth_metrics") or {}).get("status") == "ready"
+        and (_to_float(row.get("confidence")) or 0.0)
+        >= MARKET_MAINLINE_MIN_CONFIDENCE
+    ]
+    qualified_rows.sort(
+        key=lambda row: (
+            -(_to_float(row.get("leadership_score")) or 0.0),
+            -(_to_float(row.get("confidence")) or 0.0),
+            str(row.get("sector_name") or ""),
+        )
+    )
+    strengthening_rows.sort(
+        key=lambda row: (
+            -(_to_float(row.get("leadership_score")) or 0.0),
+            str(row.get("sector_name") or ""),
+        )
+    )
+    primary = qualified_rows[0] if qualified_rows else None
+    sector = (
+        {
+            "sector_type": primary.get("sector_type"),
+            "sector_name": primary.get("sector_name"),
+            "leadership_state": primary.get("leadership_state"),
+            "state_label": primary.get("state_label"),
+            "cycle_state": primary.get("cycle_state"),
+            "cycle_label": primary.get("cycle_label"),
+            "leadership_score": _to_float(primary.get("leadership_score")),
+            "confidence": _to_float(primary.get("confidence")),
+        }
+        if primary
+        else None
+    )
+    return {
+        "status": "present" if primary else "none",
+        "label": (
+            f"当前市场主线：{primary.get('sector_name')}"
+            if primary
+            else "暂无已确认市场主线"
+        ),
+        "selection_policy": "single_primary_or_none",
+        "qualification_note": (
+            "主线强度达到确认/核心/拥挤，价格处于初步启动、主升、"
+            "加速末段或主升回踩，价格与真实宽度证据完整，且置信度不低于80%"
+        ),
+        "strength_qualified_count": len(strength_qualified_rows),
+        "fully_qualified_count": len(qualified_rows),
+        "price_strengthening_count": len(strengthening_rows),
+        "price_strengthening_names": [
+            str(row.get("sector_name"))
+            for row in strengthening_rows
+            if row.get("sector_name")
+        ],
+        "sector": sector,
+    }
 
 
 def _quantile(values: Sequence[float], probability: float) -> float | None:
@@ -1122,6 +1212,7 @@ class MarketScenarioForecastRepository:
             }
             for row in leadership_rows
         ]
+        market_mainline = summarize_market_mainline(leadership)
         return {
             "model_id": MODEL_ID,
             "model_name": "市场概率情景 V1",
@@ -1131,6 +1222,7 @@ class MarketScenarioForecastRepository:
             "as_of": str(forecast_rows[0].get("as_of_datetime")),
             "forecasts": forecasts,
             "leadership": leadership,
+            "market_mainline": market_mainline,
             "leadership_model_id": leadership_model_id,
             "leadership_trade_date": str(leadership_date),
             "research_only": True,

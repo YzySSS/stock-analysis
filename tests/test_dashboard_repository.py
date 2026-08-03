@@ -140,6 +140,44 @@ class StubDashboardRepository:
 
 
 class DashboardRepositoryTests(unittest.TestCase):
+    def test_compact_dashboard_preserves_single_market_mainline_summary(self):
+        payload = {
+            "market_timing": {
+                "scenario_forecast": {
+                    "model_id": "market_scenario_forecast_v1",
+                    "market_mainline": {
+                        "status": "present",
+                        "label": "当前市场主线：银行",
+                        "selection_policy": "single_primary_or_none",
+                        "qualification_note": "完整门槛",
+                        "strength_qualified_count": 2,
+                        "fully_qualified_count": 1,
+                        "price_strengthening_count": 4,
+                        "price_strengthening_names": ["银行", "白酒"],
+                        "sector": {
+                            "sector_type": "industry",
+                            "sector_name": "银行",
+                            "leadership_state": "core",
+                            "state_label": "核心",
+                            "cycle_state": "main_up",
+                            "cycle_label": "主升阶段",
+                            "leadership_score": 78.0,
+                            "confidence": 0.9,
+                        },
+                    },
+                    "leadership": [],
+                    "forecasts": [],
+                }
+            }
+        }
+
+        result = dashboard._compact_dashboard_payload(payload)
+        mainline = result["market_timing"]["scenario_forecast"]["market_mainline"]
+
+        self.assertEqual(mainline["status"], "present")
+        self.assertEqual(mainline["sector"]["sector_name"], "银行")
+        self.assertEqual(mainline["price_strengthening_count"], 4)
+
     def test_dashboard_cache_warmer_builds_compact_shared_payload(self):
         with patch.object(
             dashboard,

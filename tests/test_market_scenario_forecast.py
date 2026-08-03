@@ -9,11 +9,90 @@ from app.market_timing.scenario_forecast import (
     fit_multinomial_logistic,
     multiclass_brier,
     predict_multinomial_logistic,
+    summarize_market_mainline,
     validate_probability_model,
 )
 
 
 class MarketScenarioForecastTest(unittest.TestCase):
+    @staticmethod
+    def _leadership_row(
+        name: str,
+        *,
+        strength: str,
+        cycle: str,
+        score: float,
+        breadth_status: str = "ready",
+        confidence: float = 0.9,
+    ) -> dict:
+        return {
+            "sector_type": "theme",
+            "sector_name": name,
+            "leadership_state": strength,
+            "state_label": strength,
+            "cycle_state": cycle,
+            "cycle_label": cycle,
+            "leadership_score": score,
+            "confidence": confidence,
+            "price_evidence_status": "ready",
+            "breadth_metrics": {"status": breadth_status},
+        }
+
+    def test_market_mainline_is_single_and_fail_closed(self) -> None:
+        rows = [
+            self._leadership_row(
+                "热度观察板块",
+                strength="watch",
+                cycle="first_impulse",
+                score=95,
+            ),
+            self._leadership_row(
+                "证据缺失板块",
+                strength="core",
+                cycle="main_up",
+                score=90,
+                breadth_status="insufficient_coverage",
+            ),
+            self._leadership_row(
+                "第二候选",
+                strength="confirmed",
+                cycle="first_impulse",
+                score=72,
+            ),
+            self._leadership_row(
+                "唯一市场主线",
+                strength="core",
+                cycle="main_up",
+                score=78,
+            ),
+        ]
+
+        result = summarize_market_mainline(rows)
+
+        self.assertEqual(result["status"], "present")
+        self.assertEqual(result["sector"]["sector_name"], "唯一市场主线")
+        self.assertEqual(result["fully_qualified_count"], 2)
+        self.assertEqual(result["strength_qualified_count"], 3)
+        self.assertEqual(result["price_strengthening_count"], 4)
+        self.assertEqual(result["selection_policy"], "single_primary_or_none")
+
+    def test_market_mainline_allows_explicit_empty_state(self) -> None:
+        result = summarize_market_mainline(
+            [
+                self._leadership_row(
+                    "仅价格启动",
+                    strength="watch",
+                    cycle="first_impulse",
+                    score=88,
+                )
+            ]
+        )
+
+        self.assertEqual(result["status"], "none")
+        self.assertIsNone(result["sector"])
+        self.assertEqual(result["label"], "暂无已确认市场主线")
+        self.assertEqual(result["price_strengthening_count"], 1)
+
     def test_volatility_standardized_scenario_labels(self) -> None:
         self.assertEqual(classify_scenario(1.01, 2.0), "up")
         self.assertEqual(classify_scenario(-1.01, 2.0), "down")

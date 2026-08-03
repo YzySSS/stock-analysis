@@ -261,6 +261,37 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
         )
         for item in (scenario_source.get("leadership") or [])[:16]
     ]
+    mainline_source = scenario_source.get("market_mainline") or {}
+    if mainline_source:
+        market_mainline = _project(
+            mainline_source,
+            (
+                "status",
+                "label",
+                "selection_policy",
+                "qualification_note",
+                "strength_qualified_count",
+                "fully_qualified_count",
+                "price_strengthening_count",
+                "price_strengthening_names",
+            ),
+        )
+        market_mainline["sector"] = _project(
+            mainline_source.get("sector"),
+            (
+                "sector_type",
+                "sector_name",
+                "leadership_state",
+                "state_label",
+                "cycle_state",
+                "cycle_label",
+                "leadership_score",
+                "confidence",
+            ),
+        ) if mainline_source.get("sector") else None
+        scenario_forecast["market_mainline"] = market_mainline
+    else:
+        scenario_forecast["market_mainline"] = None
     market_timing["scenario_forecast"] = scenario_forecast or None
 
     hot_themes_source = payload.get("hot_themes") or {}

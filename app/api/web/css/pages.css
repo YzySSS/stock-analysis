@@ -7760,6 +7760,17 @@ body[data-page="home"] .home-leadership-card.crowded {
   border-left-color: #f59e0b;
 }
 
+body[data-page="home"] .home-leadership-card.market-mainline {
+  border-color: rgba(34, 197, 94, 0.42);
+  border-left-color: #22c55e;
+  background: linear-gradient(145deg, rgba(20, 83, 45, 0.18), rgba(3, 12, 24, 0.48));
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.08);
+}
+
+body[data-page="home"] .home-leadership-card.market-mainline > div span {
+  color: #86efac;
+}
+
 body[data-page="home"] .home-leadership-card.fading,
 body[data-page="home"] .home-leadership-card.decay {
   border-left-color: #64748b;
