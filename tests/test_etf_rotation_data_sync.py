@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
+from unittest.mock import patch
 
-from app.etf_rotation.data_sync import merge_fund_rows
+from app.etf_rotation.data_sync import merge_fund_rows, sync_etf_rotation_data
 
 
 class EtfRotationDataSyncTests(unittest.TestCase):
@@ -66,6 +68,79 @@ class EtfRotationDataSyncTests(unittest.TestCase):
 
         self.assertIsNone(rows[0]["nav_date"])
         self.assertIsNone(rows[0]["premium_discount_pct"])
+
+    @patch("app.etf_rotation.data_sync._save_rows")
+    @patch("app.etf_rotation.data_sync._fetch_fund_rows")
+    @patch("app.etf_rotation.data_sync._fetch_sector_rows")
+    @patch("app.etf_rotation.data_sync._fetch_trade_calendar")
+    def test_sync_is_partial_when_open_day_sector_data_is_late(
+        self,
+        fetch_calendar,
+        fetch_sector,
+        fetch_fund,
+        save_rows,
+    ) -> None:
+        fetch_calendar.return_value = [
+            {"cal_date": "2026-08-05", "is_open": 1}
+        ]
+        fetch_sector.return_value = [
+            {"trade_date": "2026-08-04", "industry_name": "半导体"}
+        ]
+        fetch_fund.return_value = [{"trade_date": "2026-08-05"}]
+        save_rows.return_value = {
+            "calendar_rows": 1,
+            "calendar_affected": 1,
+            "sector_rows": 1,
+            "sector_affected": 0,
+            "fund_rows": 1,
+            "fund_affected": 1,
+        }
+
+        result = sync_etf_rotation_data(
+            pro=object(),
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 5),
+        )
+
+        self.assertEqual("partial_success", result["status"])
+        self.assertEqual("2026-08-04", result["sector_latest_trade_date"])
+        self.assertFalse(result["sector_target_aligned"])
+
+    @patch("app.etf_rotation.data_sync._save_rows")
+    @patch("app.etf_rotation.data_sync._fetch_fund_rows")
+    @patch("app.etf_rotation.data_sync._fetch_sector_rows")
+    @patch("app.etf_rotation.data_sync._fetch_trade_calendar")
+    def test_sync_succeeds_when_sector_data_matches_target(
+        self,
+        fetch_calendar,
+        fetch_sector,
+        fetch_fund,
+        save_rows,
+    ) -> None:
+        fetch_calendar.return_value = [
+            {"cal_date": "2026-08-05", "is_open": 1}
+        ]
+        fetch_sector.return_value = [
+            {"trade_date": "2026-08-05", "industry_name": "半导体"}
+        ]
+        fetch_fund.return_value = [{"trade_date": "2026-08-05"}]
+        save_rows.return_value = {
+            "calendar_rows": 1,
+            "calendar_affected": 1,
+            "sector_rows": 1,
+            "sector_affected": 1,
+            "fund_rows": 1,
+            "fund_affected": 1,
+        }
+
+        result = sync_etf_rotation_data(
+            pro=object(),
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 5),
+        )
+
+        self.assertEqual("success", result["status"])
+        self.assertTrue(result["sector_target_aligned"])
 
 
 if __name__ == "__main__":

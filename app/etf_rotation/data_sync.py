@@ -408,11 +408,32 @@ def sync_etf_rotation_data(
     sector_rows = _fetch_sector_rows(pro, start_date, end_date)
     fund_rows = _fetch_fund_rows(pro, start_date, end_date, spec)
     result = _save_rows(calendar_rows, sector_rows, fund_rows)
+    end_date_text = end_date.isoformat()
+    target_is_open = any(
+        str(row.get("cal_date") or "")[:10] == end_date_text
+        and int(row.get("is_open") or 0) == 1
+        for row in calendar_rows
+    )
+    sector_latest_trade_date = max(
+        (str(row.get("trade_date") or "")[:10] for row in sector_rows),
+        default=None,
+    )
+    sector_target_aligned = (
+        not target_is_open or sector_latest_trade_date == end_date_text
+    )
     return {
-        "status": "success",
+        "status": "success" if sector_target_aligned else "partial_success",
         "model_id": spec["model_id"],
         "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat(),
+        "end_date": end_date_text,
         "etf_count": len(spec["sectors"]),
+        "target_is_open": target_is_open,
+        "sector_latest_trade_date": sector_latest_trade_date,
+        "sector_target_aligned": sector_target_aligned,
+        "partial_reason": (
+            None
+            if sector_target_aligned
+            else "provider sector data has not published the target trade date"
+        ),
         **result,
     }

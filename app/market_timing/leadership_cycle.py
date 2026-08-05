@@ -452,10 +452,51 @@ def compute_breadth_metrics(
 
 
 class LeadershipCycleBuilder:
+    model_id = MODEL_ID
+    model_version = MODEL_VERSION
+
     def __init__(self, *, read_connection_factory=None) -> None:
         self._read_connection_factory = read_connection_factory or mysql_read_conn
-        self.spec = load_leadership_cycle_spec()
-        self.spec_hash = leadership_cycle_spec_hash()
+        self.spec = self._load_spec()
+        self.spec_hash = self._spec_hash()
+
+    def _load_spec(self) -> dict[str, Any]:
+        return load_leadership_cycle_spec()
+
+    def _spec_hash(self) -> str:
+        return leadership_cycle_spec_hash()
+
+    def _classify_cycle(
+        self,
+        price_metrics: Mapping[str, Any],
+        breadth: Mapping[str, Any],
+        *,
+        through: date,
+        technical_date: Any,
+    ) -> dict[str, Any]:
+        del breadth, through, technical_date
+        return classify_cycle(price_metrics)
+
+    def _price_evidence_status(
+        self,
+        price_metrics: Mapping[str, Any],
+        *,
+        through: date,
+        technical_date: Any,
+    ) -> str:
+        del through, technical_date
+        return str(price_metrics.get("status") or "missing")
+
+    def _extra_data_quality(
+        self,
+        price_metrics: Mapping[str, Any],
+        breadth: Mapping[str, Any],
+        *,
+        through: date,
+        technical_date: Any,
+    ) -> dict[str, Any]:
+        del price_metrics, breadth, through, technical_date
+        return {}
 
     def _mapping(
         self,
@@ -606,14 +647,24 @@ class LeadershipCycleBuilder:
                 price_series,
                 minimum_days=int(self.spec["minimum_price_history_days"]),
             )
-            cycle = classify_cycle(price_metrics)
-            price_score = price_structure_score(price_metrics)
             breadth = compute_breadth_metrics(
                 technical_rows,
                 stock_industries,
                 minimum_members=int(self.spec["minimum_breadth_members"]),
                 minimum_coverage=float(self.spec["minimum_breadth_coverage"]),
             )
+            cycle = self._classify_cycle(
+                price_metrics,
+                breadth,
+                through=through,
+                technical_date=technical_date,
+            )
+            price_evidence_status = self._price_evidence_status(
+                price_metrics,
+                through=through,
+                technical_date=technical_date,
+            )
+            price_score = price_structure_score(price_metrics)
 
             heat_score = _clip(current_score)
             capital_score = (
@@ -712,8 +763,10 @@ class LeadershipCycleBuilder:
                 contradictions.append("行业价格仍在MA60下方")
             if cycle["cycle_state"] in {
                 "rebound_candidate",
+                "oversold_rebound",
                 "secondary_decline_risk",
                 "downtrend",
+                "stale_data",
             }:
                 contradictions.append(cycle["cycle_label"])
 
@@ -739,13 +792,13 @@ class LeadershipCycleBuilder:
                 min(0.30, source_count * 0.05)
                 + min(0.15, len(history) / 5 * 0.15)
                 + (0.15 if net_amount is not None else 0)
-                + (0.20 if price_metrics.get("status") == "ready" else 0)
+                + (0.20 if price_evidence_status == "ready" else 0)
                 + (0.20 if breadth.get("status") == "ready" else 0)
             )
             as_of = row.get("as_of_datetime")
             payload = {
-                "model_id": MODEL_ID,
-                "version": MODEL_VERSION,
+                "model_id": self.model_id,
+                "version": self.model_version,
                 "spec_hash": self.spec_hash,
                 "trade_date": str(through),
                 "as_of": str(as_of),
@@ -764,7 +817,7 @@ class LeadershipCycleBuilder:
                 "persistence_score": round(persistence_score, 2),
                 "crowding_score": round(crowding_score, 2),
                 "price_score": round(price_score, 2),
-                "price_evidence_status": price_metrics.get("status"),
+                "price_evidence_status": price_evidence_status,
                 "price_metrics": price_metrics,
                 "breadth_metrics": breadth,
                 "evidence": evidence,
@@ -797,6 +850,12 @@ class LeadershipCycleBuilder:
                     "news_coverage_stock_count": stock_count,
                     "news_coverage_not_used_as_breadth": True,
                     "wave_labels_are_hypotheses": True,
+                    **self._extra_data_quality(
+                        price_metrics,
+                        breadth,
+                        through=through,
+                        technical_date=technical_date,
+                    ),
                 },
                 "research_only": True,
             }

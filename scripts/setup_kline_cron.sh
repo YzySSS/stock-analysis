@@ -36,8 +36,8 @@ MARKET_TIMING_JOB="40 3 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTH
 35 15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_timing_daily_update.py >> $LOG_DIR/market_timing_daily_update.log 2>&1"
 MARKET_TIMING_V20_JOB="42 3 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_timing_v20.py >> $LOG_DIR/market_timing_v20_shadow_update.log 2>&1
 42 15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_timing_v20.py >> $LOG_DIR/market_timing_v20_shadow_update.log 2>&1"
-MARKET_SCENARIO_JOB="47 3 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_scenario_forecast.py >> $LOG_DIR/market_scenario_forecast_shadow_update.log 2>&1
-47 15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_scenario_forecast.py >> $LOG_DIR/market_scenario_forecast_shadow_update.log 2>&1"
+MARKET_SCENARIO_JOB="10 6 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_scenario_forecast.py >> $LOG_DIR/market_scenario_forecast_shadow_update.log 2>&1
+50 18 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_market_scenario_forecast.py >> $LOG_DIR/market_scenario_forecast_shadow_update.log 2>&1"
 SENTIMENT_JOB="50 3 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_sentiment_daily_update.py --limit 80 >> $LOG_DIR/stock_sentiment_daily_update.log 2>&1"
 STOCK_STATUS_PIT_JOB="35 4 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_stock_status_pit_backfill.py --stages lifecycle,names,suspensions,market-data --suspension-recent-trade-days 10 --pending-market-only --pause-seconds 0.05 >> $LOG_DIR/stock_status_pit_backfill.log 2>&1
 35 18 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_stock_status_pit_backfill.py --stages suspensions --suspension-recent-trade-days 3 --pause-seconds 0 >> $LOG_DIR/stock_status_pit_backfill.log 2>&1"
@@ -64,7 +64,8 @@ FORWARD_OUTCOME_JOB="10 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PY
 STRATEGY_FACTOR_EVALUATION_JOB="20 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_strategy_factor_evaluation_v2.py --strategy-id a_share_sentiment >> $LOG_DIR/strategy_factor_evaluation_v2.log 2>&1
 30 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_strategy_factor_evaluation_v2.py --strategy-id a_share_sentiment_v05 >> $LOG_DIR/strategy_factor_evaluation_v2.log 2>&1"
 ETF_ROTATION_DATA_JOB="40 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_data_sync.py >> $LOG_DIR/etf_rotation_data_sync.log 2>&1
-20 16 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_data_sync.py >> $LOG_DIR/etf_rotation_data_sync.log 2>&1"
+20 16 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_data_sync.py >> $LOG_DIR/etf_rotation_data_sync.log 2>&1
+20 18 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_data_sync.py >> $LOG_DIR/etf_rotation_data_sync.log 2>&1"
 ETF_ROTATION_SIGNAL_JOB="55 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_signal.py >> $LOG_DIR/etf_rotation_signal.log 2>&1
 35 16 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_signal.py >> $LOG_DIR/etf_rotation_signal.log 2>&1"
 ETF_ROTATION_OUTCOME_JOB="5 6 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_etf_rotation_outcomes.py >> $LOG_DIR/etf_rotation_outcomes.log 2>&1"

@@ -1,0 +1,31 @@
+{
+  "model_id": "market_leadership_cycle_v3",
+  "model_name": "主线强度与周期位置 V3",
+  "version": "3.0.0",
+  "status": "research_only",
+  "base_model_id": "market_leadership_cycle_v2",
+  "base_spec_hash": "80d11f297cc6012e2756e788c0ce9a1afd9c46d7f995fa296171e6f251f65786",
+  "cycle_thresholds": {
+    "completed_impulse_min_runup_pct": 20.0,
+    "completed_impulse_max_drawdown_pct": -15.0,
+    "rebound_observation_min_pct": 3.0,
+    "secondary_decline_max_return_5d_pct": -4.0,
+    "b_wave_min_rebound_pct": 8.0,
+    "b_wave_min_return_5d_pct": 2.0,
+    "b_wave_min_distance_ma20_pct": -5.0,
+    "b_wave_min_ma20_slope_5_pct": 0.0,
+    "b_wave_min_days_since_low": 3,
+    "b_wave_min_breadth_score": 40.0,
+    "b_wave_min_above_ma20_pct": 25.0
+  },
+  "guardrails": [
+    "Strength and price-cycle position remain separate axes.",
+    "A B-wave candidate requires sustained price repair and real constituent breadth; a one-day rebound is only an oversold rebound.",
+    "Price and technical evidence must match the requested trade date or the cycle fails closed as stale data.",
+    "News-covered stock count is never used as market breadth.",
+    "Price cycles use THS industry indices or explicit equal-weight industry proxies, never raw ETF closes.",
+    "B-wave and C-wave labels are measurable hypotheses, never deterministic Elliott-wave claims.",
+    "V2 daily snapshots are immutable and are never rewritten by V3.",
+    "The model is research-only and never places orders or changes selection scores."
+  ]
+}

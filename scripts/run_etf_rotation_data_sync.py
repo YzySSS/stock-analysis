@@ -78,7 +78,7 @@ def main() -> int:
             end_date=end_date,
         )
         result["run_id"] = run_id
-        logger.finish(TASK_NAME, run_id, "success", None, result)
+        logger.finish(TASK_NAME, run_id, result["status"], None, result)
         print(json.dumps(result, ensure_ascii=False, default=str))
         return 0
     except Exception as exc:

@@ -7838,6 +7838,12 @@ body[data-page="home"] .home-leadership-cycle.rebound_candidate {
   background: rgba(56, 189, 248, 0.10);
 }
 
+body[data-page="home"] .home-leadership-cycle.oversold_rebound {
+  border-color: rgba(245, 158, 11, 0.34);
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.10);
+}
+
 body[data-page="home"] .home-leadership-cycle.secondary_decline_risk,
 body[data-page="home"] .home-leadership-cycle.downtrend {
   border-color: rgba(248, 113, 113, 0.34);

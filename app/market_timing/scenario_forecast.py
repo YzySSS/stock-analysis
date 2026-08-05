@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.market_timing.leadership_cycle import (
+from app.market_timing.leadership_cycle_v3 import (
     MODEL_ID as LEADERSHIP_MODEL_ID,
     LeadershipCycleBuilder,
 )

@@ -394,9 +394,11 @@ function renderScenarioForecast(scenario) {
     'late_acceleration',
     'pullback',
     'rebound_candidate',
+    'oversold_rebound',
     'secondary_decline_risk',
     'downtrend',
     'range',
+    'stale_data',
     'insufficient_data',
   ].includes(state) ? state : 'insufficient_data';
   const cycleDisplayLabel = (item) => ({
@@ -406,10 +408,12 @@ function renderScenarioForecast(scenario) {
     main_up: '主升阶段',
     late_acceleration: '加速末段',
     pullback: '主升回踩',
-    rebound_candidate: '反弹修复·B浪候选',
+    rebound_candidate: '持续修复·B浪候选',
+    oversold_rebound: '超跌反弹·趋势未确认',
     secondary_decline_risk: '二次下探·C浪风险',
     downtrend: '下降趋势',
     range: '震荡整理',
+    stale_data: '数据待对齐',
   }[item.cycle_state] || item.cycle_label || '待补证');
   const constructiveCycles = new Set(['first_impulse', 'main_up', 'late_acceleration', 'pullback']);
   const mainlineStates = new Set(['confirmed', 'core', 'crowded']);
