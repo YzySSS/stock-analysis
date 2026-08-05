@@ -847,6 +847,11 @@ class MarketScenarioForecastRepository:
             horizon_values,
         )
         leadership = self._leadership_rows(trade_date)
+        stale_leadership_count = sum(
+            row.get("price_evidence_status") == "stale_data"
+            for row in leadership
+        )
+        leadership_to_store = [] if stale_leadership_count else leadership
         new_forecasts: list[dict[str, Any]] = []
         forecasts: list[dict[str, Any]] = []
         for horizon in horizon_values:
@@ -860,7 +865,7 @@ class MarketScenarioForecastRepository:
             new_forecasts.append(created)
         with self._connection_factory(dict_cursor=False) as conn:
             with conn.cursor() as cursor:
-                for row in leadership:
+                for row in leadership_to_store:
                     cursor.execute(
                         """
                         INSERT INTO market_leadership_state_daily (
@@ -1009,12 +1014,19 @@ class MarketScenarioForecastRepository:
                         ),
                     )
         return {
-            "status": "success",
+            "status": (
+                "partial_success" if stale_leadership_count else "success"
+            ),
             "trade_date": str(trade_date),
             "forecast_count": len(forecasts),
             "created_forecast_count": len(new_forecasts),
             "reused_forecast_count": len(existing_forecasts),
-            "leadership_count": len(leadership),
+            "leadership_count": len(leadership_to_store),
+            "leadership_built_count": len(leadership),
+            "leadership_stale_count": stale_leadership_count,
+            "leadership_deferred_count": (
+                len(leadership) if stale_leadership_count else 0
+            ),
             "forecasts": forecasts,
             "leadership": leadership,
         }

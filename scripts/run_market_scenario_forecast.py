@@ -51,7 +51,7 @@ def run(
     outcomes = repository.refresh_outcomes(limit=outcome_limit)
     materialized = repository.materialize(trade_date, horizons=horizons)
     return {
-        "status": "success",
+        "status": materialized["status"],
         "outcomes": outcomes,
         "materialized": {
             "trade_date": materialized["trade_date"],
@@ -63,6 +63,15 @@ def run(
                 "reused_forecast_count"
             ],
             "leadership_count": materialized["leadership_count"],
+            "leadership_built_count": materialized[
+                "leadership_built_count"
+            ],
+            "leadership_stale_count": materialized[
+                "leadership_stale_count"
+            ],
+            "leadership_deferred_count": materialized[
+                "leadership_deferred_count"
+            ],
             "validation": [
                 {
                     "horizon_days": item["horizon_days"],
@@ -115,7 +124,7 @@ def main() -> int:
             "reason": "another scenario forecast run owns the lock",
             "run_id": run_id,
         }
-        logger.finish(TASK_NAME, run_id, "success", None, result)
+        logger.finish(TASK_NAME, run_id, result["status"], None, result)
         print(json.dumps(result, ensure_ascii=False, default=str))
         return 0
     try:

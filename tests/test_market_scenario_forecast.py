@@ -162,5 +162,43 @@ class MarketScenarioForecastTest(unittest.TestCase):
         self.assertEqual(result["reused_forecast_count"], 1)
         self.assertEqual(result["forecasts"], [stored])
 
+    def test_materialize_defers_stale_leadership_until_sources_align(self) -> None:
+        write_factory = MagicMock()
+        repository = MarketScenarioForecastRepository(
+            connection_factory=write_factory,
+        )
+        stored = {
+            "forecast_id": "msfv1_20260805_000300SH_h1",
+            "horizon_days": 1,
+            "validation_status": "insufficient_evidence",
+            "probability_display_allowed": False,
+            "materialization_status": "reused",
+        }
+        repository._existing_forecasts = MagicMock(  # type: ignore[method-assign]
+            return_value={1: stored}
+        )
+        repository._leadership_rows = MagicMock(  # type: ignore[method-assign]
+            return_value=[
+                {
+                    "sector_name": "半导体",
+                    "price_evidence_status": "stale_data",
+                }
+            ]
+        )
+        repository.build_forecast = MagicMock()  # type: ignore[method-assign]
+
+        result = repository.materialize("2026-08-05", horizons=(1,))
+
+        cursor = (
+            write_factory.return_value.__enter__.return_value
+            .cursor.return_value.__enter__.return_value
+        )
+        cursor.execute.assert_not_called()
+        self.assertEqual("partial_success", result["status"])
+        self.assertEqual(0, result["leadership_count"])
+        self.assertEqual(1, result["leadership_built_count"])
+        self.assertEqual(1, result["leadership_stale_count"])
+        self.assertEqual(1, result["leadership_deferred_count"])
+
 if __name__ == "__main__":
     unittest.main()
