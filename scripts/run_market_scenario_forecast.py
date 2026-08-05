@@ -124,7 +124,7 @@ def main() -> int:
             "reason": "another scenario forecast run owns the lock",
             "run_id": run_id,
         }
-        logger.finish(TASK_NAME, run_id, result["status"], None, result)
+        logger.finish(TASK_NAME, run_id, "success", None, result)
         print(json.dumps(result, ensure_ascii=False, default=str))
         return 0
     try:
@@ -134,7 +134,7 @@ def main() -> int:
             outcome_limit=max(1, args.outcome_limit),
         )
         result["run_id"] = run_id
-        logger.finish(TASK_NAME, run_id, "success", None, result)
+        logger.finish(TASK_NAME, run_id, result["status"], None, result)
         print(json.dumps(result, ensure_ascii=False, default=str))
         return 0
     except Exception as exc:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.market_timing.scenario_forecast import (
     MarketScenarioForecastRepository,
@@ -12,6 +13,7 @@ from app.market_timing.scenario_forecast import (
     summarize_market_mainline,
     validate_probability_model,
 )
+from scripts import run_market_scenario_forecast as scenario_script
 
 
 class MarketScenarioForecastTest(unittest.TestCase):
@@ -199,6 +201,35 @@ class MarketScenarioForecastTest(unittest.TestCase):
         self.assertEqual(1, result["leadership_built_count"])
         self.assertEqual(1, result["leadership_stale_count"])
         self.assertEqual(1, result["leadership_deferred_count"])
+
+    @patch("scripts.run_market_scenario_forecast.release_mysql_advisory_lock")
+    @patch(
+        "scripts.run_market_scenario_forecast.acquire_mysql_advisory_lock",
+        return_value=object(),
+    )
+    @patch("scripts.run_market_scenario_forecast.TaskRunLogger")
+    @patch(
+        "scripts.run_market_scenario_forecast.run",
+        return_value={"status": "partial_success"},
+    )
+    def test_script_persists_partial_success_status(
+        self,
+        run_mock,
+        logger_class,
+        acquire_lock,
+        release_lock,
+    ) -> None:
+        del run_mock, acquire_lock, release_lock
+        with patch.object(
+            sys,
+            "argv",
+            ["run_market_scenario_forecast.py", "--trade-date", "2026-08-05"],
+        ), patch("builtins.print"):
+            exit_code = scenario_script.main()
+
+        self.assertEqual(0, exit_code)
+        finish_call = logger_class.return_value.finish.call_args
+        self.assertEqual("partial_success", finish_call.args[2])
 
 if __name__ == "__main__":
     unittest.main()
