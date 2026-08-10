@@ -38,14 +38,20 @@ strategies:
     description: 冻结的 A 股舆情 0.4.4 基线，继续用于现有前瞻观察、兼容执行和 v0.5 影子对照
 
   - id: a_share_sentiment_v05
-    display_name: A股舆情选股 v0.5
+    display_name: A股舆情选股 v0.5.1
     entrypoint: app.strategies.active.a_share_sentiment_strategy.AShareSentimentV05Strategy
     config_path: app/strategies/registry/configs/a_share_sentiment_v05.yaml
-    version: 0.5.0
-    immutable_tag: a-share-sentiment-v0.5.0
+    version: 0.5.1
+    immutable_tag: a-share-sentiment-v0.5.1
     status: experimental
     mode: shadow_only
     executable: true
+    supersedes:
+      version: 0.5.0
+      immutable_tag: a-share-sentiment-v0.5.0
+      evidence_status: contaminated_retained
+      issue_code: mixed_clock_fund_confirmation
+      evidence_note: 0.5.0 在实时资金净额缺失时混用了完整交易日净额与 09:25 成交额；历史协议、快照和收益全部保留但不得用于 0.5.1 有效性判断
     capability:
       supported_instrument_types: [stock]
       required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily, stock_chip_daily, sector_opinion_daily]
@@ -54,11 +60,12 @@ strategies:
       runtime_status: enabled
       backtest_status: disabled
       validation_status: shadow_only
-      evidence_status: prospective_observation
-      evidence_note: 0.5.0 已开放手动实验执行；用户主动保存后按策略版本进入手动 14 天统计，自动观察仍单独保存且不写 selection_result
+      evidence_status: prospective_observation_reset
+      evidence_note: 0.5.1 只修复资金分子分母时钟一致性，不改权重和阈值；从 2026-08-11 重新开始 30 个交易日配对观察，仍为未验证影子策略
     tags: [sentiment, direct-catalyst, theme-leader, deterministic, shadow-only, experimental, manual-selectable]
-    description: 可手动选择的实验性双轨舆情策略；市场状态只作硬门，AI仅生成带证据的有界建议且不改变正式得分
+    description: 可手动选择的实验性双轨舆情策略；0.5.1 修复资金时钟混用，市场状态只作硬门，AI仅生成带证据的有界建议且不改变正式得分
     automatic_observation:
       enabled: true
-      start_on: "2026-07-24"
+      start_on: "2026-08-11"
+      target_trade_days: 30
       engine: sentiment_snapshot_pair

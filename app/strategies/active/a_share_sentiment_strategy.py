@@ -1264,11 +1264,38 @@ class AShareSentimentV05Strategy(BaseSelectionStrategy):
             relation_recognition = _clamp(recognition * 0.65 + direction_score * 0.35 + popularity_bonus)
 
             amount = _to_float(item.get("amount"), 0.0) or 0.0
-            realtime_amount = _to_float(item.get("realtime_mf_amount"), None) or _to_float(item.get("realtime_amount"), None) or amount
+            realtime_mf_amount = _to_float(item.get("realtime_mf_amount"), None)
+            realtime_quote_amount = _to_float(item.get("realtime_amount"), None)
             realtime_net = _to_float(item.get("realtime_mf_net"), None)
             daily_net = (_to_float(item.get("net_mf_amount"), 0.0) or 0.0) * 10_000
-            net_amount = realtime_net if realtime_net is not None else daily_net
-            net_intensity = net_amount / realtime_amount * 100 if realtime_amount > 0 else 0.0
+            realtime_flow_amount = (
+                realtime_mf_amount
+                if realtime_mf_amount is not None and realtime_mf_amount > 0
+                else realtime_quote_amount
+                if realtime_quote_amount is not None and realtime_quote_amount > 0
+                else None
+            )
+            if realtime_net is not None and realtime_flow_amount is not None:
+                net_amount = realtime_net
+                flow_amount = realtime_flow_amount
+                fund_flow_clock = "realtime"
+                fund_flow_numerator_source = "stock_realtime_moneyflow_snapshot.net_amount"
+                fund_flow_denominator_source = (
+                    "stock_realtime_moneyflow_snapshot.amount"
+                    if realtime_mf_amount is not None and realtime_mf_amount > 0
+                    else "stock_realtime_snapshot.amount"
+                )
+                fund_flow_trade_date = item.get("realtime_mf_trade_date") or item.get(
+                    "realtime_trade_date"
+                )
+            else:
+                net_amount = daily_net
+                flow_amount = amount
+                fund_flow_clock = "daily_complete"
+                fund_flow_numerator_source = "stock_moneyflow_daily.net_mf_amount"
+                fund_flow_denominator_source = "daily_kline.amount"
+                fund_flow_trade_date = item.get("trade_date")
+            net_intensity = net_amount / flow_amount * 100 if flow_amount > 0 else 0.0
             buy_large = (_to_float(item.get("buy_lg_amount"), 0.0) or 0.0) + (_to_float(item.get("buy_elg_amount"), 0.0) or 0.0)
             sell_large = (_to_float(item.get("sell_lg_amount"), 0.0) or 0.0) + (_to_float(item.get("sell_elg_amount"), 0.0) or 0.0)
             large_intensity = (buy_large - sell_large) * 10_000 / amount * 100 if amount > 0 else 0.0
@@ -1302,7 +1329,7 @@ class AShareSentimentV05Strategy(BaseSelectionStrategy):
                 {
                     **item,
                     "factors": factors,
-                    "strategy_notes": [f"v0.5 双轨候选：{lane}", "市场状态仅作交易门控，不进入本地 alpha 分"],
+                    "strategy_notes": [f"v0.5.1 双轨候选：{lane}", "市场状态仅作交易门控，不进入本地 alpha 分"],
                     "strategy_raw_metrics": {
                         **(item.get("strategy_raw_metrics") or {}),
                         **structure["raw_metrics"],
@@ -1310,6 +1337,10 @@ class AShareSentimentV05Strategy(BaseSelectionStrategy):
                         "source_score": source_score,
                         "event_timeliness_score": timeliness,
                         "net_flow_intensity_pct": round(net_intensity, 4),
+                        "fund_flow_clock": fund_flow_clock,
+                        "fund_flow_numerator_source": fund_flow_numerator_source,
+                        "fund_flow_denominator_source": fund_flow_denominator_source,
+                        "fund_flow_trade_date": fund_flow_trade_date,
                         "large_flow_intensity_pct": round(large_intensity, 4),
                         "market_regime": item.get("market_regime"),
                     },

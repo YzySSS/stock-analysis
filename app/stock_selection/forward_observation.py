@@ -10,6 +10,7 @@ from statistics import mean
 from typing import Any, Callable, Iterable
 
 from app.shared.db import mysql_conn
+from app.shared.strategy_loader import StrategyLoader, StrategyRegistryError
 from app.stock_selection.trade_plan_events import (
     TradePlanEventRepository,
     immutable_trade_plan_id,
@@ -1179,11 +1180,13 @@ class ForwardObservationService:
         self,
         repository: ForwardObservationRepository | None = None,
         trade_plan_events: TradePlanEventRepository | None = None,
+        strategy_loader: StrategyLoader | None = None,
     ) -> None:
         self.repository = repository or ForwardObservationRepository()
         self.trade_plan_events = (
             trade_plan_events or TradePlanEventRepository()
         )
+        self.strategy_loader = strategy_loader or StrategyLoader()
 
     def reconcile_open_observations(self) -> dict[str, int]:
         changed = {"success": 0, "failed": 0, "waiting": 0}
@@ -1282,6 +1285,25 @@ class ForwardObservationService:
                 "validation_status": "unvalidated",
                 "strategy_id": strategy_id,
             }
+        evidence_status = "prospective_observation"
+        evidence_note = None
+        current_strategy_version = None
+        try:
+            strategy_meta = self.strategy_loader.get_strategy_meta(strategy_id)
+        except StrategyRegistryError:
+            strategy_meta = {}
+        if strategy_meta:
+            current_strategy_version = (
+                str(strategy_meta.get("version") or "") or None
+            )
+            supersedes = dict(strategy_meta.get("supersedes") or {})
+            if str(protocol.get("strategy_version") or "") == str(
+                supersedes.get("version") or ""
+            ):
+                evidence_status = str(
+                    supersedes.get("evidence_status") or "contaminated_retained"
+                )
+                evidence_note = supersedes.get("evidence_note")
         success_observations = [row for row in observations if row.get("status") == "success"]
         candidate_count = len(picks)
         observation_days = len(success_observations)
@@ -1364,6 +1386,9 @@ class ForwardObservationService:
             "status": "preliminary_ready" if preliminary_ready else "collecting",
             "validation_status": "unvalidated",
             "strategy_id": strategy_id,
+            "current_strategy_version": current_strategy_version,
+            "evidence_status": evidence_status,
+            "evidence_note": evidence_note,
             "protocol": {
                 "protocol_id": protocol.get("protocol_id"),
                 "campaign_id": protocol.get("campaign_id"),

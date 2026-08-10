@@ -456,7 +456,7 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         rows = self.candidate_rows()
         audit = input_audit()
         audit.strategy_id = "a_share_sentiment_v05"
-        audit.strategy_version = "0.5.0"
+        audit.strategy_version = "0.5.1"
         inputs = FakeInputRepository(audit, rows)
         snapshots = FakeSnapshotRepository()
         selector = FakeSelector(
@@ -487,7 +487,7 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         rows = self.candidate_rows()
         audit = input_audit()
         audit.strategy_id = "a_share_sentiment_v05"
-        audit.strategy_version = "0.5.0"
+        audit.strategy_version = "0.5.1"
         inputs = FakeInputRepository(audit, rows)
         snapshots = FakeSnapshotRepository()
         selector = FakeSelector(
@@ -520,7 +520,7 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         )
 
         self.assertEqual(result["strategy_id"], "a_share_sentiment_v05")
-        self.assertEqual(result["strategy_version"], "0.5.0")
+        self.assertEqual(result["strategy_version"], "0.5.1")
         self.assertEqual(len(snapshots.calls), 1)
         self.assertEqual(snapshots.calls[0]["strategy_id"], "a_share_sentiment_v05")
         self.assertEqual(snapshots.calls[0]["ai_mode"], "local_core")

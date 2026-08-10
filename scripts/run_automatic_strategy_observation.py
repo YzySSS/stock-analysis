@@ -101,7 +101,7 @@ def wait_for_call_auction_snapshot(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Run mandatory five-trading-day paired strategy observations at "
+            "Run mandatory paired strategy observations at "
             "09:25 without writing manual selection_result rows"
         )
     )
@@ -198,10 +198,32 @@ def main(argv: list[str] | None = None) -> int:
     }
     try:
         logger.start(TASK_NAME, task_run_id, metadata)
+        pending_policies = service.policies_requiring_snapshot(
+            today=today,
+            policies=eligible,
+        )
+        if not pending_policies:
+            result = service.run(
+                today=today,
+                implementation_commit=deployment["head"],
+            )
+            result["call_auction_readiness"] = {
+                "ready": True,
+                "reason": "no_pending_campaigns",
+            }
+            logger.finish(
+                TASK_NAME,
+                task_run_id,
+                "success",
+                "automatic observation campaigns already complete or deduplicated",
+                result,
+            )
+            print(json.dumps(result, ensure_ascii=False, default=str))
+            return 0
         readiness = wait_for_call_auction_snapshot(
             service,
             today=today,
-            policies=eligible,
+            policies=pending_policies,
             wait_seconds=args.wait_seconds,
             poll_seconds=args.poll_seconds,
         )

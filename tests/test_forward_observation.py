@@ -527,6 +527,40 @@ class ForwardEvidenceTests(unittest.TestCase):
         self.assertEqual(summary["status"], "not_configured")
         self.assertEqual(summary["validation_status"], "unvalidated")
 
+    def test_superseded_protocol_is_retained_but_marked_contaminated(self):
+        repository = MagicMock()
+        repository.evidence_rows.return_value = (
+            {
+                "protocol_id": "v050-protocol",
+                "strategy_version": "0.5.0",
+                "minimum_observation_days": 5,
+                "minimum_candidate_count": 15,
+            },
+            [],
+            [],
+            [],
+        )
+        loader = MagicMock()
+        loader.get_strategy_meta.return_value = {
+            "id": "a_share_sentiment_v05",
+            "version": "0.5.1",
+            "supersedes": {
+                "version": "0.5.0",
+                "evidence_status": "contaminated_retained",
+                "evidence_note": "mixed-clock fund confirmation",
+            },
+        }
+
+        summary = ForwardObservationService(
+            repository=repository,
+            strategy_loader=loader,
+        ).evidence_summary("a_share_sentiment_v05")
+
+        self.assertEqual(summary["current_strategy_version"], "0.5.1")
+        self.assertEqual(summary["protocol"]["strategy_version"], "0.5.0")
+        self.assertEqual(summary["evidence_status"], "contaminated_retained")
+        self.assertEqual(summary["evidence_note"], "mixed-clock fund confirmation")
+
 
 if __name__ == "__main__":
     unittest.main()

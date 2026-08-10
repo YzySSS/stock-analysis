@@ -181,9 +181,14 @@ def discover_automatic_observation_policies(
             or defaults.get("execution_time")
             or "09:25:00"
         )
-        if target_trade_days != 5 or execution_time != "09:25:00":
+        minimum_target_trade_days = int(defaults.get("target_trade_days") or 5)
+        if (
+            target_trade_days < minimum_target_trade_days
+            or execution_time != "09:25:00"
+        ):
             raise ValueError(
-                f"strategy {strategy_id} must use the standard 5-day 09:25 observation policy"
+                f"strategy {strategy_id} must use at least the standard "
+                f"{minimum_target_trade_days}-day 09:25 observation policy"
             )
         entry_rule = str(
             override.get("entry_rule")
@@ -454,6 +459,20 @@ class AutomaticObservationCampaignRepository:
                 )
                 return cursor.fetchone() or {}
 
+    def campaign_state(self, campaign_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT campaign_id, status, completed_trade_days,
+                           target_trade_days, last_signal_trade_date
+                    FROM strategy_observation_campaign
+                    WHERE campaign_id=%s
+                    """,
+                    (campaign_id,),
+                )
+                return cursor.fetchone() or {}
+
 
 class AutomaticObservationCampaignService:
     def __init__(
@@ -498,6 +517,27 @@ class AutomaticObservationCampaignService:
             execution_time=execution_times.pop(),
             minimum_coverage=minimum,
         )
+
+    def policies_requiring_snapshot(
+        self,
+        *,
+        today: date,
+        policies: list[AutomaticObservationPolicy],
+    ) -> list[AutomaticObservationPolicy]:
+        pending: list[AutomaticObservationPolicy] = []
+        for policy in policies:
+            if today < policy.start_on:
+                continue
+            campaign = self.campaigns.campaign_state(policy.campaign_id)
+            if str(campaign.get("status") or "") == "completed":
+                continue
+            if (
+                str(campaign.get("last_signal_trade_date") or "")[:10]
+                == today.isoformat()
+            ):
+                continue
+            pending.append(policy)
+        return pending
 
     def run(
         self,
@@ -727,8 +767,8 @@ class AutomaticObservationCampaignService:
                         "20d": "twentieth_trading_day_close_including_entry_day",
                     },
                     "sample_policy": (
-                        "retain_exactly_five_successful_paired_trade_days_"
-                        "including_zero_pick_days"
+                        f"retain_exactly_{policy.target_trade_days}_successful_"
+                        "paired_trade_days_including_zero_pick_days"
                     ),
                     "manual_separation": (
                         "never_write_selection_result_or_manual_14_day_statistics"

@@ -15,15 +15,16 @@ from app.stock_selection.automatic_observation import (
     discover_automatic_observation_policies,
 )
 from scripts.run_automatic_strategy_observation import (
+    main as run_observation_main,
     verify_deployed_strategy_tags,
 )
 
 
 class AutomaticObservationPolicyTests(unittest.TestCase):
-    def test_registry_enrolls_v05_in_mandatory_five_day_opening_observation(self):
+    def test_registry_enrolls_v051_in_thirty_day_opening_observation(self):
         policies = discover_automatic_observation_policies(
             StrategyLoader(),
-            today=date(2026, 7, 23),
+            today=date(2026, 8, 10),
         )
 
         self.assertEqual(len(policies), 1)
@@ -31,9 +32,9 @@ class AutomaticObservationPolicyTests(unittest.TestCase):
         self.assertEqual(policy.baseline_strategy_id, "a_share_sentiment")
         self.assertEqual(policy.baseline_strategy_version, "0.4.4")
         self.assertEqual(policy.candidate_strategy_id, "a_share_sentiment_v05")
-        self.assertEqual(policy.candidate_strategy_version, "0.5.0")
-        self.assertEqual(policy.start_on, date(2026, 7, 24))
-        self.assertEqual(policy.target_trade_days, 5)
+        self.assertEqual(policy.candidate_strategy_version, "0.5.1")
+        self.assertEqual(policy.start_on, date(2026, 8, 11))
+        self.assertEqual(policy.target_trade_days, 30)
         self.assertEqual(policy.execution_time, "09:25:00")
         self.assertEqual(policy.entry_rule, "same_day_open")
         self.assertEqual(policy.max_picks, 3)
@@ -79,6 +80,42 @@ class AutomaticObservationPolicyTests(unittest.TestCase):
             _time_text(timedelta(hours=9, minutes=25)),
             "09:25:00",
         )
+
+    def test_shadow_strategy_cannot_shorten_standard_observation(self):
+        loader = MagicMock()
+        loader.registry = {
+            "automatic_observation_defaults": {
+                "enabled": True,
+                "mode": "paired_first_n_trade_days",
+                "baseline_strategy_id": "baseline",
+                "target_trade_days": 5,
+                "execution_time": "09:25:00",
+                "entry_rule": "same_day_open",
+                "engine": "sentiment_snapshot_pair",
+            },
+            "strategies": [
+                {
+                    "id": "baseline",
+                    "version": "1.0.0",
+                    "immutable_tag": "baseline-v1",
+                    "mode": "frozen_baseline",
+                },
+                {
+                    "id": "new_strategy",
+                    "version": "0.1.0",
+                    "immutable_tag": "new-strategy-v0.1.0",
+                    "mode": "shadow_only",
+                    "automatic_observation": {"target_trade_days": 4},
+                },
+            ],
+        }
+        loader.get_strategy_meta.return_value = loader.registry["strategies"][0]
+
+        with self.assertRaisesRegex(ValueError, "at least the standard 5-day"):
+            discover_automatic_observation_policies(
+                loader,
+                today=date(2026, 8, 10),
+            )
 
 
 class AutomaticObservationServiceTests(unittest.TestCase):
@@ -163,7 +200,7 @@ class AutomaticObservationServiceTests(unittest.TestCase):
 
         result = service._run_policy(
             policy,
-            today=date(2026, 7, 24),
+            today=date(2026, 8, 11),
             implementation_commit="b" * 40,
         )
 
@@ -175,6 +212,16 @@ class AutomaticObservationServiceTests(unittest.TestCase):
             max_picks=3,
         )
         self.assertEqual(forward.ensure_protocol.call_count, 2)
+        protocol_specs = [
+            call.args[0] for call in forward.ensure_protocol.call_args_list
+        ]
+        self.assertEqual(
+            {
+                spec.strategy_snapshot["methodology"]["sample_policy"]
+                for spec in protocol_specs
+            },
+            {"retain_exactly_30_successful_paired_trade_days_including_zero_pick_days"},
+        )
         records = forward.finalize_paired_success.call_args.args[0]
         self.assertEqual(len(records), 2)
         self.assertEqual(
@@ -196,7 +243,7 @@ class AutomaticObservationServiceTests(unittest.TestCase):
         )
 
     def test_campaign_before_start_does_not_materialize_candidates(self):
-        policy = _policy(start_on=date(2026, 7, 24))
+        policy = _policy(start_on=date(2026, 8, 11))
         campaigns = MagicMock()
         campaigns.ensure_campaign.return_value = _campaign(policy)
         campaigns.refresh_progress.return_value = _campaign(policy)
@@ -211,12 +258,36 @@ class AutomaticObservationServiceTests(unittest.TestCase):
 
         result = service._run_policy(
             policy,
-            today=date(2026, 7, 23),
+            today=date(2026, 8, 10),
             implementation_commit="b" * 40,
         )
 
         self.assertEqual(result["status"], "scheduled")
         materializer.materialize_pair.assert_not_called()
+
+    def test_completed_campaign_does_not_require_quote_snapshot(self):
+        policy = _policy()
+        campaigns = MagicMock()
+        campaigns.campaign_state.return_value = _campaign(
+            policy,
+            completed_trade_days=30,
+            status="completed",
+        )
+        service = AutomaticObservationCampaignService(
+            loader=MagicMock(),
+            campaign_repository=campaigns,
+            forward_repository=MagicMock(),
+            materializer=MagicMock(),
+            strategy_service=MagicMock(),
+        )
+
+        pending = service.policies_requiring_snapshot(
+            today=date(2026, 9, 22),
+            policies=[policy],
+        )
+
+        self.assertEqual(pending, [])
+        campaigns.campaign_state.assert_called_once_with(policy.campaign_id)
 
 
 class AutomaticObservationDeploymentTests(unittest.TestCase):
@@ -241,12 +312,12 @@ class AutomaticObservationDeploymentTests(unittest.TestCase):
         ):
             result = verify_deployed_strategy_tags(
                 service,
-                today=date(2026, 7, 24),
+                today=date(2026, 8, 11),
             )
 
         self.assertEqual(
             set(result["tags"]),
-            {"a-share-sentiment-v0.4.4", "a-share-sentiment-v0.5.0"},
+            {"a-share-sentiment-v0.4.4", "a-share-sentiment-v0.5.1"},
         )
 
     def test_deployment_verification_rejects_non_ancestor_tag(self):
@@ -271,8 +342,61 @@ class AutomaticObservationDeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "not an ancestor"):
                 verify_deployed_strategy_tags(
                     service,
-                    today=date(2026, 7, 24),
+                    today=date(2026, 8, 11),
                 )
+
+
+class AutomaticObservationExecutionTests(unittest.TestCase):
+    def test_completed_campaign_skips_quote_wait_in_runner(self):
+        policy = _policy()
+        service = MagicMock()
+        service.policies_requiring_snapshot.return_value = []
+        service.run.return_value = {
+            "status": "success",
+            "campaigns": [{"status": "completed"}],
+        }
+        deployment = {
+            "head": "b" * 40,
+            "policies": [policy],
+            "tags": {
+                policy.baseline_immutable_tag: "a" * 40,
+                policy.candidate_immutable_tag: "b" * 40,
+            },
+        }
+
+        with (
+            patch(
+                "scripts.run_automatic_strategy_observation.AutomaticObservationCampaignService",
+                return_value=service,
+            ),
+            patch(
+                "scripts.run_automatic_strategy_observation.verify_deployed_strategy_tags",
+                return_value=deployment,
+            ),
+            patch(
+                "scripts.run_automatic_strategy_observation.acquire_mysql_advisory_lock",
+                return_value=object(),
+            ),
+            patch(
+                "scripts.run_automatic_strategy_observation.release_mysql_advisory_lock",
+                return_value=None,
+            ),
+            patch("scripts.run_automatic_strategy_observation.TaskRunLogger"),
+            patch(
+                "scripts.run_automatic_strategy_observation.wait_for_call_auction_snapshot"
+            ) as wait_for_snapshot,
+            patch("builtins.print"),
+        ):
+            result = run_observation_main(
+                ["--date", "2026-08-11", "--wait-seconds", "0"]
+            )
+
+        self.assertEqual(result, 0)
+        wait_for_snapshot.assert_not_called()
+        service.run.assert_called_once_with(
+            today=date(2026, 8, 11),
+            implementation_commit="b" * 40,
+        )
 
 
 class AutomaticObservationFrontendTests(unittest.TestCase):
@@ -283,25 +407,26 @@ class AutomaticObservationFrontendTests(unittest.TestCase):
         page = Path("app/api/web/pages/strategies.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn("自动 5 日配对观察", source)
+        self.assertIn("自动 ${observationTargetDays || '-'} 日配对观察", source)
+        self.assertIn("历史证据已污染 · 禁止比较", source)
         self.assertIn("当日开盘（09:25 信号）", source)
         self.assertIn("与用户手动选股及其 14 天统计完全分开", source)
-        self.assertIn("strategies.js?v=20260724factorv2", page)
+        self.assertIn("strategies.js?v=20260810v051", page)
 
 
 def _policy(
     *,
-    start_on: date = date(2026, 7, 24),
+    start_on: date = date(2026, 8, 11),
 ) -> AutomaticObservationPolicy:
     return AutomaticObservationPolicy(
         baseline_strategy_id="a_share_sentiment",
         candidate_strategy_id="a_share_sentiment_v05",
         baseline_strategy_version="0.4.4",
-        candidate_strategy_version="0.5.0",
+        candidate_strategy_version="0.5.1",
         baseline_immutable_tag="a-share-sentiment-v0.4.4",
-        candidate_immutable_tag="a-share-sentiment-v0.5.0",
+        candidate_immutable_tag="a-share-sentiment-v0.5.1",
         start_on=start_on,
-        target_trade_days=5,
+        target_trade_days=30,
         execution_time="09:25:00",
         timezone="Asia/Shanghai",
         entry_rule="same_day_open",
@@ -317,6 +442,7 @@ def _campaign(
     policy: AutomaticObservationPolicy,
     *,
     completed_trade_days: int = 0,
+    status: str = "active",
 ) -> dict:
     return {
         "campaign_id": policy.campaign_id,
@@ -324,7 +450,7 @@ def _campaign(
         "baseline_strategy_version": policy.baseline_strategy_version,
         "candidate_strategy_id": policy.candidate_strategy_id,
         "candidate_strategy_version": policy.candidate_strategy_version,
-        "status": "active",
+        "status": status,
         "completed_trade_days": completed_trade_days,
         "target_trade_days": policy.target_trade_days,
         "metadata_json": {"implementation_commit": "b" * 40},

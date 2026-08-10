@@ -115,6 +115,84 @@ class SentimentV05ContractTests(unittest.TestCase):
         )
         self.assertAlmostEqual(sum(self.strategy.config["weights"].values()), 1.0)
 
+    def test_daily_moneyflow_fallback_keeps_numerator_and_denominator_on_daily_clock(self):
+        rows = self.strategy.compute_factors(
+            {
+                "candidates": [
+                    {
+                        "code": "DAILY-FALLBACK",
+                        "amount": 100_000_000,
+                        "net_mf_amount": 100,
+                        "realtime_mf_net": None,
+                        "realtime_mf_amount": 5_000_000,
+                        "realtime_amount": 10_000_000,
+                        "trade_date": "2026-08-10",
+                    }
+                ]
+            }
+        )
+
+        metrics = rows[0]["strategy_raw_metrics"]
+        self.assertEqual(metrics["net_flow_intensity_pct"], 1.0)
+        self.assertEqual(metrics["fund_flow_clock"], "daily_complete")
+        self.assertEqual(
+            metrics["fund_flow_numerator_source"],
+            "stock_moneyflow_daily.net_mf_amount",
+        )
+        self.assertEqual(
+            metrics["fund_flow_denominator_source"],
+            "daily_kline.amount",
+        )
+        self.assertEqual(metrics["fund_flow_trade_date"], "2026-08-10")
+
+    def test_realtime_moneyflow_uses_realtime_turnover_from_same_clock(self):
+        rows = self.strategy.compute_factors(
+            {
+                "candidates": [
+                    {
+                        "code": "REALTIME",
+                        "amount": 100_000_000,
+                        "net_mf_amount": -500,
+                        "realtime_mf_net": 500_000,
+                        "realtime_mf_amount": 10_000_000,
+                        "realtime_amount": 12_000_000,
+                        "realtime_mf_trade_date": "2026-08-11",
+                    }
+                ]
+            }
+        )
+
+        metrics = rows[0]["strategy_raw_metrics"]
+        self.assertEqual(metrics["net_flow_intensity_pct"], 5.0)
+        self.assertEqual(metrics["fund_flow_clock"], "realtime")
+        self.assertEqual(
+            metrics["fund_flow_numerator_source"],
+            "stock_realtime_moneyflow_snapshot.net_amount",
+        )
+        self.assertEqual(
+            metrics["fund_flow_denominator_source"],
+            "stock_realtime_moneyflow_snapshot.amount",
+        )
+        self.assertEqual(metrics["fund_flow_trade_date"], "2026-08-11")
+
+    def test_realtime_net_without_realtime_turnover_fails_closed_to_daily_pair(self):
+        rows = self.strategy.compute_factors(
+            {
+                "candidates": [
+                    {
+                        "code": "NO-REALTIME-DENOMINATOR",
+                        "amount": 100_000_000,
+                        "net_mf_amount": 100,
+                        "realtime_mf_net": 9_000_000,
+                    }
+                ]
+            }
+        )
+
+        metrics = rows[0]["strategy_raw_metrics"]
+        self.assertEqual(metrics["net_flow_intensity_pct"], 1.0)
+        self.assertEqual(metrics["fund_flow_clock"], "daily_complete")
+
     def test_score_boundaries_and_market_gates_are_exact(self):
         cases = [
             (59.99, "risk_on", "rejected"),

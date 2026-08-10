@@ -527,17 +527,27 @@ function renderForwardEvidence(evidence = null) {
   const actionCounts = evidence.actions || {};
   const userDiscipline = evidence.user_discipline || {};
   const isPreliminary = evidence.status === 'preliminary_ready';
+  const isContaminated = evidence.evidence_status === 'contaminated_retained';
   const isAutomaticObservation = protocolInfo.observation_source === 'automatic_observation';
+  const observationTargetDays = Number(protocolInfo.minimum_observation_days || 0);
   const entryRuleLabel = protocolInfo.entry_rule === 'same_day_open'
     ? '当日开盘（09:25 信号）'
     : '次日可交易开盘';
-  const sourceLabel = isAutomaticObservation ? '自动 5 日配对观察' : '固定前瞻观察';
-  status.className = 'badge status-warn';
-  status.textContent = isPreliminary ? '初步样本达标 · 未验证' : '采集中 · 未验证';
-  note.textContent = isPreliminary
+  const sourceLabel = isAutomaticObservation
+    ? `自动 ${observationTargetDays || '-'} 日配对观察`
+    : '固定前瞻观察';
+  status.className = `badge ${isContaminated ? 'status-error' : 'status-warn'}`;
+  status.textContent = isContaminated
+    ? '历史证据已污染 · 禁止比较'
+    : isPreliminary
+      ? '初步样本达标 · 未验证'
+      : '采集中 · 未验证';
+  note.textContent = isContaminated
+    ? evidence.evidence_note || '该协议保留供追溯，但不能用于当前策略有效性判断。'
+    : isPreliminary
     ? '已达到预设的初步观察门槛，但这不是交易有效性认证；继续积累样本并观察稳定性。'
     : isAutomaticObservation
-      ? '新策略按冻结版本自动收集 5 个交易日的 09:25 配对样本；与用户手动选股及其 14 天统计完全分开。'
+      ? `新策略按冻结版本自动收集 ${observationTargetDays || '约定'} 个交易日的 09:25 配对样本；与用户手动选股及其 14 天统计完全分开。`
       : '按冻结版本持续收集真实盘后信号；成熟收益、零候选日和 AI 降级日都会保留。';
 
   protocol.className = 'strategy-forward-protocol';
