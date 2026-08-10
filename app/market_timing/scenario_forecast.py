@@ -149,7 +149,7 @@ def summarize_market_mainline(
         ),
         "selection_policy": "single_primary_or_none",
         "qualification_note": (
-            "主线强度达到确认/核心/拥挤，价格处于初步启动、主升、"
+            "主线强度达到确认/核心/拥挤，价格处于多周期启动确认、主升、"
             "加速末段或主升回踩，价格与真实宽度证据完整，且置信度不低于80%"
         ),
         "strength_qualified_count": len(strength_qualified_rows),

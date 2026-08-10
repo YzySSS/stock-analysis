@@ -77,6 +77,7 @@ class MarketScenarioForecastTest(unittest.TestCase):
         self.assertEqual(result["strength_qualified_count"], 3)
         self.assertEqual(result["price_strengthening_count"], 4)
         self.assertEqual(result["selection_policy"], "single_primary_or_none")
+        self.assertIn("多周期启动确认", result["qualification_note"])
 
     def test_market_mainline_allows_explicit_empty_state(self) -> None:
         result = summarize_market_mainline(
