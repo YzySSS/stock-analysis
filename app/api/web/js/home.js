@@ -389,6 +389,7 @@ function renderScenarioForecast(scenario) {
   };
   const cycleClass = (state) => [
     'base',
+    'impulse_watch',
     'first_impulse',
     'main_up',
     'late_acceleration',
@@ -404,7 +405,8 @@ function renderScenarioForecast(scenario) {
   const cycleDisplayLabel = (item) => ({
     insufficient_data: '待补证',
     base: '筑底观察',
-    first_impulse: '初步启动',
+    impulse_watch: '短线转强·启动待确认',
+    first_impulse: '多周期启动确认',
     main_up: '主升阶段',
     late_acceleration: '加速末段',
     pullback: '主升回踩',

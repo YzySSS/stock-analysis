@@ -7825,6 +7825,12 @@ body[data-page="home"] .home-leadership-cycle.main_up {
   background: rgba(34, 197, 94, 0.10);
 }
 
+body[data-page="home"] .home-leadership-cycle.impulse_watch {
+  border-color: rgba(245, 158, 11, 0.34);
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.10);
+}
+
 body[data-page="home"] .home-leadership-cycle.late_acceleration {
   border-color: rgba(245, 158, 11, 0.34);
   color: #fcd34d;

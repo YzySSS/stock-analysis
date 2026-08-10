@@ -466,6 +466,15 @@ class LeadershipCycleBuilder:
     def _spec_hash(self) -> str:
         return leadership_cycle_spec_hash()
 
+    def _compute_price_metrics(
+        self,
+        price_series: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        return compute_price_metrics(
+            price_series,
+            minimum_days=int(self.spec["minimum_price_history_days"]),
+        )
+
     def _classify_cycle(
         self,
         price_metrics: Mapping[str, Any],
@@ -643,10 +652,7 @@ class LeadershipCycleBuilder:
                     self.spec["minimum_component_coverage"]
                 ),
             )
-            price_metrics = compute_price_metrics(
-                price_series,
-                minimum_days=int(self.spec["minimum_price_history_days"]),
-            )
+            price_metrics = self._compute_price_metrics(price_series)
             breadth = compute_breadth_metrics(
                 technical_rows,
                 stock_industries,
@@ -762,6 +768,7 @@ class LeadershipCycleBuilder:
             ):
                 contradictions.append("行业价格仍在MA60下方")
             if cycle["cycle_state"] in {
+                "impulse_watch",
                 "rebound_candidate",
                 "oversold_rebound",
                 "secondary_decline_risk",

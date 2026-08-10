@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 
 SPEC_PATH = Path(__file__).resolve().parent / "specs" / "industry_etf_rotation_v1.json"
-OVERLAY_PATH = (
+V1_1_OVERLAY_PATH = (
     Path(__file__).resolve().parent
     / "specs"
     / "industry_etf_rotation_v1_1_overlay.json"
 )
+V1_2_OVERLAY_PATH = (
+    Path(__file__).resolve().parent
+    / "specs"
+    / "industry_etf_rotation_v1_2_overlay.json"
+)
+V1_1_SPEC_HASH = "8e9457d495c4852fc05f9c5eeb93428e0bcd0f6a40107c85c278e276852c997a"
 
 
 def _canonical_json(value: Any) -> str:
@@ -88,18 +95,63 @@ def _validate_spec(spec: dict[str, Any]) -> None:
             "ETF rotation cycle gate must only allow first impulse, "
             "main uptrend, and primary-uptrend pullback"
         )
+    if spec.get("version") == "1.2.0":
+        thresholds = spec.get("startup_confirmation_thresholds") or {}
+        required_thresholds = {
+            "minimum_return_5d_pct",
+            "minimum_return_10d_pct",
+            "minimum_return_20d_pct",
+            "minimum_ma20_slope_10_pct",
+            "strong_return_10d_override_pct",
+            "minimum_above_ma20_days_10",
+            "minimum_consecutive_above_ma20_days_10",
+        }
+        if set(thresholds) != required_thresholds:
+            raise ValueError(
+                "ETF rotation V1.2 startup thresholds are incomplete"
+            )
 
 
 @lru_cache(maxsize=1)
-def load_etf_rotation_spec() -> dict[str, Any]:
+def load_etf_rotation_v1_1_spec() -> dict[str, Any]:
     spec = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
-    overlay = json.loads(OVERLAY_PATH.read_text(encoding="utf-8"))
+    overlay = json.loads(V1_1_OVERLAY_PATH.read_text(encoding="utf-8"))
     spec["version"] = overlay["version"]
     spec["data_contract"].update(overlay.get("data_contract") or {})
     spec["scoring"]["formula_contract"].update(
         (overlay.get("scoring") or {}).get("formula_contract") or {}
     )
     spec["risk_overlay"].update(overlay.get("risk_overlay") or {})
+    spec["guardrails"] = [
+        *spec.get("guardrails", []),
+        *(overlay.get("guardrails_append") or []),
+    ]
+    _validate_spec(spec)
+    return spec
+
+
+def etf_rotation_v1_1_spec_hash() -> str:
+    return hashlib.sha256(
+        _canonical_json(load_etf_rotation_v1_1_spec()).encode("utf-8")
+    ).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def load_etf_rotation_spec() -> dict[str, Any]:
+    base = load_etf_rotation_v1_1_spec()
+    if etf_rotation_v1_1_spec_hash() != V1_1_SPEC_HASH:
+        raise ValueError("ETF rotation V1.2 base spec mismatch")
+    overlay = json.loads(V1_2_OVERLAY_PATH.read_text(encoding="utf-8"))
+    if overlay.get("version") != "1.2.0":
+        raise ValueError("unexpected ETF rotation V1.2 version")
+    if overlay.get("base_spec_hash") != V1_1_SPEC_HASH:
+        raise ValueError("ETF rotation V1.2 base_spec_hash mismatch")
+
+    spec = deepcopy(base)
+    spec["version"] = overlay["version"]
+    spec["startup_confirmation_thresholds"] = overlay[
+        "startup_confirmation_thresholds"
+    ]
     spec["guardrails"] = [
         *spec.get("guardrails", []),
         *(overlay.get("guardrails_append") or []),

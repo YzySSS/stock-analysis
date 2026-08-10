@@ -6,7 +6,10 @@ from datetime import date, datetime
 from typing import Any, Mapping
 
 from app.market_timing.leadership_cycle import (
-    classify_cycle,
+    classify_cycle as classify_v2_cycle,
+)
+from app.market_timing.leadership_cycle_v4 import (
+    build_startup_price_checks,
     compute_price_metrics,
 )
 
@@ -242,6 +245,7 @@ def _sector_cycle_evidence(
     rows: list[dict[str, Any]],
     *,
     minimum_history_days: int,
+    startup_thresholds: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     level = 100.0
     series = []
@@ -260,13 +264,48 @@ def _sector_cycle_evidence(
         series,
         minimum_days=minimum_history_days,
     )
-    cycle = classify_cycle(metrics)
+    cycle = classify_v2_cycle(metrics)
+    startup_checks: dict[str, bool] = {}
+    confirmation_scope = "legacy_cycle"
+    if cycle["cycle_state"] == "first_impulse" and startup_thresholds:
+        startup_checks = build_startup_price_checks(
+            metrics,
+            startup_thresholds,
+        )
+        confirmation_scope = "multi_horizon_price_only"
+        return10 = _number(metrics.get("return_10d_pct")) or 0.0
+        return20 = _number(metrics.get("return_20d_exact_pct")) or 0.0
+        above_ma20_days = int(metrics.get("above_ma20_days_10") or 0)
+        consecutive_above_ma20 = int(
+            metrics.get("consecutive_above_ma20_days_10") or 0
+        )
+        cycle["reasons"] = [
+            *cycle["reasons"],
+            f"近10日收益 {return10:+.1f}%、近20日收益 {return20:+.1f}%",
+            (
+                f"近10日有 {above_ma20_days} 日站上MA20、"
+                f"连续 {consecutive_above_ma20} 日"
+            ),
+        ]
+        if all(startup_checks.values()):
+            cycle["cycle_label"] = "多周期价格启动确认"
+        else:
+            failed = [
+                name for name, passed in startup_checks.items() if not passed
+            ]
+            cycle["cycle_state"] = "impulse_watch"
+            cycle["cycle_label"] = "短线转强·启动待确认"
+            cycle["reasons"].append(
+                "尚未满足多周期价格确认：" + "、".join(failed)
+            )
     return {
         "status": metrics.get("status"),
         "cycle_state": cycle["cycle_state"],
         "cycle_label": cycle["cycle_label"],
         "metrics": metrics,
         "reasons": cycle["reasons"],
+        "startup_checks": startup_checks,
+        "confirmation_scope": confirmation_scope,
     }
 
 
@@ -331,6 +370,7 @@ def _sector_scores(
         cycle_evidence = _sector_cycle_evidence(
             all_rows,
             minimum_history_days=cycle_history_days,
+            startup_thresholds=spec.get("startup_confirmation_thresholds"),
         )
         rows = all_rows[-lookback:]
         latest = rows[-1] if rows else {}
@@ -641,6 +681,12 @@ def build_rotation_candidates(
                     "sector_cycle_reasons": sector_item["cycle_evidence"][
                         "reasons"
                     ],
+                    "sector_cycle_startup_checks": sector_item[
+                        "cycle_evidence"
+                    ]["startup_checks"],
+                    "sector_cycle_confirmation_scope": sector_item[
+                        "cycle_evidence"
+                    ]["confirmation_scope"],
                     "etf_return_5d_pct": etf_item["return_5d_pct"],
                     "etf_return_20d_pct": etf_item["return_20d_pct"],
                     "etf_return_5d_basis": etf_item["return_5d_basis"],

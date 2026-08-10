@@ -1,0 +1,21 @@
+{
+  "version": "1.2.0",
+  "base_version": "1.1.0",
+  "base_spec_hash": "8e9457d495c4852fc05f9c5eeb93428e0bcd0f6a40107c85c278e276852c997a",
+  "startup_confirmation_thresholds": {
+    "minimum_return_5d_pct": -3.0,
+    "minimum_return_10d_pct": 3.0,
+    "minimum_return_20d_pct": 3.0,
+    "minimum_ma20_slope_10_pct": 0.0,
+    "strong_return_10d_override_pct": 8.0,
+    "minimum_above_ma20_days_10": 6,
+    "minimum_consecutive_above_ma20_days_10": 3
+  },
+  "guardrails_append": [
+    "V1.1 signals and outcomes are immutable and are never rewritten by V1.2.",
+    "A first-impulse ETF gate requires aligned 5-day, exact 10-day, and exact 20-day sector price evidence.",
+    "A first-impulse ETF gate requires at least six of the latest ten closes and at least three consecutive closes above rolling MA20.",
+    "A short two-day or three-day rebound remains startup watch and cannot pass the ETF cycle gate.",
+    "This ETF cycle gate confirms multi-horizon sector price structure only; the market-mainline V4 separately requires real constituent breadth."
+  ]
+}

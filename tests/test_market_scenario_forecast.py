@@ -95,6 +95,22 @@ class MarketScenarioForecastTest(unittest.TestCase):
         self.assertEqual(result["label"], "暂无已确认市场主线")
         self.assertEqual(result["price_strengthening_count"], 1)
 
+    def test_startup_watch_cannot_be_promoted_to_market_mainline(self) -> None:
+        result = summarize_market_mainline(
+            [
+                self._leadership_row(
+                    "两日反弹板块",
+                    strength="core",
+                    cycle="impulse_watch",
+                    score=95,
+                )
+            ]
+        )
+
+        self.assertEqual("none", result["status"])
+        self.assertIsNone(result["sector"])
+        self.assertEqual(0, result["price_strengthening_count"])
+
     def test_volatility_standardized_scenario_labels(self) -> None:
         self.assertEqual(classify_scenario(1.01, 2.0), "up")
         self.assertEqual(classify_scenario(-1.01, 2.0), "down")

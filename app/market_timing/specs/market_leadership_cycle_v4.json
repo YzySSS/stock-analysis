@@ -1,0 +1,30 @@
+{
+  "model_id": "market_leadership_cycle_v4",
+  "model_name": "主线强度与周期位置 V4",
+  "version": "4.0.0",
+  "status": "research_only",
+  "base_model_id": "market_leadership_cycle_v3",
+  "base_spec_hash": "2d503ba55a8ee533f9323103e75e4b6a9f0436a17decbd2d1cf48823529936b4",
+  "startup_confirmation_thresholds": {
+    "minimum_return_5d_pct": -3.0,
+    "minimum_return_10d_pct": 3.0,
+    "minimum_return_20d_pct": 3.0,
+    "minimum_ma20_slope_10_pct": 0.0,
+    "strong_return_10d_override_pct": 8.0,
+    "minimum_above_ma20_days_10": 6,
+    "minimum_consecutive_above_ma20_days_10": 3,
+    "minimum_breadth_score": 55.0,
+    "minimum_above_ma20_pct": 60.0
+  },
+  "guardrails": [
+    "Strength and price-cycle position remain separate axes.",
+    "A short rebound is only a startup watch; startup confirmation requires aligned 5-day, 10-day, and 20-day price evidence.",
+    "The V4 5-day, 10-day, and 20-day returns use exact completed-session intervals.",
+    "Startup confirmation requires at least six of the latest ten closes and at least three consecutive closes above their rolling MA20.",
+    "Startup confirmation requires real constituent breadth; news-covered stock count is never used as breadth.",
+    "A still-declining 10-day MA20 trend is allowed only when the exact 10-day return is at least 8 percent and every other confirmation gate passes.",
+    "Price and technical evidence must match the requested trade date or the cycle fails closed as stale data.",
+    "V2 and V3 daily snapshots are immutable and are never rewritten by V4.",
+    "The model is research-only and never places orders or changes selection scores."
+  ]
+}

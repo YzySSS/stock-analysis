@@ -4,8 +4,16 @@ import copy
 import unittest
 from datetime import date, timedelta
 
-from app.etf_rotation.model import build_rotation_candidates
-from app.etf_rotation.spec import etf_rotation_spec_hash, load_etf_rotation_spec
+from app.etf_rotation.model import (
+    _sector_cycle_evidence,
+    build_rotation_candidates,
+)
+from app.etf_rotation.spec import (
+    etf_rotation_spec_hash,
+    etf_rotation_v1_1_spec_hash,
+    load_etf_rotation_spec,
+    load_etf_rotation_v1_1_spec,
+)
 
 
 class EtfRotationSpecTests(unittest.TestCase):
@@ -15,14 +23,20 @@ class EtfRotationSpecTests(unittest.TestCase):
         self.assertEqual("research_only_shadow", spec["status"])
         self.assertEqual("etf", spec["instrument_type"])
         self.assertTrue(spec["allow_cash"])
+        self.assertEqual("1.2.0", spec["version"])
         self.assertEqual(14, len(spec["sectors"]))
         self.assertEqual(
             len(spec["sectors"]),
             len({item["etf"]["ts_code"] for item in spec["sectors"]}),
         )
         self.assertEqual(
-            "8e9457d495c4852fc05f9c5eeb93428e0bcd0f6a40107c85c278e276852c997a",
+            "9cf3bdf6aeebe778f5683c390dc791f1261580383f14894ae1dfc8dccfaa18dd",
             etf_rotation_spec_hash(),
+        )
+        self.assertEqual("1.1.0", load_etf_rotation_v1_1_spec()["version"])
+        self.assertEqual(
+            "8e9457d495c4852fc05f9c5eeb93428e0bcd0f6a40107c85c278e276852c997a",
+            etf_rotation_v1_1_spec_hash(),
         )
 
 
@@ -226,6 +240,41 @@ class EtfRotationModelTests(unittest.TestCase):
             candidate["evidence"]["sector_cycle_state"],
         )
         self.assertIn("B浪候选", candidate["evidence"]["sector_cycle_label"])
+
+    def test_two_day_bounce_is_watch_only_in_v1_2(self) -> None:
+        current = date(2026, 5, 1)
+        changes = [-0.2] * 50 + [0.0] * 18 + [3.0] * 2
+        rows = [
+            {
+                "trade_date": (current + timedelta(days=index)).isoformat(),
+                "pct_change": change,
+            }
+            for index, change in enumerate(changes)
+        ]
+
+        legacy = _sector_cycle_evidence(
+            rows,
+            minimum_history_days=60,
+            startup_thresholds=None,
+        )
+        current_cycle = _sector_cycle_evidence(
+            rows,
+            minimum_history_days=60,
+            startup_thresholds=self.spec["startup_confirmation_thresholds"],
+        )
+
+        self.assertEqual("first_impulse", legacy["cycle_state"])
+        self.assertEqual("impulse_watch", current_cycle["cycle_state"])
+        self.assertLessEqual(
+            current_cycle["metrics"]["above_ma20_days_10"],
+            2,
+        )
+        self.assertTrue(
+            any(
+                "尚未满足多周期价格确认" in reason
+                for reason in current_cycle["reasons"]
+            )
+        )
 
 
 if __name__ == "__main__":
