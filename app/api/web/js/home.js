@@ -405,8 +405,8 @@ function renderScenarioForecast(scenario) {
   const cycleDisplayLabel = (item) => ({
     insufficient_data: '待补证',
     base: '筑底观察',
-    impulse_watch: '短线转强·启动待确认',
-    first_impulse: '多周期启动确认',
+    impulse_watch: '短线转强·等待延续',
+    first_impulse: '多周期转强',
     main_up: '主升阶段',
     late_acceleration: '加速末段',
     pullback: '主升回踩',
@@ -426,17 +426,26 @@ function renderScenarioForecast(scenario) {
       && item.price_evidence_status === 'ready'
       && item.breadth_metrics?.status === 'ready'
       && Number(item.confidence || 0) >= 0.8
+      && item.data_quality?.market_confirmation_eligible !== false
     ))
     .sort((left, right) => Number(right.leadership_score || 0) - Number(left.leadership_score || 0))[0] || null;
   const mainlineSummary = scenario.market_mainline || {};
+  const hasExplicitMainlineDecision = ['present', 'none'].includes(mainlineSummary.status);
   const marketMainline = mainlineSummary.status === 'present'
     ? mainlineSummary.sector
-    : fallbackMainline;
+    : (hasExplicitMainlineDecision ? null : fallbackMainline);
   const isMarketMainline = (item) => Boolean(
     marketMainline
     && item.sector_type === marketMainline.sector_type
     && item.sector_name === marketMainline.sector_name
   );
+  const marketBranches = Array.isArray(mainlineSummary.branches)
+    ? mainlineSummary.branches.slice(0, 2)
+    : [];
+  const branchIndex = (item) => marketBranches.findIndex((branch) => (
+    item.sector_type === branch.sector_type
+    && item.sector_name === branch.sector_name
+  ));
   const fallbackStrengtheningCount = leadership.filter((item) => (
     constructiveCycles.has(item.cycle_state)
     && !['fading', 'decay'].includes(item.leadership_state)
@@ -444,28 +453,52 @@ function renderScenarioForecast(scenario) {
   const strengtheningCount = Number.isFinite(Number(mainlineSummary.price_strengthening_count))
     ? Number(mainlineSummary.price_strengthening_count)
     : fallbackStrengtheningCount;
+  const branchCount = Number.isFinite(Number(mainlineSummary.branch_count))
+    ? Number(mainlineSummary.branch_count)
+    : marketBranches.length;
+  const startupCandidateCount = Number.isFinite(Number(mainlineSummary.startup_candidate_count))
+    ? Number(mainlineSummary.startup_candidate_count)
+    : Math.max(0, strengtheningCount - (marketMainline ? 1 : 0) - branchCount);
   if (leadershipStatus) {
     leadershipStatus.textContent = marketMainline
-      ? `市场主线：${marketMainline.sector_name} · 价格转强 ${strengtheningCount}`
-      : `市场主线：暂无 · 价格转强 ${strengtheningCount}`;
+      ? `市场主线：${marketMainline.sector_name} · 强支线 ${branchCount} · 转强观察 ${startupCandidateCount}`
+      : `市场主线：暂无 · 转强观察 ${startupCandidateCount}`;
     leadershipStatus.title = mainlineSummary.qualification_note || '市场主线最多一条，未达完整门槛时允许为空';
     leadershipStatus.className = `research-status ${marketMainline ? 'active' : 'muted'}`;
   }
   const orderedLeadership = [...leadership].sort((left, right) => (
     Number(isMarketMainline(right)) - Number(isMarketMainline(left))
+    || Number(branchIndex(right) >= 0) - Number(branchIndex(left) >= 0)
+    || (branchIndex(left) >= 0 && branchIndex(right) >= 0
+      ? branchIndex(left) - branchIndex(right)
+      : 0)
     || Number(right.leadership_score || 0) - Number(left.leadership_score || 0)
   ));
+  const radarStrengthLabel = (item) => ({
+    confirmed: '强度达标',
+    core: '核心强势',
+    crowded: '高位拥挤',
+    watch: '观察',
+    fading: '退潮',
+  }[item.leadership_state] || item.state_label || '观察');
   leadershipContainer.innerHTML = orderedLeadership.map((item) => {
     const primary = isMarketMainline(item);
+    const currentBranchIndex = branchIndex(item);
+    const branch = currentBranchIndex >= 0;
+    const roleLabel = primary
+      ? '市场主线 · 已确认'
+      : (branch
+        ? `强支线 ${currentBranchIndex + 1} · ${radarStrengthLabel(item)}`
+        : `行业雷达 · ${radarStrengthLabel(item)}`);
     const evidence = (item.evidence || [])
       .slice(0, 4)
       .map((text) => String(text).replace(/^主线强度/, '行业综合强度'))
       .join(' · ');
     return `
-      <article class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)} ${primary ? 'market-mainline' : ''}">
-        <div><span>${primary ? '市场主线' : '行业强度'} · ${escapeHtml(item.state_label || '-')}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
+      <article class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)} ${primary ? 'market-mainline' : ''} ${branch ? 'market-branch' : ''}">
+        <div><span>${escapeHtml(roleLabel)}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
         <strong>${escapeHtml(item.sector_name || '-')}</strong>
-        <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">价格周期 · ${escapeHtml(cycleDisplayLabel(item))}</em>
+        <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">行情阶段 · ${escapeHtml(cycleDisplayLabel(item))}</em>
         <small>${escapeHtml(evidence || '等待证据')}</small>
         ${(item.contradictions || []).length ? `<p>${escapeHtml((item.contradictions || []).join('；'))}</p>` : ''}
       </article>

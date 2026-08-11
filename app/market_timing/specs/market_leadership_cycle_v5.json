@@ -1,0 +1,53 @@
+{
+  "model_id": "market_leadership_cycle_v5",
+  "model_name": "市场主线层级 V5",
+  "version": "5.0.0",
+  "status": "research_only",
+  "base_model_id": "market_leadership_cycle_v4",
+  "base_spec_hash": "ba716c57768fbb0260ff17781b6fd4096fb640a1fcc1e3501b0598d0eed545e8",
+  "strength_confirmation_thresholds": {
+    "minimum_leadership_score": 65.0,
+    "minimum_heat_score": 55.0,
+    "minimum_capital_score": 50.0,
+    "minimum_breadth_score": 55.0,
+    "minimum_price_score": 55.0,
+    "minimum_source_count": 2,
+    "minimum_confidence": 0.8,
+    "minimum_capital_component_coverage": 0.6,
+    "maximum_market_branches": 2,
+    "constructive_cycle_states": [
+      "first_impulse",
+      "main_up",
+      "late_acceleration",
+      "pullback"
+    ]
+  },
+  "hierarchy_groups": {
+    "theme:医药": "medical",
+    "industry:医疗保健": "medical",
+    "industry:医药商业": "medical",
+    "theme:消费": "consumer",
+    "industry:白酒": "consumer",
+    "industry:食品": "consumer",
+    "theme:有色金属": "nonferrous",
+    "industry:黄金": "nonferrous",
+    "industry:铝": "nonferrous",
+    "industry:小金属": "nonferrous",
+    "theme:金融": "finance",
+    "industry:银行": "finance",
+    "industry:证券": "finance",
+    "theme:新能源车": "new_energy_vehicle",
+    "theme:锂电池": "new_energy_vehicle"
+  },
+  "guardrails": [
+    "Market-level mainline confirmation is zero or one; at most two deduplicated branches may be shown.",
+    "Missing capital flow may remain neutral in a radar score but can never satisfy strength confirmation.",
+    "Custom themes aggregate only observed mapped industry flows and fail closed when component coverage is below sixty percent.",
+    "Confirmed strength requires aligned price evidence, ready real breadth, a constructive cycle, non-negative observed capital, and price at or above MA60.",
+    "Parent and child sectors in the same hierarchy group cannot occupy multiple market-level roles.",
+    "The word confirmed is reserved for the selected market-level mainline; radar rows use strength and trend wording.",
+    "V2, V3, and V4 daily snapshots are immutable and are never rewritten by V5.",
+    "When a V4 snapshot already exists, V5 may conservatively reclassify that immutable decision-time evidence instead of rebuilding from expired intraday inputs.",
+    "The model is research-only and never places orders or changes stock-selection scores."
+  ]
+}

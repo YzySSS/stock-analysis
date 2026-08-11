@@ -11,7 +11,6 @@ from app.market_timing.leadership_cycle_v4 import (
     leadership_cycle_spec_hash,
     load_leadership_cycle_spec,
 )
-from app.market_timing.scenario_forecast import LEADERSHIP_MODEL_ID
 
 
 class MarketLeadershipCycleV4Tests(unittest.TestCase):
@@ -64,8 +63,7 @@ class MarketLeadershipCycleV4Tests(unittest.TestCase):
         self.assertEqual(55.0, thresholds["minimum_breadth_score"])
         self.assertEqual(64, len(leadership_cycle_spec_hash()))
 
-    def test_scenario_repository_uses_v4_builder(self) -> None:
-        self.assertEqual("market_leadership_cycle_v4", LEADERSHIP_MODEL_ID)
+    def test_v4_builder_remains_frozen_after_newer_versions(self) -> None:
         self.assertEqual(
             "market_leadership_cycle_v4",
             LeadershipCycleBuilder.model_id,

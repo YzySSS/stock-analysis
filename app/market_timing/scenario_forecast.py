@@ -9,7 +9,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.market_timing.leadership_cycle_v4 import (
+from app.market_timing.leadership_cycle_v5 import (
     MODEL_ID as LEADERSHIP_MODEL_ID,
     LeadershipCycleBuilder,
 )
@@ -34,6 +34,7 @@ MARKET_MAINLINE_CYCLE_STATES = frozenset(
     {"first_impulse", "main_up", "late_acceleration", "pullback"}
 )
 MARKET_MAINLINE_MIN_CONFIDENCE = 0.8
+MARKET_MAINLINE_MAX_BRANCHES = 2
 
 
 def _forecast_id(trade_date: date | str, horizon_days: int) -> str:
@@ -92,6 +93,33 @@ def summarize_market_mainline(
     is preferable to promoting the strongest observation row by default.
     """
 
+    def hierarchy_group(row: Mapping[str, Any]) -> str:
+        data_quality = row.get("data_quality") or {}
+        return str(
+            data_quality.get("hierarchy_group")
+            or f"{row.get('sector_type')}:{row.get('sector_name')}"
+        )
+
+    def role_payload(
+        row: Mapping[str, Any],
+        *,
+        role: str,
+        role_label: str,
+    ) -> dict[str, Any]:
+        return {
+            "role": role,
+            "role_label": role_label,
+            "hierarchy_group": hierarchy_group(row),
+            "sector_type": row.get("sector_type"),
+            "sector_name": row.get("sector_name"),
+            "leadership_state": row.get("leadership_state"),
+            "state_label": row.get("state_label"),
+            "cycle_state": row.get("cycle_state"),
+            "cycle_label": row.get("cycle_label"),
+            "leadership_score": _to_float(row.get("leadership_score")),
+            "confidence": _to_float(row.get("confidence")),
+        }
+
     strengthening_rows = [
         row
         for row in rows
@@ -111,6 +139,10 @@ def summarize_market_mainline(
         and (row.get("breadth_metrics") or {}).get("status") == "ready"
         and (_to_float(row.get("confidence")) or 0.0)
         >= MARKET_MAINLINE_MIN_CONFIDENCE
+        and (row.get("data_quality") or {}).get(
+            "market_confirmation_eligible",
+            True,
+        )
     ]
     qualified_rows.sort(
         key=lambda row: (
@@ -125,21 +157,44 @@ def summarize_market_mainline(
             str(row.get("sector_name") or ""),
         )
     )
-    primary = qualified_rows[0] if qualified_rows else None
+    deduplicated_qualified_rows = []
+    qualified_groups: set[str] = set()
+    for row in qualified_rows:
+        group = hierarchy_group(row)
+        if group in qualified_groups:
+            continue
+        qualified_groups.add(group)
+        deduplicated_qualified_rows.append(row)
+    primary = deduplicated_qualified_rows[0] if deduplicated_qualified_rows else None
+    branch_rows = deduplicated_qualified_rows[
+        1 : 1 + MARKET_MAINLINE_MAX_BRANCHES
+    ] if primary else []
     sector = (
-        {
-            "sector_type": primary.get("sector_type"),
-            "sector_name": primary.get("sector_name"),
-            "leadership_state": primary.get("leadership_state"),
-            "state_label": primary.get("state_label"),
-            "cycle_state": primary.get("cycle_state"),
-            "cycle_label": primary.get("cycle_label"),
-            "leadership_score": _to_float(primary.get("leadership_score")),
-            "confidence": _to_float(primary.get("confidence")),
-        }
+        role_payload(primary, role="primary", role_label="主线确认")
         if primary
         else None
     )
+    branches = [
+        role_payload(row, role="branch", role_label="强支线")
+        for row in branch_rows
+    ]
+
+    strengthening_groups: set[str] = set()
+    deduplicated_strengthening_rows = []
+    for row in strengthening_rows:
+        group = hierarchy_group(row)
+        if group in strengthening_groups:
+            continue
+        strengthening_groups.add(group)
+        deduplicated_strengthening_rows.append(row)
+    selected_groups = {
+        hierarchy_group(row) for row in ([primary] if primary else []) + branch_rows
+    }
+    startup_candidate_rows = [
+        row
+        for row in deduplicated_strengthening_rows
+        if hierarchy_group(row) not in selected_groups
+    ]
     return {
         "status": "present" if primary else "none",
         "label": (
@@ -148,16 +203,29 @@ def summarize_market_mainline(
             else "暂无已确认市场主线"
         ),
         "selection_policy": "single_primary_or_none",
+        "branch_policy": "maximum_two_deduplicated_branches",
         "qualification_note": (
-            "主线强度达到确认/核心/拥挤，价格处于多周期启动确认、主升、"
-            "加速末段或主升回踩，价格与真实宽度证据完整，且置信度不低于80%"
+            "市场主线最多一条、强支线最多两条且父子板块去重；确认必须同时具备"
+            "真实资金、舆情、价格与宽度证据，价格站上MA60且置信度不低于80%"
         ),
         "strength_qualified_count": len(strength_qualified_rows),
         "fully_qualified_count": len(qualified_rows),
+        "deduplicated_qualified_count": len(deduplicated_qualified_rows),
+        "branch_count": len(branches),
+        "branches": branches,
         "price_strengthening_count": len(strengthening_rows),
+        "deduplicated_price_strengthening_count": len(
+            deduplicated_strengthening_rows
+        ),
         "price_strengthening_names": [
             str(row.get("sector_name"))
             for row in strengthening_rows
+            if row.get("sector_name")
+        ],
+        "startup_candidate_count": len(startup_candidate_rows),
+        "startup_candidate_names": [
+            str(row.get("sector_name"))
+            for row in startup_candidate_rows
             if row.get("sector_name")
         ],
         "sector": sector,
@@ -868,6 +936,34 @@ class MarketScenarioForecastRepository:
                 for row in leadership_to_store:
                     cursor.execute(
                         """
+                        SELECT payload_hash
+                        FROM market_leadership_state_daily
+                        WHERE model_id=%s AND trade_date=%s
+                          AND sector_type=%s AND sector_name=%s
+                        """,
+                        (
+                            row["model_id"],
+                            row["trade_date"],
+                            row["sector_type"],
+                            row["sector_name"],
+                        ),
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        existing_hash = (
+                            existing[0]
+                            if not isinstance(existing, dict)
+                            else existing["payload_hash"]
+                        )
+                        if str(existing_hash) != row["payload_hash"]:
+                            raise RuntimeError(
+                                "immutable leadership payload mismatch: "
+                                f"{row['model_id']}:{row['trade_date']}:"
+                                f"{row['sector_type']}:{row['sector_name']}"
+                            )
+                        continue
+                    cursor.execute(
+                        """
                         INSERT INTO market_leadership_state_daily (
                             model_id, version, spec_hash, trade_date,
                             as_of_datetime, data_cutoff_datetime,
@@ -892,8 +988,6 @@ class MarketScenarioForecastRepository:
                             %s,%s,%s,%s,
                             %s,%s
                         )
-                        ON DUPLICATE KEY UPDATE
-                            payload_hash=payload_hash
                         """,
                         (
                             row["model_id"],

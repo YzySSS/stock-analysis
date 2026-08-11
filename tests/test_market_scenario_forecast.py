@@ -26,8 +26,10 @@ class MarketScenarioForecastTest(unittest.TestCase):
         score: float,
         breadth_status: str = "ready",
         confidence: float = 0.9,
+        hierarchy_group: str | None = None,
+        confirmation_eligible: bool | None = None,
     ) -> dict:
-        return {
+        row = {
             "sector_type": "theme",
             "sector_name": name,
             "leadership_state": strength,
@@ -39,6 +41,13 @@ class MarketScenarioForecastTest(unittest.TestCase):
             "price_evidence_status": "ready",
             "breadth_metrics": {"status": breadth_status},
         }
+        if hierarchy_group is not None or confirmation_eligible is not None:
+            row["data_quality"] = {}
+            if hierarchy_group is not None:
+                row["data_quality"]["hierarchy_group"] = hierarchy_group
+            if confirmation_eligible is not None:
+                row["data_quality"]["market_confirmation_eligible"] = confirmation_eligible
+        return row
 
     def test_market_mainline_is_single_and_fail_closed(self) -> None:
         rows = [
@@ -77,7 +86,83 @@ class MarketScenarioForecastTest(unittest.TestCase):
         self.assertEqual(result["strength_qualified_count"], 3)
         self.assertEqual(result["price_strengthening_count"], 4)
         self.assertEqual(result["selection_policy"], "single_primary_or_none")
-        self.assertIn("多周期启动确认", result["qualification_note"])
+        self.assertEqual(result["branch_count"], 1)
+        self.assertEqual(result["branches"][0]["sector_name"], "第二候选")
+        self.assertIn("市场主线最多一条", result["qualification_note"])
+
+    def test_market_roles_deduplicate_parent_child_and_cap_branches(self) -> None:
+        rows = [
+            self._leadership_row(
+                "消费",
+                strength="core",
+                cycle="main_up",
+                score=82,
+                hierarchy_group="consumer",
+                confirmation_eligible=True,
+            ),
+            self._leadership_row(
+                "白酒",
+                strength="core",
+                cycle="main_up",
+                score=80,
+                hierarchy_group="consumer",
+                confirmation_eligible=True,
+            ),
+            self._leadership_row(
+                "医药",
+                strength="confirmed",
+                cycle="first_impulse",
+                score=78,
+                hierarchy_group="medical",
+                confirmation_eligible=True,
+            ),
+            self._leadership_row(
+                "有色金属",
+                strength="confirmed",
+                cycle="first_impulse",
+                score=76,
+                hierarchy_group="nonferrous",
+                confirmation_eligible=True,
+            ),
+            self._leadership_row(
+                "传媒游戏",
+                strength="confirmed",
+                cycle="first_impulse",
+                score=74,
+                hierarchy_group="media",
+                confirmation_eligible=True,
+            ),
+        ]
+
+        result = summarize_market_mainline(rows)
+
+        self.assertEqual("消费", result["sector"]["sector_name"])
+        self.assertEqual("主线确认", result["sector"]["role_label"])
+        self.assertEqual(5, result["fully_qualified_count"])
+        self.assertEqual(4, result["deduplicated_qualified_count"])
+        self.assertEqual(2, result["branch_count"])
+        self.assertEqual(
+            ["医药", "有色金属"],
+            [item["sector_name"] for item in result["branches"]],
+        )
+        self.assertEqual(1, result["startup_candidate_count"])
+        self.assertEqual(["传媒游戏"], result["startup_candidate_names"])
+
+    def test_model_ineligible_strength_row_cannot_be_market_mainline(self) -> None:
+        result = summarize_market_mainline(
+            [
+                self._leadership_row(
+                    "资金缺失板块",
+                    strength="core",
+                    cycle="main_up",
+                    score=95,
+                    confirmation_eligible=False,
+                )
+            ]
+        )
+
+        self.assertEqual("none", result["status"])
+        self.assertIsNone(result["sector"])
 
     def test_market_mainline_allows_explicit_empty_state(self) -> None:
         result = summarize_market_mainline(
@@ -218,6 +303,36 @@ class MarketScenarioForecastTest(unittest.TestCase):
         self.assertEqual(1, result["leadership_built_count"])
         self.assertEqual(1, result["leadership_stale_count"])
         self.assertEqual(1, result["leadership_deferred_count"])
+
+    def test_materialize_rejects_immutable_leadership_mismatch(self) -> None:
+        write_factory = MagicMock()
+        cursor = (
+            write_factory.return_value.__enter__.return_value
+            .cursor.return_value.__enter__.return_value
+        )
+        cursor.fetchone.return_value = ("different-hash",)
+        repository = MarketScenarioForecastRepository(
+            connection_factory=write_factory,
+        )
+        repository._existing_forecasts = MagicMock(return_value={})  # type: ignore[method-assign]
+        repository._leadership_rows = MagicMock(  # type: ignore[method-assign]
+            return_value=[
+                {
+                    "model_id": "market_leadership_cycle_v5",
+                    "trade_date": "2026-08-10",
+                    "sector_type": "theme",
+                    "sector_name": "医药",
+                    "price_evidence_status": "ready",
+                    "payload_hash": "new-hash",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "immutable leadership payload mismatch",
+        ):
+            repository.materialize("2026-08-10", horizons=())
 
     @patch("scripts.run_market_scenario_forecast.release_mysql_advisory_lock")
     @patch(

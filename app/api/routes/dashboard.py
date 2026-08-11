@@ -269,11 +269,17 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "status",
                 "label",
                 "selection_policy",
+                "branch_policy",
                 "qualification_note",
                 "strength_qualified_count",
                 "fully_qualified_count",
+                "deduplicated_qualified_count",
+                "branch_count",
                 "price_strengthening_count",
+                "deduplicated_price_strengthening_count",
                 "price_strengthening_names",
+                "startup_candidate_count",
+                "startup_candidate_names",
             ),
         )
         market_mainline["sector"] = _project(
@@ -281,6 +287,9 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
             (
                 "sector_type",
                 "sector_name",
+                "role",
+                "role_label",
+                "hierarchy_group",
                 "leadership_state",
                 "state_label",
                 "cycle_state",
@@ -289,6 +298,25 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "confidence",
             ),
         ) if mainline_source.get("sector") else None
+        market_mainline["branches"] = [
+            _project(
+                item,
+                (
+                    "sector_type",
+                    "sector_name",
+                    "role",
+                    "role_label",
+                    "hierarchy_group",
+                    "leadership_state",
+                    "state_label",
+                    "cycle_state",
+                    "cycle_label",
+                    "leadership_score",
+                    "confidence",
+                ),
+            )
+            for item in (mainline_source.get("branches") or [])[:2]
+        ]
         scenario_forecast["market_mainline"] = market_mainline
     else:
         scenario_forecast["market_mainline"] = None
@@ -381,7 +409,7 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _dashboard_cache_key(limit: int) -> str:
-    return f"dashboard:summary:v3:compact:{limit}"
+    return f"dashboard:summary:v4:compact:{limit}"
 
 
 def _get_cached_dashboard(limit: int) -> tuple[dict[str, Any], float] | None:

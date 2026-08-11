@@ -120,7 +120,7 @@ class PageResponseBenchmarkTests(unittest.TestCase):
         self.assertIsNone(result["warm_budget_pass"])
         self.assertEqual(result["cache_miss_median_ms"], 425.0)
         self.assertEqual(cache_backend.delete.call_count, 2)
-        cache_backend.delete.assert_called_with("dashboard:summary:v3:compact:8")
+        cache_backend.delete.assert_called_with("dashboard:summary:v4:compact:8")
 
 
 if __name__ == "__main__":

@@ -149,14 +149,23 @@ class DashboardRepositoryTests(unittest.TestCase):
                         "status": "present",
                         "label": "当前市场主线：银行",
                         "selection_policy": "single_primary_or_none",
+                        "branch_policy": "maximum_two_deduplicated_branches",
                         "qualification_note": "完整门槛",
                         "strength_qualified_count": 2,
                         "fully_qualified_count": 1,
+                        "deduplicated_qualified_count": 1,
+                        "branch_count": 1,
                         "price_strengthening_count": 4,
+                        "deduplicated_price_strengthening_count": 3,
                         "price_strengthening_names": ["银行", "白酒"],
+                        "startup_candidate_count": 1,
+                        "startup_candidate_names": ["医药"],
                         "sector": {
                             "sector_type": "industry",
                             "sector_name": "银行",
+                            "role": "primary",
+                            "role_label": "主线确认",
+                            "hierarchy_group": "finance",
                             "leadership_state": "core",
                             "state_label": "核心",
                             "cycle_state": "main_up",
@@ -164,6 +173,21 @@ class DashboardRepositoryTests(unittest.TestCase):
                             "leadership_score": 78.0,
                             "confidence": 0.9,
                         },
+                        "branches": [
+                            {
+                                "sector_type": "theme",
+                                "sector_name": "医药",
+                                "role": "branch",
+                                "role_label": "强支线",
+                                "hierarchy_group": "medical",
+                                "leadership_state": "confirmed",
+                                "state_label": "强度达标",
+                                "cycle_state": "first_impulse",
+                                "cycle_label": "多周期转强",
+                                "leadership_score": 70.0,
+                                "confidence": 0.9,
+                            }
+                        ],
                     },
                     "leadership": [],
                     "forecasts": [],
@@ -177,6 +201,7 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(mainline["status"], "present")
         self.assertEqual(mainline["sector"]["sector_name"], "银行")
         self.assertEqual(mainline["price_strengthening_count"], 4)
+        self.assertEqual(mainline["branches"][0]["sector_name"], "医药")
 
     def test_dashboard_cache_warmer_builds_compact_shared_payload(self):
         with patch.object(
@@ -189,7 +214,7 @@ class DashboardRepositoryTests(unittest.TestCase):
         build.assert_called_once_with(8, compact=True)
         cache.assert_called_once_with(8, {"latest_trade_date": "2026-07-21"})
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["cache_key"], "dashboard:summary:v3:compact:8")
+        self.assertEqual(result["cache_key"], "dashboard:summary:v4:compact:8")
 
     def test_dashboard_cache_warmer_rejects_invalid_limit(self):
         with self.assertRaises(ValueError):
