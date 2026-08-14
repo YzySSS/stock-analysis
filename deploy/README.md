@@ -30,6 +30,31 @@
 
 应用默认使用进程内 TTL 缓存，不依赖 Redis 启动。`deploy/env/stock-analysis.env.example` 是无密钥模板；生产文件应为 root-only，不能提交仓库。
 
+## 数据库全量备份
+
+生产备份通过应用配置解析器读取 MySQL 凭据，密码只传给 `mysqldump` 子进程
+环境，不进入命令行、Cron 或日志。备份使用一致性事务且不请求应用账号缺少的
+`FLUSH TABLES`、tablespace 或锁表权限：
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_database_backup.py \
+  --output-dir /root/stock-analysis-backups/automated \
+  --retention-count 7
+```
+
+命令只有在 gzip CRC、`CREATE TABLE`、`INSERT INTO`、唯一结束标记、压缩/解压
+字节数和 SHA-256 全部验证成功后，才把 `.partial` 原子替换为正式备份并写入
+同名 `.json` 清单。保留清理仅匹配自动备份目录中的 `stock-full-*.sql.gz`，
+不会触碰历史发布备份或手工备份。`setup_kline_cron.sh` 默认每天 `00:30`
+串行执行并保留最近 7 份，日志为 `logs/database_backup.log`。
+
+恢复前先核对清单 SHA-256 并在独立恢复库演练；不要直接覆盖生产库：
+
+```bash
+sha256sum /root/stock-analysis-backups/automated/stock-full-*.sql.gz
+gzip -t /root/stock-analysis-backups/automated/stock-full-*.sql.gz
+```
+
 ## 可选 Redis 缓存
 
 Redis 只监听 loopback、上限 192 MiB、使用 LFU 淘汰，并关闭 RDB/AOF。MySQL 始终是事实源；Redis 数据可以随时清空或禁用。
