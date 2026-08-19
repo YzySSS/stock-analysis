@@ -113,6 +113,55 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+function renderMarketRiskAlert(selector, alert) {
+  const container = qs(selector);
+  if (!container) return;
+  if (!alert?.active) {
+    container.hidden = true;
+    container.className = 'market-risk-alert';
+    container.innerHTML = '';
+    return;
+  }
+
+  const level = ['yellow', 'orange', 'red'].includes(alert.level) ? alert.level : 'yellow';
+  const metrics = alert.metrics || {};
+  const ratioText = (value) => value == null ? '-' : `${(Number(value) * 100).toFixed(1)}%`;
+  const pctText = (value) => value == null
+    ? '-'
+    : `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)}%`;
+  const metricItems = [
+    ['下跌占比', ratioText(metrics.down_ratio)],
+    ['平均涨跌', pctText(metrics.avg_pct_chg)],
+    ['跌超 5%', metrics.strong_down_count == null ? '-' : `${Number(metrics.strong_down_count).toLocaleString('zh-CN')} 只`],
+    ['下跌成交额', ratioText(metrics.down_amount_ratio)],
+  ];
+  const evidence = (alert.evidence || []).slice(0, 5);
+
+  container.hidden = false;
+  container.className = `market-risk-alert ${level}`;
+  container.innerHTML = `
+    <div class="market-risk-alert-head">
+      <span class="market-risk-alert-badge">${escapeHtml(alert.level_label || '风险预警')}</span>
+      <div>
+        <strong>${escapeHtml(alert.title || '市场风险预警')}</strong>
+        <p>${escapeHtml(alert.summary || '')}</p>
+      </div>
+    </div>
+    <div class="market-risk-alert-metrics">
+      ${metricItems.map(([label, value]) => `
+        <span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>
+      `).join('')}
+    </div>
+    <div class="market-risk-alert-evidence">
+      ${evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}
+    </div>
+    <div class="market-risk-alert-action">
+      <b>${escapeHtml(alert.action_label || '强提醒：当前以风险观察为主。')}</b>
+      <small>${escapeHtml(alert.operation_note || '仅作强提醒，不拦截手动选股，选股功能仍可正常使用。')} · 证据截至 ${escapeHtml(alert.observed_at || '-')}</small>
+    </div>
+  `;
+}
+
 function renderEmptyRow(colspan, text = '暂无数据') {
   return `<tr><td colspan="${colspan}" class="muted">${escapeHtml(text)}</td></tr>`;
 }

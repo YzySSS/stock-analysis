@@ -214,7 +214,7 @@ class DashboardRepositoryTests(unittest.TestCase):
         build.assert_called_once_with(8, compact=True)
         cache.assert_called_once_with(8, {"latest_trade_date": "2026-07-21"})
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["cache_key"], "dashboard:summary:v4:compact:8")
+        self.assertEqual(result["cache_key"], "dashboard:summary:v5:compact:8")
 
     def test_dashboard_cache_warmer_rejects_invalid_limit(self):
         with self.assertRaises(ValueError):
@@ -308,6 +308,14 @@ class DashboardRepositoryTests(unittest.TestCase):
 
         self.assertEqual(len(overview_factory.executions), 7)
         self.assertEqual(overview["previous_strength"]["market_strength"], 50.0)
+        breadth_sql = overview_factory.executions[0][0]
+        self.assertIn("INNER JOIN stock_instrument_lifecycle l", breadth_sql)
+        self.assertIn("l.listing_date < r.trade_date", breadth_sql)
+        self.assertIn(
+            "r.trade_date = ( SELECT MAX(trade_date) FROM stock_realtime_snapshot )",
+            breadth_sql,
+        )
+        self.assertIn("COUNT(DISTINCT r.batch_id) AS snapshot_batch_count", breadth_sql)
 
         themes_factory = ScriptedConnectionFactory()
         themes_repository = DashboardRepository(connection_factory=themes_factory)

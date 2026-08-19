@@ -90,7 +90,16 @@ class PagePayloadCompactionTests(unittest.TestCase):
     def test_dashboard_compact_payload_drops_large_tracking_context(self):
         raw = {
             "latest_trade_date": "2026-07-15",
-            "market_overview": {"strong_sectors": [], "weak_sectors": []},
+            "market_overview": {
+                "strong_sectors": [],
+                "weak_sectors": [],
+                "risk_alert": {
+                    "active": True,
+                    "level": "red",
+                    "blocking": False,
+                    "selection_allowed": True,
+                },
+            },
             "market_timing": {"signals": [], "article_factor_coverage": []},
             "hot_themes": {"items": [], "as_of": "2026-07-15"},
             "emotion_board": {"limit_up_pool": [], "hot_limit_watch_pool": [], "reversal_watch_pool": []},
@@ -106,6 +115,8 @@ class PagePayloadCompactionTests(unittest.TestCase):
 
         self.assertEqual(compact["latest_tracking_preview"][0]["code"], "sh.600000")
         self.assertNotIn("factor_scores", compact["latest_tracking_preview"][0])
+        self.assertEqual(compact["market_overview"]["risk_alert"]["level"], "red")
+        self.assertFalse(compact["market_overview"]["risk_alert"]["blocking"])
 
     def test_compact_backtest_run_omits_full_summary(self):
         row = {

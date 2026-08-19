@@ -353,7 +353,7 @@ class DashboardRepository:
         }
 
     def load_market_overview_inputs(self) -> dict[str, Any]:
-        st_name_sql = "(COALESCE(r.name, sb.name) LIKE '*ST%' OR COALESCE(r.name, sb.name) LIKE 'ST%' OR COALESCE(r.name, sb.name) LIKE '退市%')"
+        st_name_sql = "(COALESCE(r.name, sb.name, l.name) LIKE '*ST%' OR COALESCE(r.name, sb.name, l.name) LIKE 'ST%' OR COALESCE(r.name, sb.name, l.name) LIKE '退市%')"
         limit_rate_sql = f"""
             CASE
                 WHEN sb.code LIKE 'bj.%%' THEN 0.30
@@ -368,6 +368,22 @@ class DashboardRepository:
                     f"""
                     SELECT
                         COUNT(*) AS total,
+                        (
+                            SELECT COUNT(*)
+                            FROM stock_instrument_lifecycle expected
+                            WHERE expected.instrument_type = 'stock'
+                              AND expected.listing_date < (
+                                  SELECT MAX(trade_date) FROM stock_realtime_snapshot
+                              )
+                              AND (
+                                  expected.delisting_date IS NULL
+                                  OR expected.delisting_date >= (
+                                      SELECT MAX(trade_date) FROM stock_realtime_snapshot
+                                  )
+                              )
+                        ) AS expected_total,
+                        SUM(CASE WHEN r.is_stale = 0 THEN 1 ELSE 0 END) AS fresh_count,
+                        COUNT(DISTINCT r.batch_id) AS snapshot_batch_count,
                         SUM(r.pct_chg > 0) AS up_count,
                         SUM(r.pct_chg < 0) AS down_count,
                         SUM(r.pct_chg = 0) AS flat_count,
@@ -388,11 +404,21 @@ class DashboardRepository:
                         SUM(CASE WHEN r.pct_chg > 0 THEN r.amount ELSE 0 END) AS up_amount,
                         SUM(CASE WHEN r.pct_chg < 0 THEN r.amount ELSE 0 END) AS down_amount,
                         SUM(r.amount) AS total_amount,
+                        MIN(r.quote_time) AS earliest_quote_time,
                         MAX(r.quote_time) AS latest_quote_time,
+                        MAX(r.received_at) AS latest_received_at,
                         MAX(r.trade_date) AS trade_date
                     FROM stock_realtime_snapshot r
+                    INNER JOIN stock_instrument_lifecycle l
+                      ON l.code = r.code
+                     AND l.instrument_type = 'stock'
+                     AND l.listing_date < r.trade_date
+                     AND (l.delisting_date IS NULL OR l.delisting_date >= r.trade_date)
                     LEFT JOIN stock_basic sb ON r.code = sb.code
-                    WHERE r.pct_chg IS NOT NULL
+                    WHERE r.trade_date = (
+                            SELECT MAX(trade_date) FROM stock_realtime_snapshot
+                          )
+                      AND r.pct_chg IS NOT NULL
                       AND (r.code LIKE 'sh.%%' OR r.code LIKE 'sz.%%' OR r.code LIKE 'bj.%%')
                     """
                 )

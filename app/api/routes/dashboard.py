@@ -11,6 +11,7 @@ from fastapi import APIRouter, Query
 from app.dashboard.repository import DashboardRepository
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
 from app.error_learning.tracker import SelectionResultTracker
+from app.market_timing.intraday_alert import build_intraday_market_risk_alert
 from app.market_timing.service import build_market_timing_signal
 from app.shared.cache import get_cache_backend
 
@@ -409,7 +410,7 @@ def _compact_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _dashboard_cache_key(limit: int) -> str:
-    return f"dashboard:summary:v4:compact:{limit}"
+    return f"dashboard:summary:v5:compact:{limit}"
 
 
 def _get_cached_dashboard(limit: int) -> tuple[dict[str, Any], float] | None:
@@ -935,6 +936,8 @@ def _dashboard_market_overview() -> dict:
     previous_strength = inputs["previous_strength"]
 
     total = _to_int(breadth.get("total"))
+    expected_total = _to_int(breadth.get("expected_total"))
+    fresh_count = _to_int(breadth.get("fresh_count"))
     up_count = _to_int(breadth.get("up_count"))
     down_count = _to_int(breadth.get("down_count"))
     flat_count = _to_int(breadth.get("flat_count"))
@@ -1015,8 +1018,9 @@ def _dashboard_market_overview() -> dict:
 
     has_fund_flow = bool(fund_strong_rows or fund_weak_rows)
 
-    return {
-        "source": "stock_realtime_snapshot + market_sector_fund_flow_snapshot",
+    overview = {
+        "source": "stock_realtime_snapshot + stock_instrument_lifecycle + market_sector_fund_flow_snapshot",
+        "universe": "PIT_active_stocks_excluding_first_listing_day",
         "board_api_status": "akshare_board_spot_unstable_remote_disconnected",
         "trade_date": str(breadth.get("trade_date")) if breadth.get("trade_date") else None,
         "latest_quote_time": str(breadth.get("latest_quote_time")) if breadth.get("latest_quote_time") else None,
@@ -1027,6 +1031,13 @@ def _dashboard_market_overview() -> dict:
         "market_state": state,
         "market_state_label": _market_state_label(state),
         "total": total,
+        "expected_total": expected_total,
+        "coverage_ratio": round(total / expected_total, 4) if expected_total else None,
+        "fresh_count": fresh_count,
+        "fresh_ratio": round(fresh_count / total, 4) if total else None,
+        "snapshot_batch_count": _to_int(breadth.get("snapshot_batch_count")),
+        "earliest_quote_time": str(breadth.get("earliest_quote_time")) if breadth.get("earliest_quote_time") else None,
+        "latest_received_at": str(breadth.get("latest_received_at")) if breadth.get("latest_received_at") else None,
         "up_count": up_count,
         "down_count": down_count,
         "flat_count": flat_count,
@@ -1061,6 +1072,8 @@ def _dashboard_market_overview() -> dict:
         "strong_sectors": [format_fund_sector(row) for row in fund_strong_rows] if has_fund_flow else [format_sector(row) for row in strong_rows],
         "weak_sectors": [format_fund_sector(row) for row in fund_weak_rows] if has_fund_flow else [format_sector(row) for row in weak_rows],
     }
+    overview["risk_alert"] = build_intraday_market_risk_alert(overview)
+    return overview
 
 
 def _dashboard_hot_themes(limit: int = 8) -> dict:

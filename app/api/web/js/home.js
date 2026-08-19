@@ -215,6 +215,7 @@ function setClass(selector, className) {
 
 function renderMarketOverview(overview) {
   if (!overview) return;
+  renderMarketRiskAlert('#home-market-risk-alert', overview.risk_alert || null);
   const quote = splitDateTime(overview.latest_quote_time);
   const strength = Number(overview.market_strength || 0);
   const total = Number(overview.total || 0);

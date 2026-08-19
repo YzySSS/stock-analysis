@@ -7,6 +7,30 @@ const savedSelectionKeys = new Set();
 const SELECTION_RUN_DURATION_KEY = 'selection.run.durationMs';
 const DEFAULT_SELECTION_RUN_ESTIMATE_MS = 110000;
 
+async function loadSelectionMarketRiskAlert() {
+  const container = qs('#selection-market-risk-alert');
+  if (!container) return;
+  try {
+    const dashboard = await fetchJson('/api/dashboard/summary?limit=8&compact=true');
+    renderMarketRiskAlert(
+      '#selection-market-risk-alert',
+      dashboard.market_overview?.risk_alert || null,
+    );
+  } catch (error) {
+    container.hidden = false;
+    container.className = 'market-risk-alert unavailable';
+    container.innerHTML = `
+      <div class="market-risk-alert-head">
+        <span class="market-risk-alert-badge">数据提示</span>
+        <div>
+          <strong>盘中市场预警暂时无法加载</strong>
+          <p>${escapeHtml(error.message || '请稍后刷新页面')}</p>
+        </div>
+      </div>
+    `;
+  }
+}
+
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -1318,6 +1342,7 @@ async function runSelection(event) {
 }
 
 async function refreshSelectionPage() {
+  await loadSelectionMarketRiskAlert();
   await loadStrategies();
   if (hasExecutedSelection || (qs('#selection-run-id')?.value || '').trim()) {
     await loadSelectionResults();
@@ -1390,6 +1415,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncScoreInputs(qs('#selection-min-score'));
     syncInstrumentSegments();
     syncMarketBoardSegments();
+    await loadSelectionMarketRiskAlert();
     await loadStrategies();
     renderSelectionPlaceholder();
     bindTooltips();

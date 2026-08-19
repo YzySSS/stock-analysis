@@ -203,7 +203,7 @@ class AuthBoundaryTests(unittest.TestCase):
         }
         for filename in product_pages:
             source = (pages_dir / filename).read_text(encoding="utf-8")
-            self.assertIn("/static/js/common.js?v=20260723auth3", source)
+            self.assertIn("/static/js/common.js?v=20260819marketalert1", source)
 
     def test_product_pages_use_the_stock_research_brand_icon(self):
         web_dir = PROJECT_ROOT / "app" / "api" / "web"
