@@ -3,13 +3,25 @@ from __future__ import annotations
 import json
 import math
 from datetime import datetime, time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from app.data_ingestion.market_opinion_repository import hydrate_sector_opinion_rows
+from app.data_ingestion.market_opinion_events import (
+    ACTIONABLE_CONTENT_ROLES,
+    CONFIRMED_EVENT_STATES,
+    CONFIRMED_RELATION_STATES,
+    EVIDENCE_RULE_VERSION,
+    RELATION_RULE_VERSION,
+    aggregate_event_evidence,
+    build_event_relation_bundle,
+)
+from app.market_timing.intraday_alert import build_intraday_market_risk_alert
 from app.shared.sentiment_scoring import enrich_opinion_news_item
 from app.shared.market_opinion_taxonomy import THEME_FUND_FLOW_ANCHORS, THEME_INDUSTRY_HINTS
+from app.shared.market_clock import to_shanghai_wall_clock
 from app.shared.strategy_loader import StrategyLoader
 from app.stock_selection.repository import SelectionRepository
+from app.stock_selection.sentiment_v06_intraday import summarize_intraday_path
 from app.stock_selection.trade_plan import build_selection_trade_plan
 
 
@@ -20,7 +32,12 @@ THEME_TIER_LABELS = {
     "broad_related": "泛相关",
     "unknown": "未分层",
 }
-SENTIMENT_STRATEGY_IDS = frozenset({"a_share_sentiment", "a_share_sentiment_v05"})
+SENTIMENT_STRATEGY_IDS = frozenset(
+    {"a_share_sentiment", "a_share_sentiment_v05", "a_share_sentiment_v06"}
+)
+PIT_FUNDAMENTAL_STRATEGY_IDS = frozenset(
+    {"a_share_sentiment", "a_share_sentiment_v06"}
+)
 
 
 class StockSelector:
@@ -90,8 +107,24 @@ class StockSelector:
             parsed = self._parse_as_of(explicit)
             if parsed is None:
                 raise ValueError("invalid decision_as_of")
-            return parsed
-        return self._requested_market_opinion_as_of()
+            return (
+                to_shanghai_wall_clock(parsed)
+                if self.strategy_id == "a_share_sentiment_v06"
+                else parsed
+            )
+        requested = self._requested_market_opinion_as_of()
+        if requested is not None:
+            return (
+                to_shanghai_wall_clock(requested)
+                if self.strategy_id == "a_share_sentiment_v06"
+                else requested
+            )
+        # V0.6 is defined by a point-in-time decision contract. A manual run
+        # without an explicit replay cutoff therefore freezes its own wall
+        # clock instead of silently falling back to end-of-day inputs.
+        if self.strategy_id == "a_share_sentiment_v06":
+            return datetime.now()
+        return None
 
     def _expected_realtime_batch_ids(self) -> List[str]:
         raw = (
@@ -185,6 +218,288 @@ class StockSelector:
         return None
 
     @staticmethod
+    def _decode_json_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        if not value:
+            return {}
+        try:
+            decoded = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+    @classmethod
+    def _persistent_v06_bundle(
+        cls,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        """Rebuild point-in-time event state from the append-only ledger rows.
+
+        Stored confirmation is deliberately ignored here: later evidence may
+        have upgraded it. Confirmation is recomputed only from evidence that
+        the repository already constrained to the decision cutoff.
+        """
+
+        evidence_by_id: Dict[str, Dict[str, Any]] = {}
+        relation_by_id: Dict[str, Dict[str, Any]] = {}
+        for raw in rows:
+            row = dict(raw)
+            event_id = str(row.get("canonical_event_id") or "").strip()
+            evidence_id = str(row.get("evidence_id") or "").strip()
+            if not event_id or not evidence_id:
+                continue
+            facts = cls._decode_json_mapping(row.get("facts_json"))
+            evidence_metadata = cls._decode_json_mapping(
+                row.get("evidence_metadata_json")
+            )
+            publisher = str(
+                row.get("original_publisher") or row.get("source_id") or ""
+            ).strip()
+            evidence_by_id[evidence_id] = {
+                "canonical_event_id": event_id,
+                "event_revision": int(row.get("event_revision") or 1),
+                "revision_hash": row.get("revision_hash"),
+                "evidence_id": evidence_id,
+                "raw_id": row.get("raw_id"),
+                "original_news_id": row.get("original_news_id"),
+                "source_id": row.get("source_id"),
+                "original_publisher": row.get("original_publisher"),
+                "publisher_key": publisher.casefold() or None,
+                "collection_channel": row.get("collection_channel"),
+                "source_type": row.get("source_type"),
+                "credibility_rule_version": row.get("credibility_rule_version"),
+                "credibility_score": row.get("credibility_score"),
+                "impact_score": row.get("impact_score"),
+                "is_primary_source": bool(row.get("is_primary_source")),
+                "is_independent_confirmation": bool(
+                    row.get("is_independent_confirmation")
+                ),
+                "repost_of_evidence_id": row.get("repost_of_evidence_id"),
+                "source_time": str(row.get("source_time"))
+                if row.get("source_time")
+                else None,
+                "published_at": str(row.get("published_at"))
+                if row.get("published_at")
+                else None,
+                "first_seen_at": str(row.get("first_seen_at"))
+                if row.get("first_seen_at")
+                else None,
+                "received_at": str(row.get("received_at"))
+                if row.get("received_at")
+                else None,
+                "available_at": str(row.get("available_at"))
+                if row.get("available_at")
+                else None,
+                "eligible_at_decision": True,
+                "availability_status": "available",
+                "title": row.get("title"),
+                "summary": row.get("evidence_excerpt"),
+                "evidence_excerpt": row.get("evidence_excerpt"),
+                "source_url": row.get("source_url"),
+                "raw_payload_hash": row.get("raw_payload_hash"),
+                "expectation_status": evidence_metadata.get(
+                    "expectation_status", "unknown"
+                ),
+                "expectation_value": evidence_metadata.get("expectation_value"),
+                "actual_value": evidence_metadata.get("actual_value"),
+                "expectation_unit": evidence_metadata.get("expectation_unit"),
+                "actual_unit": evidence_metadata.get("actual_unit"),
+                "surprise_pct": evidence_metadata.get("surprise_pct"),
+                "event_type": row.get("event_type"),
+                "content_role": row.get("content_role"),
+                "direction": row.get("direction"),
+                "effective_until": str(row.get("effective_until"))
+                if row.get("effective_until")
+                else None,
+                "driver_horizon": facts.get("driver_horizon") or "unknown",
+                "next_milestone": facts.get("next_milestone"),
+                "is_one_off": bool(facts.get("is_one_off")),
+                "is_terminal": bool(facts.get("is_terminal")),
+                "persistence_score": facts.get("persistence_score"),
+            }
+            relation_id = str(row.get("relation_id") or "").strip()
+            if relation_id:
+                relation_by_id[relation_id] = {
+                    "relation_id": relation_id,
+                    "canonical_event_id": event_id,
+                    "event_revision": int(row.get("event_revision") or 1),
+                    "code": row.get("code"),
+                    "relation_type": row.get("relation_type"),
+                    "relation_status": row.get("relation_status"),
+                    "relation_score": row.get("relation_score"),
+                    "benefit_scale": row.get("benefit_scale"),
+                    "benefit_scale_unit": row.get("benefit_scale_unit"),
+                    "evidence_id": row.get("relation_evidence_id"),
+                    "evidence_excerpt": row.get("relation_evidence_excerpt"),
+                    "relation_reason": row.get("relation_reason"),
+                    "is_adverse_veto": bool(row.get("is_adverse_veto")),
+                    "valid_from": str(row.get("valid_from"))
+                    if row.get("valid_from")
+                    else None,
+                    "valid_until": str(row.get("valid_until"))
+                    if row.get("valid_until")
+                    else None,
+                    "relation_rule_version": row.get("relation_rule_version"),
+                }
+        return {
+            "events": aggregate_event_evidence(list(evidence_by_id.values())),
+            "relations": list(relation_by_id.values()),
+        }
+
+    @staticmethod
+    def _merge_v06_bundles(
+        bundles: Sequence[Mapping[str, Any]],
+        *,
+        has_theme_lane: bool,
+    ) -> Dict[str, Any]:
+        evidence_by_id: Dict[str, Dict[str, Any]] = {}
+        evidence_id_by_raw_id: Dict[str, str] = {}
+        relation_by_id: Dict[str, Dict[str, Any]] = {}
+        excluded_by_event: Dict[str, int] = {}
+        for bundle in bundles:
+            for event in bundle.get("events") or []:
+                if not isinstance(event, Mapping):
+                    continue
+                event_id = str(event.get("canonical_event_id") or "").strip()
+                if event_id:
+                    excluded_by_event[event_id] = max(
+                        excluded_by_event.get(event_id, 0),
+                        int(event.get("excluded_evidence_count") or 0),
+                    )
+                for evidence in event.get("evidence") or []:
+                    if not isinstance(evidence, Mapping):
+                        continue
+                    evidence_id = str(evidence.get("evidence_id") or "").strip()
+                    if evidence_id:
+                        raw_id = str(evidence.get("raw_id") or "").strip()
+                        previous_id = evidence_id_by_raw_id.get(raw_id) if raw_id else None
+                        if previous_id and previous_id != evidence_id:
+                            # The normalized legacy snapshot omits some raw
+                            # collector fields, so its deterministic evidence
+                            # id can differ from the append-only ledger id for
+                            # the same raw row. The ledger bundle is appended
+                            # last and therefore replaces the bridge copy.
+                            evidence_by_id.pop(previous_id, None)
+                        if raw_id:
+                            evidence_id_by_raw_id[raw_id] = evidence_id
+                        evidence_by_id[evidence_id] = dict(evidence)
+            for relation in bundle.get("relations") or []:
+                if not isinstance(relation, Mapping):
+                    continue
+                relation_id = str(relation.get("relation_id") or "").strip()
+                if relation_id:
+                    relation_by_id[relation_id] = dict(relation)
+
+        events = aggregate_event_evidence(list(evidence_by_id.values()))
+        for event in events:
+            event_id = str(event.get("canonical_event_id") or "")
+            event["excluded_evidence_count"] = max(
+                int(event.get("excluded_evidence_count") or 0),
+                excluded_by_event.get(event_id, 0),
+            )
+        event_ids = {
+            str(event.get("canonical_event_id") or "")
+            for event in events
+            if event.get("canonical_event_id")
+        }
+        relations = [
+            relation
+            for relation in relation_by_id.values()
+            if str(relation.get("canonical_event_id") or "") in event_ids
+        ]
+        relations_by_event: Dict[str, List[Dict[str, Any]]] = {}
+        for relation in relations:
+            relations_by_event.setdefault(
+                str(relation.get("canonical_event_id") or ""), []
+            ).append(relation)
+
+        direct_watch_ids: List[str] = []
+        direct_ids: List[str] = []
+        adverse_ids: List[str] = []
+        for event in events:
+            event_id = str(event.get("canonical_event_id") or "")
+            event_relations = relations_by_event.get(event_id, [])
+            confirmed_relation = any(
+                relation.get("relation_status") in CONFIRMED_RELATION_STATES
+                for relation in event_relations
+            )
+            adverse = any(bool(relation.get("is_adverse_veto")) for relation in event_relations)
+            if (
+                int(event.get("available_evidence_count") or 0) > 0
+                and event.get("content_role") in ACTIONABLE_CONTENT_ROLES
+                and event.get("direction") == "positive"
+                and confirmed_relation
+                and not event.get("is_terminal")
+            ):
+                direct_watch_ids.append(event_id)
+                if event.get("confirmation_status") in CONFIRMED_EVENT_STATES:
+                    direct_ids.append(event_id)
+            if (
+                int(event.get("available_evidence_count") or 0) > 0
+                and event.get("content_role") == "risk_event"
+                and event.get("confirmation_status") in CONFIRMED_EVENT_STATES
+                and adverse
+            ):
+                adverse_ids.append(event_id)
+
+        lanes: List[str] = []
+        if direct_watch_ids:
+            lanes.append("direct_catalyst")
+        if has_theme_lane:
+            lanes.append("theme_leader")
+        available_count = sum(
+            int(event.get("available_evidence_count") or 0) for event in events
+        )
+        excluded_count = sum(
+            int(event.get("excluded_evidence_count") or 0) for event in events
+        ) + sum(
+            count
+            for event_id, count in excluded_by_event.items()
+            if event_id not in event_ids
+        )
+        missing_fields: List[str] = []
+        if not evidence_by_id:
+            missing_fields.append("event_evidence")
+        if any(not row.get("received_at") for row in evidence_by_id.values()):
+            missing_fields.append("received_at")
+        if direct_ids and not any(
+            relation.get("evidence_excerpt")
+            for relation in relations
+            if str(relation.get("canonical_event_id") or "") in direct_ids
+        ):
+            missing_fields.append("business_relation_excerpt")
+        return {
+            "events": events,
+            "relations": sorted(
+                relations,
+                key=lambda row: (
+                    str(row.get("canonical_event_id") or ""),
+                    str(row.get("relation_id") or ""),
+                ),
+            ),
+            "candidate_lanes": lanes,
+            "direct_event_ids": sorted(set(direct_ids)),
+            "direct_watch_event_ids": sorted(set(direct_watch_ids)),
+            "adverse_event_ids": sorted(set(adverse_ids)),
+            "evidence_ids": sorted(evidence_by_id),
+            "evidence_quality": {
+                "status": (
+                    "invalid"
+                    if adverse_ids
+                    else "complete"
+                    if direct_ids or (has_theme_lane and available_count > 0)
+                    else "partial"
+                ),
+                "available_count": available_count,
+                "excluded_after_decision_count": excluded_count,
+                "missing_fields": sorted(set(missing_fields)),
+                "evidence_rule_version": EVIDENCE_RULE_VERSION,
+                "relation_rule_version": RELATION_RULE_VERSION,
+            },
+        }
+
+    @staticmethod
     def _stock_recognition_context(stock: Dict[str, Any], rank: int, stock_count: int, match_type: str | None) -> Dict[str, Any]:
         """Score whether a stock is a recognizable front-row name inside a hot theme."""
         stock_score = float(stock.get("score") or 0)
@@ -198,7 +513,13 @@ class StockSelector:
             if amount > 0
             else 50.0
         )
-        direct_bonus = 10.0 if match_type == "direct_news_match" else -6.0 if match_type == "sector_candidate" else 0.0
+        direct_bonus = (
+            10.0
+            if match_type == "direct_news_match"
+            else -6.0
+            if match_type in {"sector_candidate", "sector_candidate_current"}
+            else 0.0
+        )
         news_bonus = min(news_count * 4.0, 12.0)
         limitup_bonus = 8.0 if pct_chg >= 9.0 else 0.0
         recognition = StockSelector._round_score(
@@ -402,7 +723,7 @@ class StockSelector:
     def _build_candidate(self, row: Dict[str, Any]) -> Dict[str, Any]:
         pe = float(row["pe_tushare"]) if row.get("pe_tushare") is not None else None
         pb = float(row["pb_tushare"]) if row.get("pb_tushare") is not None else None
-        use_pit_fundamental = self.strategy_id == "a_share_sentiment"
+        use_pit_fundamental = self.strategy_id in PIT_FUNDAMENTAL_STRATEGY_IDS
         fundamental_prefix = "pit_" if use_pit_fundamental else ""
 
         def fundamental_value(name: str) -> float | None:
@@ -519,6 +840,13 @@ class StockSelector:
         realtime_mf_net = float(row["realtime_mf_net"]) if row.get("realtime_mf_net") is not None else None
         realtime_mf_amount = float(row["realtime_mf_amount"]) if row.get("realtime_mf_amount") is not None else None
         realtime_mf_turnover_rate = float(row["realtime_mf_turnover_rate"]) if row.get("realtime_mf_turnover_rate") is not None else None
+        realtime_mf_received_at = (
+            str(row["realtime_mf_received_at"])
+            if row.get("realtime_mf_received_at")
+            else None
+        )
+        realtime_mf_source = row.get("realtime_mf_source")
+        realtime_mf_source_unit = row.get("realtime_mf_source_unit")
         popularity_rank = int(row.get("popularity_rank") or 0) if row.get("popularity_rank") is not None else None
         popularity_source_score = float(row["popularity_source_score"]) if row.get("popularity_source_score") is not None else None
         popularity_score = float(row["popularity_score"]) if row.get("popularity_score") is not None else None
@@ -743,6 +1071,9 @@ class StockSelector:
             "realtime_mf_turnover_rate": realtime_mf_turnover_rate,
             "realtime_mf_quote_time": str(row["realtime_mf_quote_time"]) if row.get("realtime_mf_quote_time") else None,
             "realtime_mf_trade_date": str(row["realtime_mf_trade_date"]) if row.get("realtime_mf_trade_date") else None,
+            "realtime_mf_received_at": realtime_mf_received_at,
+            "realtime_mf_source": realtime_mf_source,
+            "realtime_mf_source_unit": realtime_mf_source_unit,
             "popularity_source": row.get("popularity_source"),
             "popularity_rank": popularity_rank,
             "popularity_source_score": popularity_source_score,
@@ -808,6 +1139,145 @@ class StockSelector:
             "missing_fields": sorted(set(missing_fields)),
         }
 
+    @classmethod
+    def _attach_v06_market_regime(
+        cls,
+        candidates: List[Dict[str, Any]],
+        *,
+        decision_as_of: datetime,
+        quote_ttl_seconds: int,
+    ) -> Dict[str, Any]:
+        """Derive a point-in-time market gate from the loaded realtime batch.
+
+        The existing broad-market alert remains a non-blocking product alert.
+        V0.6 consumes the same evidence under its own versioned entry contract.
+        """
+
+        decision_clock = to_shanghai_wall_clock(decision_as_of)
+        universe = [
+            item
+            for item in candidates
+            if item.get("lifecycle_known") is not False
+            and str(item.get("list_status") or "L").upper() not in {"D", "DELISTING"}
+            and (item.get("listed_trade_days") is None or int(item.get("listed_trade_days") or 0) > 1)
+        ]
+        observed: List[Dict[str, Any]] = []
+        fresh_count = 0
+        latest_quote: datetime | None = None
+        for item in universe:
+            pct_chg = item.get("realtime_pct_chg")
+            quote_time = cls._parse_as_of(item.get("realtime_quote_time"))
+            received_at = cls._parse_as_of(item.get("realtime_received_at"))
+            if (
+                pct_chg is None
+                or quote_time is None
+                or received_at is None
+                or bool(item.get("realtime_is_stale"))
+                or str(item.get("realtime_trade_date") or "")[:10]
+                != decision_clock.date().isoformat()
+            ):
+                continue
+            quote_time = to_shanghai_wall_clock(quote_time)
+            received_at = to_shanghai_wall_clock(received_at)
+            if (
+                quote_time > decision_clock
+                or received_at > decision_clock
+                or received_at < quote_time
+            ):
+                continue
+            latest_quote = quote_time if latest_quote is None else max(latest_quote, quote_time)
+            quote_age = (decision_clock - quote_time).total_seconds()
+            receive_age = (decision_clock - received_at).total_seconds()
+            if quote_age <= quote_ttl_seconds and receive_age <= quote_ttl_seconds:
+                fresh_count += 1
+            observed.append(item)
+
+        amounts = [
+            max(float(item.get("realtime_amount") or 0.0), 0.0)
+            for item in observed
+        ]
+        pct_values = [float(item.get("realtime_pct_chg") or 0.0) for item in observed]
+        total_amount = sum(amounts)
+        overview = {
+            "trade_date": decision_clock.date().isoformat(),
+            "latest_quote_time": latest_quote,
+            "total": len(observed),
+            "expected_total": len(universe),
+            "fresh_count": fresh_count,
+            "up_count": sum(value > 0 for value in pct_values),
+            "down_count": sum(value < 0 for value in pct_values),
+            "strong_down_count": sum(value <= -5.0 for value in pct_values),
+            "limit_up_like": sum(bool(item.get("is_limit_up")) for item in observed),
+            "limit_down_like": sum(value <= -9.5 for value in pct_values),
+            "avg_pct_chg": (
+                sum(pct_values) / len(pct_values) if pct_values else None
+            ),
+            "amount_weighted_pct_chg": (
+                sum(value * amount for value, amount in zip(pct_values, amounts))
+                / total_amount
+                if total_amount > 0
+                else None
+            ),
+            "up_amount": sum(
+                amount
+                for value, amount in zip(pct_values, amounts)
+                if value > 0
+            ),
+            "down_amount": sum(
+                amount
+                for value, amount in zip(pct_values, amounts)
+                if value < 0
+            ),
+        }
+        alert = build_intraday_market_risk_alert(
+            overview,
+            current_date=decision_clock.date(),
+        )
+        background_state = str(
+            next(
+                (item.get("market_state") for item in candidates if item.get("market_state")),
+                "unknown",
+            )
+        ).strip().lower()
+        if not bool((alert.get("data_quality") or {}).get("ready")):
+            regime = "defensive"
+            regime_reason = "realtime_market_evidence_incomplete"
+        elif alert.get("level") in {"red", "orange"}:
+            regime = "defensive"
+            regime_reason = f"broad_market_{alert.get('level')}_risk"
+        elif alert.get("level") == "yellow":
+            regime = "cautious"
+            regime_reason = "broad_market_yellow_risk"
+        elif background_state in {"bear", "weak", "defensive"}:
+            regime = "defensive"
+            regime_reason = "previous_complete_market_context_defensive"
+        elif background_state in {"neutral", "cautious", "pressured", "unknown"}:
+            regime = "cautious"
+            regime_reason = "current_breadth_ready_background_not_risk_on"
+        else:
+            regime = "risk_on"
+            regime_reason = "current_breadth_ready_background_supportive"
+
+        coverage = (len(observed) / len(universe)) if universe else 0.0
+        for item in candidates:
+            item["market_regime"] = regime
+            item["realtime_market_coverage_ratio"] = round(coverage, 6)
+            item["sentiment_v06_market_risk"] = {
+                "level": alert.get("level"),
+                "data_quality_status": (alert.get("data_quality") or {}).get("status"),
+                "regime": regime,
+                "regime_reason": regime_reason,
+            }
+        return {
+            "regime": regime,
+            "regime_reason": regime_reason,
+            "coverage_ratio": round(coverage, 6),
+            "expected_count": len(universe),
+            "observed_count": len(observed),
+            "fresh_count": fresh_count,
+            "alert": alert,
+        }
+
     def _attach_market_opinion_context(
         self,
         candidates: List[Dict[str, Any]],
@@ -850,6 +1320,8 @@ class StockSelector:
             or self.strategy.config.get("market_opinion_as_of")
         )
         requested_as_of_dt = decision_as_of or self._requested_market_opinion_as_of()
+        if self.strategy_id == "a_share_sentiment_v06" and requested_as_of_dt:
+            requested_as_of_dt = to_shanghai_wall_clock(requested_as_of_dt)
         if requested_as_of:
             if not requested_as_of_dt:
                 diagnostics["reason"] = "invalid_market_opinion_as_of"
@@ -879,51 +1351,91 @@ class StockSelector:
             "latest_candidate_trade_date": latest_candidate_trade_date,
             "requested_as_of": requested_as_of_dt.strftime("%Y-%m-%d %H:%M:%S") if requested_as_of_dt else None,
         })
-        if not sectors:
-            diagnostics["reason"] = "no_fresh_or_trade_date_aligned_sector_opinion_daily_rows"
-            return diagnostics
-
-        latest_as_of = sectors[0].get("as_of_datetime")
-        if isinstance(latest_as_of, str):
-            latest_as_of_dt = datetime.fromisoformat(latest_as_of.replace("Z", "+00:00"))
-        else:
-            latest_as_of_dt = latest_as_of
-        if not latest_as_of_dt:
-            diagnostics["reason"] = "sector_opinion_missing_as_of_datetime"
-            return diagnostics
-        if requested_as_of_dt:
-            now_dt = requested_as_of_dt
-            if latest_as_of_dt.tzinfo and now_dt.tzinfo is None:
-                now_dt = now_dt.replace(tzinfo=latest_as_of_dt.tzinfo)
-            elif not latest_as_of_dt.tzinfo and now_dt.tzinfo is not None:
-                now_dt = now_dt.replace(tzinfo=None)
-        else:
-            now_dt = datetime.now(latest_as_of_dt.tzinfo) if latest_as_of_dt.tzinfo else datetime.now()
-        age_minutes = (now_dt - latest_as_of_dt).total_seconds() / 60
-        sector_trade_date = str(sectors[0].get("trade_date")) if sectors and sectors[0].get("trade_date") else None
-        same_trade_date = bool(latest_candidate_trade_date and sector_trade_date == latest_candidate_trade_date)
-        stale_accepted = (not requested_as_of_dt) and allow_same_trade_date_stale and same_trade_date
-        diagnostics.update({
-            "latest_as_of": str(latest_as_of),
-            "age_minutes": round(age_minutes, 2),
-            "sector_trade_date": sector_trade_date,
-            "same_trade_date_stale_accepted": bool(age_minutes > max_age_minutes and stale_accepted),
-        })
-        if not requested_as_of_dt and age_minutes > max_age_minutes and not stale_accepted:
-            diagnostics["reason"] = "sector_opinion_stale"
-            return diagnostics
-
         eligible_sectors: List[Dict[str, Any]] = []
-        for sector in sectors:
-            sector_type = str(sector.get("sector_type") or "").strip()
-            sector_name = str(sector.get("sector_name") or "").strip()
-            if allowed_sector_types and sector_type not in allowed_sector_types:
-                continue
-            if sector_name in excluded_sector_names:
-                continue
-            eligible_sectors.append(sector)
+        if not sectors:
+            diagnostics["sector_snapshot_status"] = "missing"
+            diagnostics["reason"] = (
+                "direct_event_recall_only_no_sector_snapshot"
+                if self.strategy_id == "a_share_sentiment_v06"
+                else "no_fresh_or_trade_date_aligned_sector_opinion_daily_rows"
+            )
+            if self.strategy_id != "a_share_sentiment_v06":
+                return diagnostics
+        else:
+            latest_as_of = sectors[0].get("as_of_datetime")
+            if isinstance(latest_as_of, str):
+                latest_as_of_dt = datetime.fromisoformat(
+                    latest_as_of.replace("Z", "+00:00")
+                )
+            else:
+                latest_as_of_dt = latest_as_of
+            if not latest_as_of_dt:
+                diagnostics["reason"] = "sector_opinion_missing_as_of_datetime"
+                return diagnostics
+            if self.strategy_id == "a_share_sentiment_v06":
+                latest_as_of_dt = to_shanghai_wall_clock(latest_as_of_dt)
+            if requested_as_of_dt:
+                now_dt = requested_as_of_dt
+                if latest_as_of_dt.tzinfo and now_dt.tzinfo is None:
+                    now_dt = now_dt.replace(tzinfo=latest_as_of_dt.tzinfo)
+                elif not latest_as_of_dt.tzinfo and now_dt.tzinfo is not None:
+                    now_dt = now_dt.replace(tzinfo=None)
+            else:
+                now_dt = (
+                    datetime.now(latest_as_of_dt.tzinfo)
+                    if latest_as_of_dt.tzinfo
+                    else datetime.now()
+                )
+            age_minutes = (now_dt - latest_as_of_dt).total_seconds() / 60
+            sector_trade_date = (
+                str(sectors[0].get("trade_date"))
+                if sectors[0].get("trade_date")
+                else None
+            )
+            same_trade_date = bool(
+                latest_candidate_trade_date
+                and sector_trade_date == latest_candidate_trade_date
+            )
+            stale_accepted = (
+                not requested_as_of_dt
+                and allow_same_trade_date_stale
+                and same_trade_date
+            )
+            diagnostics.update(
+                {
+                    "sector_snapshot_status": "available",
+                    "latest_as_of": str(latest_as_of),
+                    "age_minutes": round(age_minutes, 2),
+                    "sector_trade_date": sector_trade_date,
+                    "same_trade_date_stale_accepted": bool(
+                        age_minutes > max_age_minutes and stale_accepted
+                    ),
+                }
+            )
+            if (
+                not requested_as_of_dt
+                and age_minutes > max_age_minutes
+                and not stale_accepted
+            ):
+                diagnostics["reason"] = "sector_opinion_stale"
+                return diagnostics
+
+            for sector in sectors:
+                sector_type = str(sector.get("sector_type") or "").strip()
+                sector_name = str(sector.get("sector_name") or "").strip()
+                if allowed_sector_types and sector_type not in allowed_sector_types:
+                    continue
+                if sector_name in excluded_sector_names:
+                    continue
+                eligible_sectors.append(sector)
 
         by_code: Dict[str, Dict[str, Any]] = {}
+        v06_contexts_by_code: Dict[str, List[Dict[str, Any]]] = {}
+        candidate_lookup = {
+            str(item.get("code") or ""): item
+            for item in candidates
+            if str(item.get("code") or "")
+        }
         theme_tiers = self._build_theme_tiers(eligible_sectors, fund_rows)
         for sector in eligible_sectors:
             try:
@@ -943,8 +1455,86 @@ class StockSelector:
             weighted_impact = float(sector.get("weighted_impact_score") or 0)
             sector_type = str(sector.get("sector_type") or "").strip()
             sector_name = str(sector.get("sector_name") or "").strip()
-            stock_count = len(stocks or [])
-            for rank, stock in enumerate(stocks or [], start=1):
+            sector_stocks = list(stocks or [])
+            if self.strategy_id == "a_share_sentiment_v06":
+                known_codes = {
+                    str(row.get("code") or "")
+                    for row in sector_stocks
+                    if str(row.get("code") or "")
+                }
+                allowed_industries = THEME_INDUSTRY_HINTS.get(sector_name) or set()
+                current_expansion = [
+                    item
+                    for item in candidates
+                    if item.get("realtime_pct_chg") is not None
+                    and str(item.get("code") or "") not in known_codes
+                    and (
+                        (
+                            sector_type == "industry"
+                            and str(item.get("industry") or "") == sector_name
+                        )
+                        or (
+                            sector_type == "theme"
+                            and bool(allowed_industries)
+                            and str(item.get("industry") or "")
+                            in allowed_industries
+                        )
+                    )
+                ]
+                current_expansion.sort(
+                    key=lambda row: (
+                        -float(row.get("realtime_pct_chg") or 0.0),
+                        -float(row.get("realtime_amount") or 0.0),
+                        str(row.get("code") or ""),
+                    )
+                )
+                for item in current_expansion[:30]:
+                    sector_stocks.append(
+                        {
+                            "code": item.get("code"),
+                            "name": item.get("name"),
+                            "industry": item.get("industry"),
+                            "score": 0.0,
+                            "news_count": 0,
+                            "pct_chg": item.get("realtime_pct_chg"),
+                            "amount": item.get("realtime_amount"),
+                            "match_type": "sector_candidate_current",
+                            "match_reason": (
+                                "当前同批次行业/主题成分扩召回；仅属主题轨，"
+                                "不代表公司直接受益"
+                            ),
+                            "matched_news": [],
+                        }
+                    )
+            stock_count = len(sector_stocks)
+            live_theme_members = [
+                candidate_lookup[str(stock.get("code"))]
+                for stock in sector_stocks
+                if str(stock.get("code") or "") in candidate_lookup
+                and candidate_lookup[str(stock.get("code"))].get("realtime_pct_chg")
+                is not None
+            ]
+            live_theme_members.sort(
+                key=lambda row: (
+                    -float(row.get("realtime_pct_chg") or 0.0),
+                    str(row.get("code") or ""),
+                )
+            )
+            live_theme_rank = {
+                str(row.get("code")): index
+                for index, row in enumerate(live_theme_members, start=1)
+            }
+            theme_current_breadth_ratio = (
+                sum(
+                    1
+                    for row in live_theme_members
+                    if float(row.get("realtime_pct_chg") or 0.0) > 0.0
+                )
+                / len(live_theme_members)
+                if live_theme_members
+                else None
+            )
+            for rank, stock in enumerate(sector_stocks, start=1):
                 code = stock.get("code")
                 if not code:
                     continue
@@ -956,9 +1546,6 @@ class StockSelector:
                     continue
                 stock_score = float(stock.get("score") or 0)
                 combined = sector_score * 0.72 + stock_score * 0.28
-                existing = by_code.get(code)
-                if existing and existing.get("opinion_combined_score", 0) >= combined:
-                    continue
                 match_reason = stock.get("match_reason") or "板块热度候选股"
                 match_type = stock.get("match_type")
                 if not match_type:
@@ -972,11 +1559,14 @@ class StockSelector:
                 recognition_context = self._stock_recognition_context(stock, rank, stock_count, match_type)
                 theme_tier = theme_tiers.get(sector_name) if sector_type == "theme" else None
                 market_theme_score_delta = float((theme_tier or {}).get("market_theme_score_delta") or 0)
-                if match_type == "sector_candidate" and theme_tier:
+                if match_type in {"sector_candidate", "sector_candidate_current"} and theme_tier:
                     market_theme_score_delta -= 2.0
-                if match_type == "sector_candidate" and recognition_context["opinion_stock_recognition_score"] < 58:
+                if (
+                    match_type in {"sector_candidate", "sector_candidate_current"}
+                    and recognition_context["opinion_stock_recognition_score"] < 58
+                ):
                     market_theme_score_delta -= 3.0
-                by_code[code] = {
+                candidate_context = {
                     "opinion_sector_type": sector.get("sector_type"),
                     "opinion_sector_name": sector.get("sector_name"),
                     "opinion_as_of_datetime": str(sector.get("as_of_datetime")) if sector.get("as_of_datetime") else None,
@@ -999,7 +1589,189 @@ class StockSelector:
                     **recognition_context,
                     **(theme_tier or {}),
                     "market_theme_score_delta": market_theme_score_delta if theme_tier else None,
-                    "market_theme_match_adjustment": -2.0 if match_type == "sector_candidate" and theme_tier else 0.0,
+                    "market_theme_match_adjustment": (
+                        -2.0
+                        if match_type
+                        in {"sector_candidate", "sector_candidate_current"}
+                        and theme_tier
+                        else 0.0
+                    ),
+                    "theme_current_rank": live_theme_rank.get(str(code)),
+                    "theme_current_pool_size": len(live_theme_members),
+                    "theme_current_breadth_ratio": (
+                        round(theme_current_breadth_ratio, 6)
+                        if theme_current_breadth_ratio is not None
+                        else None
+                    ),
+                    "theme_current_coverage_ratio": (
+                        round(len(live_theme_members) / stock_count, 6)
+                        if stock_count > 0
+                        else None
+                    ),
+                }
+                if self.strategy_id == "a_share_sentiment_v06":
+                    v06_contexts_by_code.setdefault(str(code), []).append(candidate_context)
+                existing = by_code.get(code)
+                if not existing or existing.get("opinion_combined_score", 0) < combined:
+                    by_code[code] = candidate_context
+
+        if self.strategy_id == "a_share_sentiment_v06":
+            persistent_rows_by_code: Dict[str, List[Dict[str, Any]]] = {}
+            direct_code_loader = getattr(
+                self.repository, "load_sentiment_v06_direct_candidate_codes", None
+            )
+            direct_codes: List[str] = []
+            direct_recall_limit = max(
+                1,
+                min(
+                    int(
+                        (self.strategy.config.get("entry_gates", {}) or {}).get(
+                            "maximum_intraday_codes", 180
+                        )
+                    ),
+                    180,
+                ),
+            )
+            if callable(direct_code_loader) and requested_as_of_dt:
+                try:
+                    direct_codes = direct_code_loader(
+                        decision_as_of=requested_as_of_dt,
+                        max_codes=direct_recall_limit,
+                    )
+                except Exception as exc:
+                    diagnostics["direct_recall_status"] = "unavailable"
+                    diagnostics["direct_recall_error"] = type(exc).__name__
+                else:
+                    diagnostics["direct_recall_status"] = "available"
+            direct_codes = [code for code in direct_codes if code in candidate_lookup]
+            for code in direct_codes:
+                v06_contexts_by_code.setdefault(code, [])
+            diagnostics["direct_recall_codes"] = len(direct_codes)
+            diagnostics["direct_recall_limit"] = direct_recall_limit
+            diagnostics["direct_recall_may_be_truncated"] = (
+                len(direct_codes) >= direct_recall_limit
+            )
+            event_loader = getattr(
+                self.repository, "load_sentiment_v06_event_rows", None
+            )
+            if callable(event_loader) and requested_as_of_dt:
+                try:
+                    persistent_rows = event_loader(
+                        codes=sorted(v06_contexts_by_code),
+                        decision_as_of=requested_as_of_dt,
+                    )
+                except Exception as exc:
+                    persistent_rows = []
+                    diagnostics["event_ledger_status"] = "unavailable_snapshot_bridge_only"
+                    diagnostics["event_ledger_error"] = type(exc).__name__
+                else:
+                    diagnostics["event_ledger_status"] = "available"
+                for row in persistent_rows:
+                    code = str(row.get("code") or "").strip()
+                    if code:
+                        persistent_rows_by_code.setdefault(code, []).append(dict(row))
+                diagnostics["event_ledger_rows"] = len(persistent_rows)
+                diagnostics["event_rows_per_code_limit"] = 20
+                diagnostics["event_ledger_may_be_truncated_codes"] = sorted(
+                    code
+                    for code, code_rows in persistent_rows_by_code.items()
+                    if len(code_rows) >= 20
+                )
+
+            for code, contexts in v06_contexts_by_code.items():
+                candidate = candidate_lookup.get(code) or {}
+                bundles: List[Dict[str, Any]] = []
+                enriched_contexts: List[Dict[str, Any]] = []
+                for context in contexts:
+                    direct_match = context.get("opinion_match_type") == "direct_news_match"
+                    news_rows = (
+                        context.get("opinion_stock_news")
+                        if direct_match
+                        else context.get("opinion_sector_top_news")
+                    ) or []
+                    bundle = build_event_relation_bundle(
+                        news_rows,
+                        code=code,
+                        stock_name=str(candidate.get("name") or "") or None,
+                        sector_name=str(context.get("opinion_sector_name") or "") or None,
+                        sector_type=str(context.get("opinion_sector_type") or "") or None,
+                        match_type=str(context.get("opinion_match_type") or "") or None,
+                        match_reason=str(context.get("opinion_match_reason") or "") or None,
+                        decision_as_of=requested_as_of_dt,
+                        snapshot_as_of=context.get("opinion_as_of_datetime"),
+                    )
+                    bundles.append(bundle)
+                    enriched_contexts.append(
+                        {
+                            **context,
+                            "canonical_event_ids": [
+                                str(event.get("canonical_event_id"))
+                                for event in bundle.get("events") or []
+                                if event.get("canonical_event_id")
+                            ],
+                            "direct_watch_event_ids": list(
+                                bundle.get("direct_watch_event_ids") or []
+                            ),
+                        }
+                    )
+                ledger_rows = persistent_rows_by_code.get(code) or []
+                if ledger_rows:
+                    bundles.append(self._persistent_v06_bundle(ledger_rows))
+                merged = self._merge_v06_bundles(
+                    bundles,
+                    has_theme_lane=bool(contexts),
+                )
+                primary = (
+                    min(
+                        enriched_contexts,
+                        key=lambda row: (
+                            0 if row.get("direct_watch_event_ids") else 1,
+                            0
+                            if row.get("opinion_match_type") == "direct_news_match"
+                            else 1,
+                            -float(row.get("opinion_combined_score") or 0.0),
+                            str(row.get("opinion_sector_name") or ""),
+                        ),
+                    )
+                    if enriched_contexts
+                    else {
+                        "opinion_match_type": "direct_event_ledger",
+                        "opinion_match_reason": "由决策时点前的公司事件关系直接召回",
+                    }
+                )
+                by_code[code] = {
+                    **primary,
+                    "sentiment_v06_contexts": enriched_contexts,
+                    "opinion_relations": [
+                        {
+                            "sector_type": row.get("opinion_sector_type"),
+                            "sector_name": row.get("opinion_sector_name"),
+                            "match_type": row.get("opinion_match_type"),
+                            "match_reason": row.get("opinion_match_reason"),
+                            "combined_score": row.get("opinion_combined_score"),
+                            "current_rank": row.get("theme_current_rank"),
+                            "current_pool_size": row.get("theme_current_pool_size"),
+                            "current_breadth_ratio": row.get(
+                                "theme_current_breadth_ratio"
+                            ),
+                        }
+                        for row in enriched_contexts
+                    ],
+                    "sentiment_v06_events": merged["events"],
+                    "sentiment_v06_relations": merged["relations"],
+                    "candidate_lanes": merged["candidate_lanes"],
+                    "direct_event_ids": merged["direct_event_ids"],
+                    "direct_watch_event_ids": merged["direct_watch_event_ids"],
+                    "adverse_event_ids": merged["adverse_event_ids"],
+                    "evidence_ids": merged["evidence_ids"],
+                    "evidence_quality": merged["evidence_quality"],
+                    "event_evidence_source": (
+                        "append_only_ledger_and_snapshot_bridge"
+                        if ledger_rows and enriched_contexts
+                        else "append_only_ledger"
+                        if ledger_rows
+                        else "snapshot_bridge"
+                    ),
                 }
 
         matched = 0
@@ -1009,6 +1781,20 @@ class StockSelector:
                 continue
             matched += 1
             item.update(context)
+            if self.strategy_id == "a_share_sentiment_v06":
+                related_themes = sorted(
+                    {
+                        str(row.get("sector_name") or "").strip()
+                        for row in context.get("opinion_relations") or []
+                        if str(row.get("sector_type") or "") == "theme"
+                        and str(row.get("sector_name") or "").strip()
+                    }
+                )
+                item["sentiment_v06_concentration_themes"] = related_themes
+                if len(related_themes) > 1:
+                    item.setdefault("candidate_risks", []).append(
+                        "多主题重叠暴露：" + "、".join(related_themes)
+                    )
             sector_name = context.get("opinion_sector_name")
             if sector_name:
                 item.setdefault("candidate_reasons", []).append(f"舆情热度映射到热点板块/主题：{sector_name}")
@@ -1081,7 +1867,7 @@ class StockSelector:
         rows = self.repository.load_candidate_rows(
             daily_kline_operator=daily_kline_operator,
             cutoff_date=cutoff_date,
-            use_pit_fundamental=self.strategy_id == "a_share_sentiment",
+            use_pit_fundamental=self.strategy_id in PIT_FUNDAMENTAL_STRATEGY_IDS,
             fundamental_date_operator=fundamental_date_operator,
             fundamental_as_of_date=fundamental_as_of_date,
             use_realtime=use_realtime,
@@ -1124,10 +1910,114 @@ class StockSelector:
             )
             candidate["required_data_components"] = required_components
             candidate["required_data_complete"] = all(required_components.values())
+        market_regime_diagnostics: Dict[str, Any] = {}
+        if self.strategy_id == "a_share_sentiment_v06" and requested_as_of_dt:
+            market_regime_diagnostics = self._attach_v06_market_regime(
+                candidates,
+                decision_as_of=requested_as_of_dt,
+                quote_ttl_seconds=int(
+                    (self.strategy.config.get("entry_gates", {}) or {}).get(
+                        "quote_ttl_seconds", 180
+                    )
+                ),
+            )
         opinion_diagnostics = self._attach_market_opinion_context(
             candidates,
             decision_as_of=requested_as_of_dt,
         )
+        intraday_diagnostics: Dict[str, Any] = {}
+        if self.strategy_id == "a_share_sentiment_v06":
+            entry_config = self.strategy.config.get("entry_gates", {}) or {}
+            maximum_codes = max(
+                1, min(int(entry_config.get("maximum_intraday_codes") or 180), 180)
+            )
+            mapped = [item for item in candidates if item.get("candidate_lanes")]
+            mapped.sort(
+                key=lambda item: (
+                    0
+                    if "direct_catalyst" in (item.get("candidate_lanes") or [])
+                    else 1,
+                    str(item.get("code") or ""),
+                )
+            )
+            loaded_codes = [
+                str(item.get("code")) for item in mapped[:maximum_codes]
+            ]
+            rows_by_code: Dict[str, List[Dict[str, Any]]] = {}
+            intraday_loader = getattr(
+                self.repository, "load_sentiment_v06_intraday_rows", None
+            )
+            if callable(intraday_loader) and requested_as_of_dt and loaded_codes:
+                try:
+                    intraday_rows = intraday_loader(
+                        codes=loaded_codes,
+                        decision_as_of=requested_as_of_dt,
+                        window_minutes=int(
+                            entry_config.get("intraday_window_minutes") or 45
+                        ),
+                    )
+                except Exception as exc:
+                    intraday_rows = []
+                    intraday_diagnostics["status"] = "unavailable"
+                    intraday_diagnostics["error"] = type(exc).__name__
+                else:
+                    intraday_diagnostics["status"] = "available"
+                for row in intraday_rows:
+                    code = str(row.get("code") or "").strip()
+                    if code:
+                        rows_by_code.setdefault(code, []).append(dict(row))
+            elif loaded_codes:
+                intraday_diagnostics["status"] = "repository_capability_missing"
+            else:
+                intraday_diagnostics["status"] = "no_mapped_candidates"
+
+            loaded_code_set = set(loaded_codes)
+            for item in mapped:
+                code = str(item.get("code") or "")
+                if code not in loaded_code_set:
+                    item["intraday_path"] = {
+                        "feature_version": "sentiment-v06-intraday-v1",
+                        "data_status": "not_loaded_candidate_cap",
+                        "path_state": "unknown",
+                        "sample_count": 0,
+                    }
+                    continue
+                direct_ids = {
+                    str(value)
+                    for value in item.get("direct_event_ids") or []
+                    if str(value)
+                }
+                event_times = [
+                    str(event.get("available_at"))
+                    for event in item.get("sentiment_v06_events") or []
+                    if event.get("available_at")
+                    and (
+                        not direct_ids
+                        or str(event.get("canonical_event_id") or "") in direct_ids
+                    )
+                ]
+                item["intraday_path"] = summarize_intraday_path(
+                    rows_by_code.get(code) or [],
+                    decision_as_of=requested_as_of_dt,
+                    event_available_at=min(event_times) if event_times else None,
+                    minimum_samples=int(
+                        entry_config.get("intraday_minimum_samples") or 3
+                    ),
+                    quote_ttl_seconds=int(
+                        entry_config.get("quote_ttl_seconds") or 180
+                    ),
+                )
+            intraday_diagnostics.update(
+                {
+                    "mapped_candidates": len(mapped),
+                    "loaded_candidates": len(loaded_codes),
+                    "truncated_candidates": max(len(mapped) - len(loaded_codes), 0),
+                    "minute_rows": sum(len(rows) for rows in rows_by_code.values()),
+                    "window_minutes": int(
+                        entry_config.get("intraday_window_minutes") or 45
+                    ),
+                }
+            )
         bundle = {
             "candidates": candidates,
             "selection_clock_diagnostics": {
@@ -1148,6 +2038,11 @@ class StockSelector:
             bundle["candidate_as_of_diagnostics"] = candidate_as_of_diagnostics
         if opinion_diagnostics.get("enabled"):
             bundle["market_opinion_diagnostics"] = opinion_diagnostics
+        if self.strategy_id == "a_share_sentiment_v06":
+            bundle["sentiment_v06_intraday_diagnostics"] = intraday_diagnostics
+            bundle["sentiment_v06_market_regime_diagnostics"] = (
+                market_regime_diagnostics
+            )
         return bundle
 
     @staticmethod
@@ -1187,6 +2082,9 @@ class StockSelector:
             "intraday_repair_pct": item.get("intraday_repair_pct"),
             "realtime_amount_ratio": item.get("realtime_amount_ratio"),
             "realtime_quote_time": item.get("realtime_quote_time"),
+            "realtime_received_at": item.get("realtime_received_at"),
+            "realtime_batch_id": item.get("realtime_batch_id"),
+            "realtime_is_stale": item.get("realtime_is_stale"),
             "realtime_trade_date": item.get("realtime_trade_date"),
             "amount": item.get("amount"),
             "turnover_rate": item.get("turnover_rate"),
@@ -1208,6 +2106,9 @@ class StockSelector:
             "realtime_mf_turnover_rate": item.get("realtime_mf_turnover_rate"),
             "realtime_mf_quote_time": item.get("realtime_mf_quote_time"),
             "realtime_mf_trade_date": item.get("realtime_mf_trade_date"),
+            "realtime_mf_received_at": item.get("realtime_mf_received_at"),
+            "realtime_mf_source": item.get("realtime_mf_source"),
+            "realtime_mf_source_unit": item.get("realtime_mf_source_unit"),
             "popularity_source": item.get("popularity_source"),
             "popularity_rank": item.get("popularity_rank"),
             "popularity_source_score": item.get("popularity_source_score"),
@@ -1273,6 +2174,28 @@ class StockSelector:
             "trade_grade_label": item.get("trade_grade_label"),
             "trade_grade_reason": item.get("trade_grade_reason"),
             "theme_trade_slot_state": item.get("theme_trade_slot_state"),
+            "candidate_lanes": item.get("candidate_lanes"),
+            "primary_lane": item.get("primary_lane"),
+            "lane_scores": item.get("lane_scores"),
+            "evidence_quality": item.get("evidence_quality"),
+            "entry_eligibility": item.get("entry_eligibility"),
+            "entry_block_reasons": item.get("entry_block_reasons"),
+            "entry_gate_results": item.get("entry_gate_results"),
+            "decision_as_of": item.get("decision_as_of"),
+            "valid_until": item.get("valid_until"),
+            "factor_schema_version": item.get("factor_schema_version"),
+            "evaluation_method_version": item.get("evaluation_method_version"),
+            "evaluation_spec_hash": item.get("evaluation_spec_hash"),
+            "event_evidence_source": item.get("event_evidence_source"),
+            "theme_current_rank": item.get("theme_current_rank"),
+            "theme_current_pool_size": item.get("theme_current_pool_size"),
+            "theme_current_breadth_ratio": item.get(
+                "theme_current_breadth_ratio"
+            ),
+            "theme_current_coverage_ratio": item.get(
+                "theme_current_coverage_ratio"
+            ),
+            "intraday_path": item.get("intraday_path"),
             "trade_date": item.get("trade_date"),
         }
         if extra:
@@ -1307,7 +2230,16 @@ class StockSelector:
         }
         factor_scores = item.get("factors") or explain.get("factors") or {}
         sector_name = item.get("opinion_sector_name") or raw_metrics.get("opinion_sector_name")
-        if not sector_name and raw_metrics.get("sentiment_mode") != "market_opinion_v2":
+        canonical_events = (
+            item.get("sentiment_v06_events")
+            or explain.get("canonical_events")
+            or []
+        )
+        if (
+            not sector_name
+            and not canonical_events
+            and raw_metrics.get("sentiment_mode") != "market_opinion_v2"
+        ):
             return None
         stock_news = item.get("opinion_stock_news") or raw_metrics.get("opinion_stock_news") or []
         top_news = item.get("opinion_top_news") or raw_metrics.get("opinion_top_news") or []
@@ -1374,6 +2306,39 @@ class StockSelector:
             "market_theme_score_delta": raw_metrics.get("market_theme_score_delta"),
             "market_theme_reason": raw_metrics.get("market_theme_reason"),
             "market_theme_fund_flow": raw_metrics.get("market_theme_fund_flow"),
+            "candidate_lanes": item.get("candidate_lanes")
+            or raw_metrics.get("candidate_lanes")
+            or [],
+            "primary_lane": item.get("primary_lane")
+            or raw_metrics.get("primary_lane"),
+            "all_theme_relations": item.get("opinion_relations") or [],
+            "canonical_events": canonical_events,
+            "event_relations": item.get("sentiment_v06_relations")
+            or explain.get("event_relations")
+            or [],
+            "evidence_quality": item.get("evidence_quality")
+            or explain.get("evidence_quality")
+            or {},
+            "entry_eligibility": item.get("entry_eligibility")
+            or explain.get("entry_eligibility"),
+            "entry_block_reasons": item.get("entry_block_reasons")
+            or explain.get("entry_block_reasons")
+            or [],
+            "entry_gate_results": item.get("entry_gate_results")
+            or explain.get("entry_gate_results")
+            or {},
+            "decision_as_of": item.get("decision_as_of")
+            or explain.get("decision_as_of"),
+            "valid_until": item.get("valid_until") or explain.get("valid_until"),
+            "factor_schema_version": item.get("factor_schema_version")
+            or explain.get("factor_schema_version"),
+            "evaluation_method_version": item.get("evaluation_method_version")
+            or explain.get("evaluation_method_version"),
+            "validation_status": item.get("validation_status")
+            or explain.get("validation_status"),
+            "intraday_path": item.get("intraday_path")
+            or explain.get("intraday_path")
+            or {},
             "deepseek": {
                 "score": item.get("deepseek_sentiment_score"),
                 "confidence": item.get("deepseek_confidence"),
@@ -1633,6 +2598,17 @@ class StockSelector:
             "allow_limit_up": allow_limit_up,
             "rule": "limit_up_excluded_and_price_preference_adjusted",
         }
+        if self.strategy_id == "a_share_sentiment_v06":
+            return sorted(
+                adjusted,
+                key=lambda row: (
+                    {"conditions_met": 0, "observe": 1, "invalid": 2}.get(
+                        str(row.get("entry_eligibility") or ""), 3
+                    ),
+                    -float(row.get("score") or 0.0),
+                    str(row.get("code") or ""),
+                ),
+            )
         return sorted(adjusted, key=lambda row: row.get("score", 0), reverse=True)
 
     @staticmethod
@@ -1861,13 +2837,26 @@ class StockSelector:
             sentiment_context = self._build_sentiment_context(enriched, explain)
             if sentiment_context:
                 enriched["sentiment_context"] = sentiment_context
-            trade_plan = build_selection_trade_plan(
-                enriched,
-                strategy_id=enriched.get("strategy_id") or self.strategy_id,
-                raw_metrics=self._build_raw_metrics(enriched),
-            )
-            if trade_plan:
-                enriched["trade_plan"] = trade_plan
+            if self.strategy_id == "a_share_sentiment_v06":
+                enriched["research_entry_assessment"] = {
+                    "entry_eligibility": enriched.get("entry_eligibility"),
+                    "entry_block_reasons": list(
+                        enriched.get("entry_block_reasons") or []
+                    ),
+                    "decision_as_of": enriched.get("decision_as_of"),
+                    "valid_until": enriched.get("valid_until"),
+                    "execution_rule_version": "sentiment-v06-execution-v1",
+                    "trade_instruction": None,
+                    "research_only": True,
+                }
+            else:
+                trade_plan = build_selection_trade_plan(
+                    enriched,
+                    strategy_id=enriched.get("strategy_id") or self.strategy_id,
+                    raw_metrics=self._build_raw_metrics(enriched),
+                )
+                if trade_plan:
+                    enriched["trade_plan"] = trade_plan
             results.append(enriched)
         return self.finalize_sentiment_results(results) if self.strategy_id == "a_share_sentiment" else results
 
@@ -1904,11 +2893,14 @@ class StockSelector:
         for index, (item, price_snapshot) in enumerate(zip(results, price_snapshots), start=1):
             raw_metrics = self._build_raw_metrics(item)
             raw_metrics.update(price_snapshot)
-            trade_plan = item.get("trade_plan") or build_selection_trade_plan(
-                item,
-                strategy_id=item.get("strategy_id") or self.strategy_id,
-                raw_metrics=raw_metrics,
-            )
+            result_strategy_id = item.get("strategy_id") or self.strategy_id
+            trade_plan = item.get("trade_plan")
+            if result_strategy_id != "a_share_sentiment_v06" and not trade_plan:
+                trade_plan = build_selection_trade_plan(
+                    item,
+                    strategy_id=result_strategy_id,
+                    raw_metrics=raw_metrics,
+                )
             metadata = {
                 "name": item.get("name"),
                 "instrument_type": item.get("instrument_type"),
@@ -1922,6 +2914,9 @@ class StockSelector:
                 "sentiment_context": item.get("sentiment_context"),
                 "raw_metrics": raw_metrics,
                 "trade_plan": trade_plan,
+                "research_entry_assessment": item.get(
+                    "research_entry_assessment"
+                ),
             }
             payload.append(
                 (

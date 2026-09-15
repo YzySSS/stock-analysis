@@ -731,6 +731,9 @@ def stock_detail(
             "sentiment_source": (metadata.get("explain") or {}).get("sentiment_source"),
             "news_count": explain_raw_metrics.get("news_count"),
             "sentiment_context": metadata.get("sentiment_context"),
+            "research_entry_assessment": metadata.get(
+                "research_entry_assessment"
+            ),
             "factor_scores": metadata.get("factors") or {},
             "raw_metrics": {
                 **explain_raw_metrics,

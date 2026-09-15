@@ -9,7 +9,7 @@ from app.shared.db import mysql_read_conn
 from app.shared.instrument_policy import SUPPORTED_SELECTION_INSTRUMENT_TYPES, require_supported_instrument
 from app.shared.strategy_loader import StrategyLoader, StrategyRegistryError
 from app.stock_selection.deepseek_sentiment_rerank import DeepSeekSentimentReranker
-from app.stock_selection.selector import StockSelector
+from app.stock_selection.selector import SENTIMENT_STRATEGY_IDS, StockSelector
 from app.data_ingestion.news_provider import NewsAggregator
 from app.stock_selection.sentiment_refresh import refresh_sentiment_candidates
 from app.stock_selection.sentiment_snapshot import SentimentCandidateSnapshotRepository
@@ -910,10 +910,10 @@ class StrategyService:
             instrument_type=instrument_type,
         )
 
-        if self._sentiment_read_model_enabled() and final_strategy_id in {
-            "a_share_sentiment",
-            "a_share_sentiment_v05",
-        }:
+        if (
+            self._sentiment_read_model_enabled()
+            and final_strategy_id in SENTIMENT_STRATEGY_IDS
+        ):
             return self._published_sentiment_result(
                 strategy_meta=strategy_meta,
                 serialized_meta=serialized_meta,

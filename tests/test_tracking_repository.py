@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -111,6 +112,86 @@ class TrackingRepositoryTests(unittest.TestCase):
         compact = tracking_route._compact_tracking_item(item)
 
         self.assertEqual(compact["strategy_version"], "0.3.1")
+
+    def test_v06_compact_tracking_record_keeps_only_research_contract(self):
+        compact = tracking_route._compact_tracking_item(
+            {
+                "code": "sh.600000",
+                "strategy_id": "a_share_sentiment_v06",
+                "sentiment_context": {
+                    "canonical_events": [{"large": "x" * 5000}],
+                    "candidate_lanes": ["direct_catalyst"],
+                    "primary_lane": "direct_catalyst",
+                    "entry_eligibility": "conditions_met",
+                    "entry_block_reasons": [],
+                    "decision_as_of": "2026-09-15 11:00:00",
+                    "valid_until": "2026-09-15 11:45:00",
+                    "factor_schema_version": "sentiment-v06-factor-v1",
+                    "evaluation_method_version": "sentiment-v06-forward-evaluation-v1",
+                    "validation_status": "shadow_only",
+                    "research_only": True,
+                },
+            }
+        )
+
+        context = compact["sentiment_context"]
+        self.assertEqual(context["entry_eligibility"], "conditions_met")
+        self.assertEqual(context["candidate_lanes"], ["direct_catalyst"])
+        self.assertTrue(context["research_only"])
+        self.assertNotIn("canonical_events", context)
+
+    def test_v06_direct_event_context_is_preserved_without_sector(self):
+        context = SelectionResultTracker._build_sentiment_context(
+            {
+                "sentiment_context": {
+                    "canonical_events": [{"canonical_event_id": "event-1"}],
+                    "candidate_lanes": ["direct_catalyst"],
+                    "entry_eligibility": "observe",
+                },
+                "research_entry_assessment": {
+                    "research_only": True,
+                    "valid_until": "2026-09-15 11:45:00",
+                },
+                "explain": {"validation_status": "shadow_only"},
+            },
+            {},
+        )
+
+        self.assertEqual(context["entry_eligibility"], "observe")
+        self.assertEqual(context["validation_status"], "shadow_only")
+        self.assertTrue(context["research_only"])
+
+    def test_v06_tracking_does_not_synthesize_legacy_trade_plan(self):
+        tracker = SelectionResultTracker()
+        row = {
+            "code": "sh.600000",
+            "name": "浦发银行",
+            "selection_date": "2026-09-15",
+            "selection_datetime": "2026-09-15 11:00:00",
+            "strategy_id": "a_share_sentiment_v06",
+            "strategy_version": "0.6.0",
+            "selected_open_price": 10.0,
+            "selected_close_price": 10.0,
+            "current_price": 10.0,
+            "latest_trade_date": "2026-09-15",
+            "metadata_json": json.dumps(
+                {
+                    "sentiment_context": {
+                        "canonical_events": [{"canonical_event_id": "event-1"}],
+                        "candidate_lanes": ["direct_catalyst"],
+                        "entry_eligibility": "conditions_met",
+                    },
+                    "research_entry_assessment": {"research_only": True},
+                }
+            ),
+        }
+
+        with patch("app.error_learning.tracker.build_selection_trade_plan") as builder:
+            record = tracker._build_record_from_selection_result(row)
+
+        builder.assert_not_called()
+        self.assertIsNone(record.trade_plan)
+        self.assertIsNone(record.trade_plan_status)
 
     def test_cross_version_strategy_summary_keeps_one_aggregate_and_lineage(self):
         items = [

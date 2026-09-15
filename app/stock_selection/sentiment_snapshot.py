@@ -26,6 +26,19 @@ SELECTION_CONTRACT_FIELDS = (
     "gate_results",
     "evidence_ids",
     "ai_status",
+    "factor_schema_version",
+    "evidence_quality",
+    "candidate_lanes",
+    "primary_lane",
+    "lane_scores",
+    "entry_eligibility",
+    "entry_block_reasons",
+    "entry_gate_results",
+    "decision_as_of",
+    "valid_until",
+    "evaluation_method_version",
+    "evaluation_spec_hash",
+    "research_entry_assessment",
 )
 
 
@@ -269,10 +282,15 @@ def validate_sentiment_snapshot(
                     row_complete = False
             if _is_present(lineage.get("received_at")):
                 try:
-                    _as_datetime(
+                    received_at = _as_datetime(
                         lineage["received_at"],
                         field_name=f"{lineage_label}.received_at",
                     )
+                    if received_at > decision_time:
+                        errors.append(
+                            f"{lineage_label}: received_at is after decision_as_of"
+                        )
+                        row_complete = False
                 except ValueError as exc:
                     errors.append(str(exc))
                     row_complete = False

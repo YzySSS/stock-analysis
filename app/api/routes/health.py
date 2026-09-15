@@ -24,7 +24,11 @@ def health() -> dict:
     snapshot_pointers = {}
     # Keep liveness cheap: do not make the first Redis connection from /health.
     if cache_mode == "memory" or cache.get("status") in {"ready", "fallback"}:
-        for strategy_id in ("a_share_sentiment", "a_share_sentiment_v05"):
+        for strategy_id in (
+            "a_share_sentiment",
+            "a_share_sentiment_v05",
+            "a_share_sentiment_v06",
+        ):
             pointer = backend.get(f"sentiment:snapshot:latest:{strategy_id}")
             if isinstance(pointer, dict):
                 snapshot_pointers[strategy_id] = pointer

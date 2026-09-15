@@ -1,0 +1,111 @@
+selection:
+  max_picks: 3
+  score_threshold: 60
+  allow_limit_up: false
+
+versions:
+  factor_schema_version: sentiment-v06-factors-v1
+  evidence_rule_version: sentiment-v06-evidence-v1
+  relation_rule_version: sentiment-v06-relation-v1
+  intraday_feature_version: sentiment-v06-intraday-v1
+  entry_rule_version: sentiment-v06-entry-v1
+  execution_rule_version: sentiment-v06-execution-v1
+  evaluation_method_version: sentiment-v06-eval-v1
+
+hard_filters:
+  min_listed_days: 60
+  min_latest_amount: 50000000
+  min_median_amount_20: 80000000
+
+grading:
+  reject_below: 60
+  max_per_theme: 1
+  max_per_industry: 2
+
+# Pre-registered engineering defaults. They are research gates, not claims of
+# optimal thresholds and not an estimate of win probability.
+entry_gates:
+  conditions_score: 68
+  minimum_coverage: 0.98
+  valid_for_minutes: 5
+  intraday_window_minutes: 45
+  intraday_minimum_samples: 3
+  quote_ttl_seconds: 180
+  maximum_clock_skew_seconds: 180
+  minimum_net_flow_intensity_pct: 0
+  maximum_chase_pct: 7
+  minimum_high_drawdown_pct: -2.5
+  minimum_short_return_pct: -0.8
+  minimum_vwap_deviation_pct: -0.5
+  minimum_event_response_pct: -0.5
+  maximum_event_response_pct: 7
+  minimum_theme_breadth_ratio: 0.50
+  maximum_intraday_codes: 180
+
+market_opinion:
+  max_age_minutes: 60
+  allow_same_trade_date_stale: true
+  allowed_sector_types: [theme, industry]
+  excluded_sector_names: []
+  excluded_industries: []
+
+ai_overlay:
+  enabled: false
+  policy: evidence_explanation_only
+  may_change_score: false
+  may_change_rank: false
+  may_change_entry_eligibility: false
+
+factors:
+  catalyst_quality:
+    name: 增量催化质量
+    category: event
+    direction: positive
+    weight: 0.25
+    description: 只衡量公司或主题事件的增量事实、重要程度与确认程度；行情报道不能制造催化。
+  persistence:
+    name: 后续驱动力
+    category: event
+    direction: positive
+    weight: 0.15
+    description: 由兑现周期、后续节点和终止条件产生，不使用新闻新鲜度回填。
+  relation_recognition:
+    name: 业务关系与受益强度
+    category: relation
+    direction: positive
+    weight: 0.15
+    description: 衡量股票与事件的产品、客户、供应链或公告事实；主题映射与直接受益明确区分。
+  fund_confirmation:
+    name: 同时点资金确认
+    category: moneyflow
+    direction: positive
+    weight: 0.15
+    description: 区分盘中同钟资金、完整日背景、合法零值、负值与未知值。
+  price_volume_confirmation:
+    name: 盘中价量承接
+    category: technical
+    direction: positive
+    weight: 0.20
+    description: 集中表达当前相对强弱、分时路径、回撤、VWAP与量价效率，避免价格动量重复计分。
+  chip_liquidity_capacity:
+    name: 筹码与成交容量
+    category: risk
+    direction: positive
+    weight: 0.10
+    description: 只衡量流动性容量和筹码风险，不把成交额大解释成未来收益高。
+
+research_protocol:
+  status: preregistered_not_started
+  timezone: Asia/Shanghai
+  decision_groups: ["11:00:00", "13:30:00", "14:30:00"]
+  manual_runs_separate: true
+  primary_horizon_trade_days: 3
+  auxiliary_horizons: [1, 5]
+  benchmark_codes: ["000300.SH", "000905.SH", "000852.SH"]
+  entry_rule: next_executable_quote_after_decision
+  minimum_engineering_days: 20
+  initial_direction_days: 30
+  medium_report_days: 120
+  full_cycle_days: 252
+  automatic_promotion: false
+  scheduled_collection_enabled: false

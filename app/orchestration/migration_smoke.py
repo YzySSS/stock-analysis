@@ -63,6 +63,10 @@ REQUIRED_TABLES = {
     "etf_rotation_signal_run",
     "etf_rotation_signal_candidate",
     "etf_rotation_forward_outcome",
+    "market_opinion_event",
+    "market_opinion_event_revision",
+    "market_opinion_event_evidence",
+    "market_opinion_stock_relation",
 }
 
 

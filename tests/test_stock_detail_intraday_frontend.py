@@ -123,7 +123,7 @@ return { posts, gets };
             encoding="utf-8"
         )
 
-        self.assertIn("stock-detail.js?v=20260722intradayfix1", page)
+        self.assertIn("stock-detail.js?v=20260915sentimentv06", page)
 
 
 if __name__ == "__main__":

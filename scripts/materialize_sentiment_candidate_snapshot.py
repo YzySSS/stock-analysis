@@ -31,7 +31,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strategy-id",
         default="a_share_sentiment",
-        choices=("a_share_sentiment", "a_share_sentiment_v05"),
+        choices=(
+            "a_share_sentiment",
+            "a_share_sentiment_v05",
+            "a_share_sentiment_v06",
+        ),
     )
     parser.add_argument(
         "--allow-shadow",

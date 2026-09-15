@@ -39,6 +39,17 @@ class AutomaticObservationPolicyTests(unittest.TestCase):
         self.assertEqual(policy.entry_rule, "same_day_open")
         self.assertEqual(policy.max_picks, 3)
 
+    def test_preregistered_v06_intraday_protocol_does_not_join_0925_campaign(self):
+        policies = discover_automatic_observation_policies(
+            StrategyLoader(),
+            today=date(2026, 9, 15),
+        )
+
+        self.assertEqual(
+            [policy.candidate_strategy_id for policy in policies],
+            ["a_share_sentiment_v05"],
+        )
+
     def test_new_shadow_strategy_cannot_opt_out_of_standard_observation(self):
         loader = MagicMock()
         loader.registry = {

@@ -17,8 +17,29 @@ class SelectionResultTracker:
     @staticmethod
     def _build_sentiment_context(metadata: Dict[str, Any], factor_scores: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         existing = metadata.get("sentiment_context")
-        if isinstance(existing, dict) and existing.get("sector_name"):
-            return existing
+        if isinstance(existing, dict) and (
+            existing.get("sector_name")
+            or existing.get("canonical_events")
+            or existing.get("candidate_lanes")
+            or existing.get("entry_eligibility")
+        ):
+            context = dict(existing)
+            assessment = metadata.get("research_entry_assessment") or {}
+            if isinstance(assessment, dict):
+                for key in (
+                    "entry_eligibility",
+                    "entry_block_reasons",
+                    "decision_as_of",
+                    "valid_until",
+                    "execution_rule_version",
+                    "research_only",
+                ):
+                    if context.get(key) is None and assessment.get(key) is not None:
+                        context[key] = assessment[key]
+            explain = metadata.get("explain") or {}
+            if context.get("validation_status") is None:
+                context["validation_status"] = explain.get("validation_status")
+            return context
         sector_name = factor_scores.get("opinion_sector_name")
         if not sector_name and factor_scores.get("sentiment_mode") != "market_opinion_v2":
             return None
@@ -371,7 +392,11 @@ class SelectionResultTracker:
         if period_base_price and period_min_low:
             max_drawdown_pct = min(round((period_min_low - period_base_price) / period_base_price * 100, 2), 0.0)
         trade_plan = metadata.get("trade_plan") if isinstance(metadata.get("trade_plan"), dict) else None
-        if trade_plan is None or str(trade_plan.get("version") or "") == "selection_trade_plan_v1":
+        is_sentiment_v06 = row.get("strategy_id") == "a_share_sentiment_v06"
+        if not is_sentiment_v06 and (
+            trade_plan is None
+            or str(trade_plan.get("version") or "") == "selection_trade_plan_v1"
+        ):
             trade_plan = build_selection_trade_plan(
                 {
                     "code": row.get("code"),

@@ -251,6 +251,12 @@ function factorLabel(key) {
     turnover_heat: '换手热度',
     sentiment_heat: '情绪热度',
     risk_control: '风险控制',
+    catalyst_quality: '增量催化质量',
+    persistence: '后续驱动力',
+    relation_recognition: '业务关系强度',
+    fund_confirmation: '同时点资金确认',
+    price_volume_confirmation: '盘中价量承接',
+    chip_liquidity_capacity: '筹码与成交容量',
   };
   return labelMap[key] || String(key || '')
     .replace(/_score$/, '')
@@ -264,6 +270,7 @@ function getDisplayFactorEntries(factorScores) {
     'turnover_score', 'turnover', 'lowvol_score', 'lowvol', 'reversal_score', 'reversal',
     'sector_heat', 'source_credibility', 'info_importance', 'amplification', 'stock_match',
     'fund_flow', 'daily_trend', 'chip_structure', 'price_confirm', 'volume_confirm', 'intraday_confirm', 'market_context', 'deepseek_sentiment',
+    'catalyst_quality', 'persistence', 'relation_recognition', 'fund_confirmation', 'price_volume_confirmation', 'chip_liquidity_capacity',
   ];
   const rawMetricKeys = new Set([
     'open', 'high', 'low', 'close', 'volume', 'amount', 'trade_date',
@@ -285,6 +292,61 @@ function getDisplayFactorEntries(factorScores) {
   return [...orderedKeys, ...extraKeys]
     .map((key) => ({ key, label: factorLabel(key), value: Number(scores[key]) }))
     .filter((item) => !Number.isNaN(item.value) && item.value >= 0 && item.value <= 100);
+}
+
+function renderSentimentV06SelectionRows(latestSelection = {}) {
+  const context = latestSelection.sentiment_context || {};
+  const assessment = latestSelection.research_entry_assessment || {};
+  const eligibility = context.entry_eligibility || assessment.entry_eligibility;
+  if (latestSelection.strategy_id !== 'a_share_sentiment_v06' && !eligibility) return '';
+
+  const laneLabels = {
+    direct_catalyst: '直接催化轨',
+    theme_leader: '主题龙头轨',
+  };
+  const lanes = (context.candidate_lanes || [])
+    .map((lane) => laneLabels[lane] || lane)
+    .filter(Boolean)
+    .join(' / ') || '-';
+  const eligibilityLabel = {
+    conditions_met: '条件满足 · 研究候选（不构成买入建议）',
+    observe: '条件未齐 · 仅观察',
+    invalid: '证据或交易状态失效',
+  }[eligibility] || eligibility || '状态未知';
+  const blockReasons = context.entry_block_reasons || assessment.entry_block_reasons || [];
+  const events = (context.canonical_events || []).slice(0, 2).map((event) => {
+    const evidence = (event.evidence || [])[0] || {};
+    return evidence.title || event.event_type || event.canonical_event_id || '';
+  }).filter(Boolean);
+  const themes = Array.from(new Set([
+    context.sector_name,
+    ...(context.all_theme_relations || []).map((relation) => relation.sector_name),
+  ].filter(Boolean)));
+  const relationEvidence = (context.event_relations || [])
+    .map((relation) => relation.evidence_excerpt || relation.relation_reason)
+    .filter(Boolean)
+    .slice(0, 2);
+  const decisionAsOf = context.decision_as_of || assessment.decision_as_of;
+  const validUntil = context.valid_until || assessment.valid_until;
+  const path = context.intraday_path || {};
+  const evidenceQuality = context.evidence_quality || {};
+
+  return `
+    <div><strong>候选轨道</strong></div>
+    <div>${escapeHtml(lanes)}</div>
+    <div><strong>主要事件 / 主题</strong></div>
+    <div>${escapeHtml([events.join('；'), themes.join(' / ')].filter(Boolean).join(' · ') || '-')}</div>
+    <div><strong>核心业务证据</strong></div>
+    <div>${escapeHtml(relationEvidence.join('；') || '-')}</div>
+    <div><strong>盘中条件</strong></div>
+    <div>${escapeHtml(eligibilityLabel)}${blockReasons.length ? ` · ${escapeHtml(blockReasons.slice(0, 4).join(' / '))}` : ''}</div>
+    <div><strong>决策时钟</strong></div>
+    <div>${escapeHtml(decisionAsOf || '-')}${validUntil ? ` · 有效至 ${escapeHtml(validUntil)}` : ''}</div>
+    <div><strong>行情证据时间</strong></div>
+    <div>${escapeHtml(path.last_quote_time || '-')}${path.last_received_at ? ` · 接收 ${escapeHtml(path.last_received_at)}` : ''}</div>
+    <div><strong>证据 / 验证状态</strong></div>
+    <div>${escapeHtml(evidenceQuality.status || 'unknown')} · ${escapeHtml(context.validation_status || 'shadow_only')} · ${escapeHtml(context.factor_schema_version || '-')}</div>
+  `;
 }
 
 function renderFactorScorePills(factorScores, latestSelection = {}) {
@@ -1088,6 +1150,7 @@ async function loadStockDetail() {
       <div>${escapeHtml(latestSelection.strategy_version || '-')}</div>
       <div><strong>记录创建时间</strong></div>
       <div>${escapeHtml(latestSelection.created_at || '-')}</div>
+      ${renderSentimentV06SelectionRows(latestSelection)}
     `;
 
     const riskTexts = [];

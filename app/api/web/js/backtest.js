@@ -11,6 +11,7 @@ let currentBacktestTradesLimit = 10;
 const BACKTEST_STRATEGY_LABELS = {
   a_share_sentiment: 'A股舆情选股',
   a_share_sentiment_v05: 'A股舆情选股 v0.5',
+  a_share_sentiment_v06: 'A股舆情选股 v0.6',
 };
 
 function backtestStrategyLabel(strategyId) {
@@ -87,6 +88,10 @@ const BACKTEST_STRATEGY_DEFAULTS = {
   },
   a_share_sentiment_v05: {
     threshold: 68,
+    maxPicks: 3,
+  },
+  a_share_sentiment_v06: {
+    threshold: 60,
     maxPicks: 3,
   },
 };

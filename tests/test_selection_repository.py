@@ -261,7 +261,78 @@ class SelectionRepositoryTests(unittest.TestCase):
         self.assertIn("quote_time <= %s", fund_sql)
         self.assertIn("created_at <= %s", fund_sql)
         self.assertIn("updated_at <= %s", fund_sql)
+        self.assertIn("created_at AS received_at", fund_sql)
+        self.assertIn("source_unit", fund_sql)
         self.assertEqual(fund_params, ("2026-07-21 12:30:00",) * 9)
+
+    def test_v06_event_read_requires_source_and_receive_cutoffs(self):
+        decision = datetime(2026, 9, 11, 11, 0, 0)
+        cursor = FakeCursor(fetchall_values=[[{"canonical_event_id": "e" * 64}]])
+        repository = SelectionRepository(connection_factory(cursor))
+
+        rows = repository.load_sentiment_v06_event_rows(
+            codes=["sh.600001", "sh.600001", "sz.000001"],
+            decision_as_of=decision,
+            max_rows_per_code=2,
+        )
+
+        self.assertEqual(rows, [{"canonical_event_id": "e" * 64}])
+        sql, params = cursor.executed[0]
+        self.assertIn("revision.source_time IS NULL OR revision.source_time <= %s", sql)
+        self.assertIn("revision.received_at <= %s", sql)
+        self.assertIn("evidence.source_time IS NULL OR evidence.source_time <= %s", sql)
+        self.assertIn("evidence.received_at <= %s", sql)
+        self.assertIn("relation.valid_from <= %s", sql)
+        self.assertIn("ROW_NUMBER() OVER", sql)
+        self.assertIn("PARTITION BY relation.code", sql)
+        self.assertLess(
+            sql.index("relation.is_adverse_veto DESC"),
+            sql.index("relation.event_revision DESC"),
+        )
+        self.assertIn("WHERE row_no <= %s", sql)
+        self.assertEqual(sql.count("%s"), len(params))
+        self.assertEqual(params[-1], 2)
+
+    def test_v06_direct_recall_is_bounded_and_does_not_depend_on_theme_pool(self):
+        decision = datetime(2026, 9, 11, 11, 0, 0)
+        cursor = FakeCursor(
+            fetchall_values=[[{"code": "sh.600001"}, {"code": "sz.000001"}]]
+        )
+        repository = SelectionRepository(connection_factory(cursor))
+
+        codes = repository.load_sentiment_v06_direct_candidate_codes(
+            decision_as_of=decision,
+            max_codes=999,
+        )
+
+        self.assertEqual(codes, ["sh.600001", "sz.000001"])
+        sql, params = cursor.executed[0]
+        self.assertIn("relation.relation_type='direct_business'", sql)
+        self.assertIn("revision.content_role IN", sql)
+        self.assertIn("revision.received_at <= %s", sql)
+        self.assertNotIn("event.is_terminal", sql)
+        self.assertIn("LIMIT 180", sql)
+        self.assertEqual(params, (decision,) * 5)
+
+    def test_v06_intraday_path_read_is_partition_pruned_and_point_in_time(self):
+        decision = datetime(2026, 9, 11, 11, 0, 0)
+        cursor = FakeCursor(fetchall_values=[[]])
+        repository = SelectionRepository(connection_factory(cursor))
+
+        repository.load_sentiment_v06_intraday_rows(
+            codes=["sh.600001"],
+            decision_as_of=decision,
+            window_minutes=999,
+        )
+
+        sql, params = cursor.executed[0]
+        self.assertIn("WHERE trade_date=%s", sql)
+        self.assertIn("INTERVAL 120 MINUTE", sql)
+        self.assertIn("quote_time <= %s", sql)
+        self.assertIn("received_at <= %s", sql)
+        self.assertIn("created_at <= %s", sql)
+        self.assertEqual(sql.count("%s"), len(params))
+        self.assertEqual(params[0], date(2026, 9, 11))
 
     def test_save_result_rows_preserves_both_dedupe_steps(self):
         cursor = FakeCursor()
@@ -334,6 +405,22 @@ class SelectorDecisionAsOfTests(unittest.TestCase):
         )
         self.assertEqual(repository.candidate_kwargs["daily_kline_operator"], "<")
 
+    def test_v06_aware_decision_is_normalized_to_naive_shanghai_clock(self):
+        repository = self.CapturingRepository()
+        selector = StockSelector(
+            "a_share_sentiment_v06",
+            repository=repository,  # type: ignore[arg-type]
+        )
+
+        selector.load_candidates_from_mysql(
+            decision_as_of="2026-09-11T03:00:00Z"
+        )
+
+        self.assertEqual(
+            repository.candidate_kwargs["decision_as_of"],
+            datetime(2026, 9, 11, 11, 0, 0),
+        )
+
     def test_required_data_complete_is_candidate_specific(self):
         decision = datetime(2026, 7, 21, 10, 15, 30)
         base = {
@@ -367,6 +454,41 @@ class SelectorDecisionAsOfTests(unittest.TestCase):
             bundle["candidates"][1]["required_data_components"]["chip"]
         )
         self.assertEqual(bundle["candidates"][0]["decision_clock_mode"], "intraday")
+
+    def test_v06_mismatched_realtime_batch_fails_candidate_completeness(self):
+        decision = datetime(2026, 9, 11, 11, 0, 0)
+        repository = self.CapturingRepository(
+            [
+                {
+                    "code": "sh.600001",
+                    "name": "test",
+                    "trade_date": date(2026, 9, 10),
+                    "daily_data_available": 1,
+                    "technical_data_available": 1,
+                    "factor_data_available": 1,
+                    "daily_moneyflow_data_available": 1,
+                    "chip_data_available": 1,
+                    "realtime_data_available": 1,
+                    "realtime_quote_time": decision,
+                    "realtime_received_at": decision,
+                    "realtime_trade_date": decision.date(),
+                    "realtime_batch_id": "unexpected-batch",
+                    "realtime_is_stale": 0,
+                }
+            ]
+        )
+        selector = StockSelector(
+            "a_share_sentiment_v06",
+            strategy_overrides={"decision_realtime_batch_ids": ["frozen-batch"]},
+            repository=repository,  # type: ignore[arg-type]
+        )
+
+        bundle = selector.load_candidates_from_mysql(decision_as_of=decision)
+
+        self.assertFalse(bundle["candidates"][0]["required_data_complete"])
+        self.assertFalse(
+            bundle["candidates"][0]["required_data_components"]["realtime"]
+        )
 
 
 if __name__ == "__main__":

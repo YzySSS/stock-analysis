@@ -278,7 +278,44 @@ def _compact_trade_plan(plan: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _compact_tracking_item(item: dict[str, Any]) -> dict[str, Any]:
     status = item.get("trade_plan_status") or {}
-    return {
+    sentiment_context = item.get("sentiment_context") or {}
+    compact_sentiment_context = None
+    compact_context_keys = (
+        "trade_grade_state",
+        "trade_grade_label",
+        "primary_lane",
+        "candidate_lanes",
+        "entry_eligibility",
+        "entry_block_reasons",
+        "decision_as_of",
+        "valid_until",
+        "factor_schema_version",
+        "evaluation_method_version",
+        "validation_status",
+        "research_only",
+    )
+    if any(sentiment_context.get(key) not in (None, "", [], {}) for key in compact_context_keys):
+        compact_sentiment_context = {
+            "trade_grade_state": sentiment_context.get("trade_grade_state"),
+            "trade_grade_label": sentiment_context.get("trade_grade_label"),
+            "primary_lane": sentiment_context.get("primary_lane"),
+            "candidate_lanes": list(sentiment_context.get("candidate_lanes") or []),
+            "entry_eligibility": sentiment_context.get("entry_eligibility"),
+            "entry_block_reasons": list(
+                sentiment_context.get("entry_block_reasons") or []
+            )[:4],
+            "decision_as_of": sentiment_context.get("decision_as_of"),
+            "valid_until": sentiment_context.get("valid_until"),
+            "factor_schema_version": sentiment_context.get(
+                "factor_schema_version"
+            ),
+            "evaluation_method_version": sentiment_context.get(
+                "evaluation_method_version"
+            ),
+            "validation_status": sentiment_context.get("validation_status"),
+            "research_only": sentiment_context.get("research_only"),
+        }
+    compact = {
         "code": item.get("code"),
         "name": item.get("name"),
         "rank_no": item.get("rank_no"),
@@ -310,6 +347,9 @@ def _compact_tracking_item(item: dict[str, Any]) -> dict[str, Any]:
         if status
         else None,
     }
+    if compact_sentiment_context:
+        compact["sentiment_context"] = compact_sentiment_context
+    return compact
 
 
 def _tracking_payload(

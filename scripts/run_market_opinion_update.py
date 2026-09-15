@@ -23,6 +23,9 @@ from app.data_ingestion.newsnow_client import (  # noqa: E402
     NewsNowItem,
 )
 from app.data_ingestion.market_opinion_repository import save_sector_summaries_normalized  # noqa: E402
+from app.data_ingestion.market_opinion_event_repository import (  # noqa: E402
+    persist_market_opinion_event,
+)
 from app.data_ingestion.market_opinion_semantics import (  # noqa: E402
     classify_opinion_direction,
     classify_sector_direction,
@@ -590,6 +593,47 @@ def replace_matches(raw_id: int, stock_matches: list[dict[str, Any]], sector_mat
                 )
 
 
+def persist_v06_event_evidence(
+    *,
+    raw_id: int,
+    item: NewsNowItem,
+    stock_matches: list[dict[str, Any]],
+    sector_matches: list[dict[str, Any]],
+    direction: str,
+    event_type: str,
+    event_importance_score: float,
+    effective_until: datetime,
+) -> dict[str, Any]:
+    """Adapt the collector item to the app-owned v0.6 evidence contract."""
+
+    return persist_market_opinion_event(
+        raw_id=raw_id,
+        evidence={
+            "original_news_id": item.item_id,
+            "source_id": item.source_id,
+            "source_name": item.source_name,
+            "source_type": item.source_type,
+            "collection_channel": "newsnow",
+            "title": item.title,
+            "summary": item.summary,
+            "url": item.url,
+            "published_at": item.published_at,
+            "source_time": item.effective_time,
+            "first_seen_at": item.crawl_time,
+            "received_at": item.crawl_time,
+            "effective_until": effective_until,
+            "direction": direction,
+            "event_type": event_type,
+            # V0.6 keeps market amplification and freshness out of the event
+            # fact score. Credibility, persistence and reaction have separate
+            # versioned fields downstream.
+            "impact_score": event_importance_score,
+        },
+        stock_matches=stock_matches,
+        sector_matches=sector_matches,
+    )
+
+
 def aggregate_sectors(as_of: datetime, lookback_days: int) -> list[dict[str, Any]]:
     max_valid_days = max(int(profile["expires"]) for profile in TIME_DECAY_PROFILES.values())
     start_at = as_of - timedelta(days=max(lookback_days, max_valid_days))
@@ -945,6 +989,7 @@ def main() -> None:
         client = NewsNowClient(timeout_seconds=args.timeout_seconds)
         stock_refs, industries = load_stock_refs()
         fetched = saved = matched_stocks = matched_sectors = failed_sources = 0
+        event_evidence_rows = event_relation_rows = 0
         errors: dict[str, str] = {}
         cutoff = as_of - timedelta(days=args.lookback_days)
         for source_id in sources:
@@ -980,6 +1025,18 @@ def main() -> None:
                                 event_type,
                             )
                             replace_matches(raw_id, [], [])
+                            event_result = persist_v06_event_evidence(
+                                raw_id=raw_id,
+                                item=item,
+                                stock_matches=stock_matches,
+                                sector_matches=sector_matches,
+                                direction=direction,
+                                event_type=event_type,
+                                event_importance_score=imp,
+                                effective_until=time_info["effective_until"],
+                            )
+                            event_evidence_rows += 1
+                            event_relation_rows += int(event_result.get("relation_count") or 0)
                         continue
                     if not args.dry_run:
                         raw_id = save_raw_item(
@@ -995,6 +1052,18 @@ def main() -> None:
                             event_type,
                         )
                         replace_matches(raw_id, stock_matches, sector_matches)
+                        event_result = persist_v06_event_evidence(
+                            raw_id=raw_id,
+                            item=item,
+                            stock_matches=stock_matches,
+                            sector_matches=sector_matches,
+                            direction=direction,
+                            event_type=event_type,
+                            event_importance_score=imp,
+                            effective_until=time_info["effective_until"],
+                        )
+                        event_evidence_rows += 1
+                        event_relation_rows += int(event_result.get("relation_count") or 0)
                     saved += 1
                     matched_stocks += len(stock_matches)
                     matched_sectors += len(sector_matches)
@@ -1022,12 +1091,14 @@ def main() -> None:
                 "saved_items": saved,
                 "stock_matches": matched_stocks,
                 "sector_matches": matched_sectors,
+                "event_evidence_rows": event_evidence_rows,
+                "event_relation_rows": event_relation_rows,
                 "sector_summary_count": len(summaries),
                 "top_sectors": summaries[:8],
                 "failed_sources": failed_sources,
                 "errors": errors,
                 "elapsed_seconds": round(time.time() - started, 2),
-                "anti_lookahead_rule": "COALESCE(published_at, crawl_time) <= as_of_datetime; future source pubDate is capped at crawl_time; timeliness_score is recomputed by event type at aggregate time",
+                "anti_lookahead_rule": "source_time and received_at must both be <= decision_as_of; available_at is their maximum; timeliness_score is recomputed by event type at aggregate time",
             }
         )
         logger.finish(TASK_NAME, run_id, payload["status"], f"market opinion updated, saved={saved}, sectors={len(summaries)}", payload)

@@ -618,6 +618,12 @@ const FACTOR_LABELS = {
   turnover_heat: '换手热度',
   sentiment_heat: '情绪热度',
   risk_control: '风险控制',
+  catalyst_quality: '增量催化质量',
+  persistence: '后续驱动力',
+  relation_recognition: '业务关系强度',
+  fund_confirmation: '同时点资金确认',
+  price_volume_confirmation: '盘中价量承接',
+  chip_liquidity_capacity: '筹码与成交容量',
 };
 
 function formatFactorSummary(factors = {}, maxItems = 5) {
@@ -691,7 +697,27 @@ function normalizeSentimentContext(item = {}) {
     stock_recognition_reason: metrics.opinion_stock_recognition_reason,
     deepseek: metrics.deepseek || null,
   };
-  return context?.sector_name || context?.sentiment_mode === 'market_opinion_v2' ? context : null;
+  const normalized = context ? {
+    ...context,
+    candidate_lanes: context.candidate_lanes || item.candidate_lanes || metrics.candidate_lanes || [],
+    primary_lane: context.primary_lane || item.primary_lane || metrics.primary_lane || null,
+    canonical_events: context.canonical_events || item.explain?.canonical_events || [],
+    event_relations: context.event_relations || item.explain?.event_relations || [],
+    evidence_quality: context.evidence_quality || item.evidence_quality || item.explain?.evidence_quality || {},
+    entry_eligibility: context.entry_eligibility || item.entry_eligibility || metrics.entry_eligibility || null,
+    entry_block_reasons: context.entry_block_reasons || item.entry_block_reasons || metrics.entry_block_reasons || [],
+    decision_as_of: context.decision_as_of || item.decision_as_of || metrics.decision_as_of || null,
+    valid_until: context.valid_until || item.valid_until || metrics.valid_until || null,
+    factor_schema_version: context.factor_schema_version || item.factor_schema_version || metrics.factor_schema_version || null,
+    evaluation_method_version: context.evaluation_method_version || item.evaluation_method_version || metrics.evaluation_method_version || null,
+    intraday_path: context.intraday_path || item.explain?.intraday_path || metrics.intraday_path || {},
+  } : null;
+  return normalized?.sector_name
+    || normalized?.canonical_events?.length
+    || normalized?.candidate_lanes?.length
+    || normalized?.sentiment_mode === 'market_opinion_v2'
+    ? normalized
+    : null;
 }
 
 function formatNewsTitle(news) {
@@ -708,6 +734,15 @@ function formatSourceName(source) {
 
 function renderSentimentContextInline(context) {
   if (!context) return '';
+  const laneLabel = {
+    direct_catalyst: '直接催化轨',
+    theme_leader: '主题龙头轨',
+  }[context.primary_lane] || '';
+  const entryLabel = {
+    conditions_met: '盘中条件满足·仍为研究候选',
+    observe: '盘中条件未齐·仅观察',
+    invalid: '证据或交易状态失效',
+  }[context.entry_eligibility] || '';
   const gradeLabel = context.trade_grade_label ? ` · ${context.trade_grade_label}` : '';
   const tradeLabel = context.trade_signal_label ? ` · ${context.trade_signal_label}` : '';
   const dailyLabel = context.daily_trend_label ? ` · ${context.daily_trend_label}` : '';
@@ -722,7 +757,10 @@ function renderSentimentContextInline(context) {
     context.positive != null ? `正 ${context.positive}` : '',
     context.negative != null ? `负 ${context.negative}` : '',
   ].filter(Boolean).join(' · ');
-  return `舆情主题：${context.sector_name || '-'}${context.sector_type ? `（${context.sector_type}）` : ''}${themeLabel}${recognition}${gradeLabel}${tradeLabel}${dailyLabel}${chipLabel}${context.as_of ? ` · ${context.as_of}` : ''}${counts ? ` · ${counts}` : ''}`;
+  const subject = context.sector_name
+    ? `舆情主题：${context.sector_name}${context.sector_type ? `（${context.sector_type}）` : ''}`
+    : '公司增量事件';
+  return `${subject}${laneLabel ? ` · ${laneLabel}` : ''}${entryLabel ? ` · ${entryLabel}` : ''}${themeLabel}${recognition}${gradeLabel}${tradeLabel}${dailyLabel}${chipLabel}${context.as_of ? ` · ${context.as_of}` : ''}${counts ? ` · ${counts}` : ''}`;
 }
 
 function renderSentimentContextBlock(context) {
@@ -741,6 +779,10 @@ function renderSentimentContextBlock(context) {
     ${context.market_context_label ? `<div class="muted">大盘环境：${escapeHtml(context.market_context_label)} · 分数 ${formatNumber(context.market_context_score, 1)} · ${escapeHtml(context.market_context_reason || '-')}</div>` : ''}
     ${context.market_index_count ? `<div class="muted">宽基指数：沪深300 ${formatPercent(context.csi300_pct_chg)} · 中证500 ${formatPercent(context.csi500_pct_chg)} · 中证1000 ${formatPercent(context.csi1000_pct_chg)}</div>` : ''}
     ${context.source_credibility_level ? `<div class="muted">信源评级：${escapeHtml(context.source_credibility_level)} · ${formatNumber(context.source_credibility_score, 2)} · ${escapeHtml(context.source_credibility_reason || '-')}</div>` : ''}
+    ${context.canonical_events?.length ? `<div class="muted">规范事件：${context.canonical_events.length} 个 · 证据 ${context.evidence_quality?.available_count ?? 0} 条 · ${escapeHtml(context.evidence_quality?.status || 'partial')}</div>` : ''}
+    ${context.entry_eligibility ? `<div class="muted">盘中条件：${escapeHtml({ conditions_met: '满足（影子研究）', observe: '未齐，仅观察', invalid: '失效' }[context.entry_eligibility] || context.entry_eligibility)}${context.entry_block_reasons?.length ? ` · ${escapeHtml(context.entry_block_reasons.slice(0, 4).join(' / '))}` : ''}</div>` : ''}
+    ${context.decision_as_of ? `<div class="muted">决策截止：${escapeHtml(context.decision_as_of)}${context.valid_until ? ` · 有效至 ${escapeHtml(context.valid_until)}` : ''}</div>` : ''}
+    ${context.intraday_path?.data_status ? `<div class="muted">分时路径：${escapeHtml(context.intraday_path.path_state || 'unknown')} · ${escapeHtml(context.intraday_path.data_status)}</div>` : ''}
     ${context.deepseek?.summary ? `<div class="muted">DeepSeek：${escapeHtml(context.deepseek.summary)}${context.deepseek.confidence != null ? ` · 置信度 ${formatNumber(context.deepseek.confidence, 2)}` : ''}</div>` : ''}
     <div class="muted">新闻来源：${escapeHtml(sources)}</div>
     <div class="muted">Top新闻：${escapeHtml(news.join('；') || '-')}</div>
@@ -824,6 +866,9 @@ function renderSelectionResultCards(items = [], emptyText = '暂无达标标的'
     const pctClass = getPctClass(item.price_change_pct) || '';
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
+    const researchEntryText = item.research_entry_assessment?.research_only
+      ? `影子研究：${item.entry_eligibility === 'conditions_met' ? '盘中条件满足，但不构成买入建议' : item.entry_eligibility === 'invalid' ? '证据或交易状态失效' : '盘中条件未齐，仅观察'}`
+      : '';
     return `
       <article class="selection-stock-card">
         <div class="selection-stock-head">
@@ -847,6 +892,7 @@ function renderSelectionResultCards(items = [], emptyText = '暂无达标标的'
           <span>最新 ${formatPrice(item.current_price)}</span>
         </div>
         ${tradePlanText ? `<div class="selection-card-note">${escapeHtml(tradePlanText)}</div>` : ''}
+        ${researchEntryText ? `<div class="selection-card-note">${escapeHtml(researchEntryText)}</div>` : ''}
         ${turtlePlanText ? `<div class="selection-card-note">${escapeHtml(turtlePlanText)}</div>` : ''}
         <div class="selection-factor-mini">${escapeHtml(factorSummary)}</div>
         ${sentimentContext ? `<div class="selection-card-note">${escapeHtml(renderSentimentContextInline(sentimentContext))}</div>` : ''}
@@ -942,6 +988,17 @@ function normalizeRunResponse(result) {
       trade_grade_label: item.trade_grade_label || item.strategy_raw_metrics?.trade_grade_label || explain.raw_metrics?.trade_grade_label || null,
       trade_grade_reason: item.trade_grade_reason || item.strategy_raw_metrics?.trade_grade_reason || explain.raw_metrics?.trade_grade_reason || null,
       theme_trade_slot_state: item.theme_trade_slot_state || item.strategy_raw_metrics?.theme_trade_slot_state || explain.raw_metrics?.theme_trade_slot_state || null,
+      candidate_lanes: item.candidate_lanes || explain.candidate_lanes || factorScores.candidate_lanes || [],
+      primary_lane: item.primary_lane || explain.candidate_lane || factorScores.primary_lane || null,
+      evidence_quality: item.evidence_quality || explain.evidence_quality || {},
+      entry_eligibility: item.entry_eligibility || explain.entry_eligibility || factorScores.entry_eligibility || null,
+      entry_block_reasons: item.entry_block_reasons || explain.entry_block_reasons || factorScores.entry_block_reasons || [],
+      entry_gate_results: item.entry_gate_results || explain.entry_gate_results || factorScores.entry_gate_results || {},
+      decision_as_of: item.decision_as_of || explain.decision_as_of || factorScores.decision_as_of || null,
+      valid_until: item.valid_until || explain.valid_until || factorScores.valid_until || null,
+      factor_schema_version: item.factor_schema_version || explain.factor_schema_version || factorScores.factor_schema_version || null,
+      evaluation_method_version: item.evaluation_method_version || explain.evaluation_method_version || factorScores.evaluation_method_version || null,
+      research_entry_assessment: item.research_entry_assessment || null,
       trade_plan: item.trade_plan || null,
       trade_plan_status: item.trade_plan_status || null,
     };
@@ -1040,6 +1097,9 @@ function renderSelectionResults(data) {
       : `基本面完整度 ${formatNumber(fundamentalCompleteness, 0)}% · 关键字段齐全`;
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
+    const researchEntryText = item.research_entry_assessment?.research_only
+      ? `影子研究：${item.entry_eligibility === 'conditions_met' ? '盘中条件满足，但不构成买入建议' : item.entry_eligibility === 'invalid' ? '证据或交易状态失效' : '盘中条件未齐，仅观察'}`
+      : '';
     const peStatusHint = item.pe_status_label
       ? `PE状态：${item.pe_status_label}${item.pe_status_reason ? `（${item.pe_status_reason}）` : ''}`
       : null;
@@ -1059,7 +1119,7 @@ function renderSelectionResults(data) {
       renderSentimentContextInline(sentimentContext),
       `交易状态：${tradeLabel || '-'}${sentimentContext?.trade_signal_reason ? `，${sentimentContext.trade_signal_reason}` : ''}`,
       `分级说明：${sentimentContext?.trade_grade_reason || item.trade_grade_reason || '-'}`,
-      `买卖计划：${tradePlanText || '-'}`,
+      researchEntryText || `买卖计划：${tradePlanText || '-'}`,
       `海龟V4研究计划：${turtlePlanText || '-'}`,
       `基础打分：value=${factorScores.value_score ?? '-'}, quality=${factorScores.quality_score ?? '-'}, stability=${factorScores.stability_score ?? '-'}, data=${factorScores.data_quality_score ?? '-'}, completeness=${factorScores.completeness_score ?? '-'}`,
       peStatusHint,

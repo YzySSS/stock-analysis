@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from app.orchestration import migrate
 from app.orchestration.migration_smoke import validate_smoke_database_name
+from app.orchestration.sentiment_v06_schema import SENTIMENT_V06_DDL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +46,7 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
         self.assertEqual(versions, sorted(versions))
         self.assertEqual(len(versions), len(set(versions)))
         self.assertEqual(versions[0], "0001")
-        self.assertEqual(versions[-1], "0036")
+        self.assertEqual(versions[-1], "0037")
         self.assertTrue(any("market opinion" in name for name in names))
         self.assertTrue(any("realtime" in name for name in names))
         self.assertTrue(any("job state" in name for name in names))
@@ -67,6 +68,7 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
         self.assertTrue(any("duplicate secondary indexes" in name for name in names))
         self.assertTrue(any("price-cycle evidence" in name for name in names))
         self.assertTrue(any("manifest-scope performance index" in name for name in names))
+        self.assertTrue(any("canonical event evidence" in name for name in names))
 
     def test_core_checksum_is_stable_when_module_is_imported(self):
         core = migrate.MIGRATIONS[0]
@@ -142,6 +144,35 @@ class SchemaMigrationRegistryTests(unittest.TestCase):
 
 
 class SchemaBoundaryTests(unittest.TestCase):
+    def test_v06_event_schema_is_append_only_indexed_and_has_no_foreign_keys(self):
+        ddl = "\n".join(SENTIMENT_V06_DDL)
+
+        for table in (
+            "market_opinion_event",
+            "market_opinion_event_revision",
+            "market_opinion_event_evidence",
+            "market_opinion_stock_relation",
+        ):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", ddl)
+        for field in (
+            "canonical_event_id",
+            "event_revision",
+            "evidence_id",
+            "original_news_id",
+            "content_role",
+            "confirmation_status",
+            "source_time",
+            "received_at",
+            "available_at",
+            "effective_until",
+            "driver_horizon",
+            "next_milestone",
+            "relation_status",
+            "relation_score",
+        ):
+            self.assertIn(field, ddl)
+        self.assertNotIn("FOREIGN KEY", ddl.upper())
+
     def test_request_and_sync_paths_do_not_execute_schema_ddl(self):
         roots = [
             PROJECT_ROOT / "app" / "api",

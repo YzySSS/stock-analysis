@@ -69,3 +69,29 @@ strategies:
       start_on: "2026-08-11"
       target_trade_days: 30
       engine: sentiment_snapshot_pair
+
+  - id: a_share_sentiment_v06
+    display_name: A股舆情选股 v0.6.0（盘中研究）
+    entrypoint: app.strategies.active.a_share_sentiment_v06_strategy.AShareSentimentV06Strategy
+    config_path: app/strategies/registry/configs/a_share_sentiment_v06.yaml
+    version: 0.6.0
+    immutable_tag: a-share-sentiment-v0.6.0
+    status: experimental
+    mode: shadow_only
+    executable: true
+    capability:
+      supported_instrument_types: [stock]
+      required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily, stock_chip_daily, sector_opinion_daily]
+      minimum_coverage: 0.98
+      maximum_data_age_days: 0
+      runtime_status: enabled
+      backtest_status: disabled
+      validation_status: shadow_only
+      evidence_status: protocol_preregistered_not_started
+      evidence_note: 0.6.0 独立事件证据、双轨召回和盘中必要门已版本化；仅可人工选择研究运行，固定时点前瞻采样尚未启用，不具备交易资格
+    tags: [sentiment, canonical-event, direct-catalyst, theme-leader, intraday-gates, deterministic, shadow-only, manual-selectable]
+    description: 盘中研究版；把增量事件、真实业务关系、当前价量资金确认和可成交性拆开，条件满足仍只显示“研究候选”，不自动下单或晋级
+    automatic_observation:
+      enabled: false
+      exemption: separate_preregistered_intraday_protocol_not_activated
+      reason: preregistered_protocol_requires_separate_activation

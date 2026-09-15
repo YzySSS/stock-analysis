@@ -74,11 +74,19 @@ class StrategyCapabilityContractTests(unittest.TestCase):
 
         self.assertEqual(
             {item["id"] for item in items},
-            {"a_share_sentiment", "a_share_sentiment_v05"},
+            {
+                "a_share_sentiment",
+                "a_share_sentiment_v05",
+                "a_share_sentiment_v06",
+            },
         )
         self.assertEqual(
             {item["id"] for item in items if item["runtime_ready"]},
-            {"a_share_sentiment", "a_share_sentiment_v05"},
+            {
+                "a_share_sentiment",
+                "a_share_sentiment_v05",
+                "a_share_sentiment_v06",
+            },
         )
         self.assertFalse(any(item["backtest_ready"] for item in items))
         self.assertIsNone(service.get_default_strategy_id())
@@ -91,6 +99,11 @@ class StrategyCapabilityContractTests(unittest.TestCase):
         self.assertEqual(by_id["a_share_sentiment_v05"]["validation_status"], "shadow_only")
         self.assertEqual(by_id["a_share_sentiment_v05"]["availability"], "experimental")
         self.assertEqual(by_id["a_share_sentiment_v05"]["availability_label"], "实验可执行")
+        self.assertEqual(by_id["a_share_sentiment_v06"]["mode"], "shadow_only")
+        self.assertEqual(
+            by_id["a_share_sentiment_v06"]["validation_status"], "shadow_only"
+        )
+        self.assertEqual(by_id["a_share_sentiment_v06"]["availability"], "experimental")
 
     def test_loadable_v05_is_runtime_ready_but_explicitly_experimental(self):
         item = StrategyService(dataset_snapshot=ready_snapshot()).get_strategy_capability(

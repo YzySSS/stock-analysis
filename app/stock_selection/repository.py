@@ -353,7 +353,8 @@ class SelectionRepository:
                 if point_in_time:
                     cursor.execute(
                         """
-                        SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
+                        SELECT sector_type, sector_name, net_amount, pct_chg, quote_time,
+                               created_at AS received_at, source, source_unit
                         FROM market_sector_fund_flow_snapshot
                         WHERE trade_date = (
                             SELECT MAX(trade_date)
@@ -374,7 +375,8 @@ class SelectionRepository:
                 else:
                     cursor.execute(
                         """
-                        SELECT sector_type, sector_name, net_amount, pct_chg, quote_time
+                        SELECT sector_type, sector_name, net_amount, pct_chg, quote_time,
+                               created_at AS received_at, source, source_unit
                         FROM market_sector_fund_flow_snapshot
                         WHERE trade_date = (SELECT MAX(trade_date) FROM market_sector_fund_flow_snapshot)
                           AND quote_time >= DATE_SUB((SELECT MAX(quote_time) FROM market_sector_fund_flow_snapshot), INTERVAL 20 MINUTE)
@@ -382,6 +384,212 @@ class SelectionRepository:
                     )
                 fund_rows = cursor.fetchall() or []
         return sectors, fund_rows
+
+    def load_sentiment_v06_event_rows(
+        self,
+        *,
+        codes: Sequence[str],
+        decision_as_of: Any,
+        max_rows_per_code: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Read only event revisions and evidence available at the decision."""
+
+        normalized_codes = sorted(
+            {str(value).strip() for value in codes if str(value).strip()}
+        )[:180]
+        if not normalized_codes or decision_as_of is None:
+            return []
+        placeholders = ",".join(["%s"] * len(normalized_codes))
+        per_code_limit = max(1, min(int(max_rows_per_code), 20))
+        sql = f"""
+        WITH ranked_evidence AS (
+        SELECT
+            relation.relation_id,
+            relation.canonical_event_id,
+            relation.event_revision,
+            relation.code,
+            relation.relation_type,
+            relation.relation_status,
+            relation.relation_score,
+            relation.benefit_scale,
+            relation.benefit_scale_unit,
+            relation.evidence_id AS relation_evidence_id,
+            relation.evidence_excerpt AS relation_evidence_excerpt,
+            relation.relation_reason,
+            relation.is_adverse_veto,
+            relation.valid_from,
+            relation.valid_until,
+            relation.relation_rule_version,
+            event.event_type,
+            revision.revision_hash,
+            revision.content_role,
+            revision.direction,
+            revision.confirmation_status AS stored_confirmation_status,
+            revision.delta_from_previous,
+            revision.effective_until,
+            revision.facts_json,
+            evidence.evidence_id,
+            evidence.raw_id,
+            evidence.original_news_id,
+            evidence.source_id,
+            evidence.original_publisher,
+            evidence.collection_channel,
+            evidence.source_type,
+            evidence.credibility_rule_version,
+            evidence.credibility_score,
+            evidence.impact_score,
+            evidence.is_primary_source,
+            evidence.is_independent_confirmation,
+            evidence.repost_of_evidence_id,
+            evidence.source_time,
+            evidence.published_at,
+            evidence.first_seen_at,
+            evidence.received_at,
+            evidence.available_at,
+            evidence.title,
+            evidence.evidence_excerpt,
+            evidence.source_url,
+            evidence.raw_payload_hash,
+            evidence.metadata_json AS evidence_metadata_json,
+            ROW_NUMBER() OVER (
+                PARTITION BY relation.code
+                ORDER BY relation.is_adverse_veto DESC,
+                         relation.event_revision DESC,
+                         evidence.available_at DESC,
+                         evidence.evidence_id
+            ) AS row_no
+        FROM market_opinion_stock_relation relation
+        INNER JOIN market_opinion_event event
+          ON event.canonical_event_id=relation.canonical_event_id
+        INNER JOIN market_opinion_event_revision revision
+          ON revision.canonical_event_id=relation.canonical_event_id
+         AND revision.event_revision=relation.event_revision
+        INNER JOIN market_opinion_event_evidence evidence
+          ON evidence.canonical_event_id=revision.canonical_event_id
+         AND evidence.event_revision=revision.event_revision
+        WHERE relation.code IN ({placeholders})
+          AND relation.valid_from <= %s
+          AND (relation.valid_until IS NULL OR relation.valid_until >= %s)
+          AND revision.available_at <= %s
+          AND revision.received_at <= %s
+          AND (revision.source_time IS NULL OR revision.source_time <= %s)
+          AND evidence.available_at <= %s
+          AND evidence.received_at <= %s
+          AND (evidence.source_time IS NULL OR evidence.source_time <= %s)
+        )
+        SELECT *
+        FROM ranked_evidence
+        WHERE row_no <= %s
+        ORDER BY code, canonical_event_id, event_revision DESC,
+                 available_at, evidence_id
+        """
+        params: list[Any] = [
+            *normalized_codes,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            per_code_limit,
+        ]
+        with self._read_connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                return cursor.fetchall() or []
+
+    def load_sentiment_v06_direct_candidate_codes(
+        self,
+        *,
+        decision_as_of: Any,
+        max_codes: int = 180,
+    ) -> list[str]:
+        """Recall current direct-catalyst names before theme-pool truncation."""
+
+        if decision_as_of is None:
+            return []
+        bounded_limit = max(1, min(int(max_codes), 180))
+        sql = f"""
+        SELECT relation.code
+        FROM market_opinion_stock_relation relation
+        INNER JOIN market_opinion_event event
+          ON event.canonical_event_id=relation.canonical_event_id
+        INNER JOIN market_opinion_event_revision revision
+          ON revision.canonical_event_id=relation.canonical_event_id
+         AND revision.event_revision=relation.event_revision
+        WHERE relation.relation_status IN ('confirmed', 'confirmed_primary')
+          AND relation.relation_type='direct_business'
+          AND revision.content_role IN ('original_catalyst', 'catalyst_update')
+          AND revision.direction='positive'
+          AND relation.valid_from <= %s
+          AND (relation.valid_until IS NULL OR relation.valid_until >= %s)
+          AND revision.available_at <= %s
+          AND revision.received_at <= %s
+          AND (revision.source_time IS NULL OR revision.source_time <= %s)
+        GROUP BY relation.code
+        ORDER BY MAX(relation.relation_score) DESC,
+                 MAX(relation.valid_from) DESC,
+                 relation.code
+        LIMIT {bounded_limit}
+        """
+        with self._read_connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (decision_as_of,) * 5)
+                return [
+                    str(row.get("code") or "").strip()
+                    for row in cursor.fetchall() or []
+                    if str(row.get("code") or "").strip()
+                ]
+
+    def load_sentiment_v06_intraday_rows(
+        self,
+        *,
+        codes: Sequence[str],
+        decision_as_of: Any,
+        window_minutes: int,
+    ) -> list[dict[str, Any]]:
+        """Load a bounded, partition-pruned minute path for mapped v0.6 names."""
+
+        normalized_codes = sorted(
+            {str(value).strip() for value in codes if str(value).strip()}
+        )[:180]
+        if not normalized_codes or decision_as_of is None:
+            return []
+        bounded_window = max(5, min(int(window_minutes), 120))
+        decision_date = (
+            decision_as_of.date()
+            if hasattr(decision_as_of, "date") and not isinstance(decision_as_of, str)
+            else str(decision_as_of)[:10]
+        )
+        placeholders = ",".join(["%s"] * len(normalized_codes))
+        sql = f"""
+        SELECT code, trade_date, quote_time, quote_minute, latest_price,
+               pre_close, open_price, high_price, low_price, volume, amount,
+               batch_id, received_at, freshness_seconds, is_stale, source
+        FROM stock_realtime_intraday
+        WHERE trade_date=%s
+          AND code IN ({placeholders})
+          AND quote_time > DATE_SUB(%s, INTERVAL {bounded_window} MINUTE)
+          AND quote_time <= %s
+          AND received_at <= %s
+          AND created_at <= %s
+          AND COALESCE(is_stale, 0)=0
+        ORDER BY code, quote_time, received_at
+        """
+        params: list[Any] = [
+            decision_date,
+            *normalized_codes,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+            decision_as_of,
+        ]
+        with self._read_connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                return cursor.fetchall() or []
 
     def load_candidate_rows(
         self,
@@ -617,6 +825,9 @@ class SelectionRepository:
             realtime_mf.turnover_rate AS realtime_mf_turnover_rate,
             realtime_mf.quote_time AS realtime_mf_quote_time,
             realtime_mf.trade_date AS realtime_mf_trade_date,
+            realtime_mf.created_at AS realtime_mf_received_at,
+            realtime_mf.source AS realtime_mf_source,
+            realtime_mf.source_unit AS realtime_mf_source_unit,
             pop.source AS popularity_source,
             pop.source_rank AS popularity_rank,
             pop.source_score AS popularity_source_score,

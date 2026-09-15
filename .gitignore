@@ -49,6 +49,7 @@ docs/*
 !docs/sentiment_data_consistency_and_realtime_probe.md
 !docs/sentiment_remediation_v2_implementation.md
 !docs/sentiment_v06_modification_plan_2026-09-11.md
+!docs/sentiment_v06_implementation_2026-09-15.md
 app/api/web/assets/ui-preview/
 app/api/web/pages/ui-*-preview.html
 app/api/web/pages/ui-reference.html

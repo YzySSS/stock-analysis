@@ -180,6 +180,20 @@ class SentimentSnapshotValidationTests(unittest.TestCase):
         self.assertTrue(any("after decision_as_of" in error for error in result.errors))
         self.assertTrue(any("batch_id is required" in error for error in result.errors))
 
+    def test_rejects_future_received_time_even_when_source_time_is_old(self):
+        result = validate_sentiment_snapshot(
+            [candidate(received_at="2026-07-21 09:30:01")],
+            expected_entity_count=100,
+            covered_entity_count=100,
+            decision_as_of="2026-07-21 09:30:00",
+            source_manifest_ids=[101],
+        )
+
+        self.assertFalse(result.passed)
+        self.assertTrue(
+            any("received_at is after decision_as_of" in error for error in result.errors)
+        )
+
 
 class SentimentSnapshotRepositoryTests(unittest.TestCase):
     def test_stage_writes_manifest_and_lineage_rows_without_publishing(self):
@@ -225,6 +239,15 @@ class SentimentSnapshotRepositoryTests(unittest.TestCase):
             "gate_results": {"hard_gate_pass": True},
             "evidence_ids": ["news-1", "news-2"],
             "ai_status": "advisory_only",
+            "factor_schema_version": "sentiment-v06-factors-v1",
+            "evidence_quality": {"status": "complete", "available_count": 2},
+            "candidate_lanes": ["direct_catalyst", "theme_leader"],
+            "primary_lane": "direct_catalyst",
+            "entry_eligibility": "conditions_met",
+            "entry_block_reasons": [],
+            "decision_as_of": "2026-07-21 09:30:00",
+            "valid_until": "2026-07-21 09:35:00",
+            "evaluation_method_version": "sentiment-v06-eval-v1",
             "explain_json": {"summary": "fixture"},
         }
 
@@ -261,6 +284,9 @@ class SentimentSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(decoded["gate_results"], {"hard_gate_pass": True})
         self.assertEqual(decoded["evidence_ids"], ["news-1", "news-2"])
         self.assertEqual(decoded["ai_status"], "advisory_only")
+        self.assertEqual(decoded["candidate_lanes"], ["direct_catalyst", "theme_leader"])
+        self.assertEqual(decoded["entry_eligibility"], "conditions_met")
+        self.assertEqual(decoded["valid_until"], "2026-07-21 09:35:00")
         self.assertEqual(decoded["industry"], "银行")
         self.assertEqual(decoded["explain_json"], {"summary": "fixture"})
 

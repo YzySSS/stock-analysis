@@ -70,6 +70,29 @@ function formatSelectionTime(item = {}) {
   return item.selection_datetime || item.selection_date || '-';
 }
 
+function formatSentimentV06ResearchInline(item = {}) {
+  const context = item.sentiment_context || {};
+  if (item.strategy_id !== 'a_share_sentiment_v06' && !context.entry_eligibility) return '';
+  const laneLabels = {
+    direct_catalyst: '直接催化轨',
+    theme_leader: '主题龙头轨',
+  };
+  const lanes = (context.candidate_lanes || [])
+    .map((lane) => laneLabels[lane] || lane)
+    .filter(Boolean)
+    .join('/');
+  const eligibility = {
+    conditions_met: '盘中条件满足（影子研究，不构成买入建议）',
+    observe: '盘中条件未齐，仅观察',
+    invalid: '证据或交易状态失效',
+  }[context.entry_eligibility] || context.entry_eligibility || '状态未知';
+  const blocks = (context.entry_block_reasons || []).slice(0, 2).join(' / ');
+  const clock = context.decision_as_of
+    ? ` · 决策截止 ${context.decision_as_of}${context.valid_until ? `，有效至 ${context.valid_until}` : ''}`
+    : '';
+  return `v0.6 影子研究${lanes ? ` · ${lanes}` : ''} · ${eligibility}${blocks ? ` · ${blocks}` : ''}${clock}`;
+}
+
 function formatTradePlanInline(plan = null, status = null) {
   if (!plan) return '';
   const entryZone = plan.entry_zone || {};
@@ -263,6 +286,7 @@ function renderTrackingTable(items, summary = {}) {
         : '需重点复盘回撤';
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
+    const sentimentResearchText = formatSentimentV06ResearchInline(item);
     const planBadgeClass = getTradePlanBadgeClass(item.trade_plan_status);
     const tradeGradeLabel = item.sentiment_context?.trade_grade_label;
     const tradeGradeClass = item.sentiment_context?.trade_grade_state === 'tradable' ? 'status-ok' : 'status-warn';
@@ -295,6 +319,7 @@ function renderTrackingTable(items, summary = {}) {
           <div>${escapeHtml(reviewNote)}</div>
           ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
           ${turtlePlanText ? `<div class="muted">${escapeHtml(turtlePlanText)}</div>` : ''}
+          ${sentimentResearchText ? `<div class="muted">${escapeHtml(sentimentResearchText)}</div>` : ''}
         </td>
         <td>
           <button class="btn btn-sm ${includeInStats ? 'btn-secondary' : 'btn-warning'}" type="button" data-action="toggle-tracking-stats" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}" data-include-in-stats="${includeInStats ? 'true' : 'false'}" data-stats-window-expired="${statsWindowExpired ? 'true' : 'false'}" title="${escapeHtml(statsWindowExpired ? statsExclusionReason : '手动切换该记录是否参与统计')}" ${statsWindowExpired ? 'disabled' : ''}>
@@ -325,6 +350,7 @@ function renderTrackingCards(items = [], summary = {}) {
     const includeInStats = item.include_in_stats !== false && !statsWindowExpired;
     const tradePlanText = formatTradePlanInline(item.trade_plan, item.trade_plan_status);
     const turtlePlanText = formatTurtleShadowInline(item.trade_plan);
+    const sentimentResearchText = formatSentimentV06ResearchInline(item);
     const tradeGradeLabel = item.sentiment_context?.trade_grade_label;
     const tradeGradeClass = item.sentiment_context?.trade_grade_state === 'tradable' ? 'status-ok' : 'status-warn';
     return `
@@ -346,6 +372,7 @@ function renderTrackingCards(items = [], summary = {}) {
         </div>
         ${tradePlanText ? `<div class="muted">${escapeHtml(tradePlanText)}</div>` : ''}
         ${turtlePlanText ? `<div class="muted">${escapeHtml(turtlePlanText)}</div>` : ''}
+        ${sentimentResearchText ? `<div class="muted">${escapeHtml(sentimentResearchText)}</div>` : ''}
         <div class="tracking-record-foot">
           <span>${escapeHtml(formatSelectionTime(item))} · ${escapeHtml(item.realtime_quote_time || '无实时')}</span>
           <span>

@@ -40,7 +40,7 @@ class MarketRiskAlertUiTests(unittest.TestCase):
         self.assertIn("common.js?v=20260819marketalert1", home)
         self.assertIn("common.js?v=20260819marketalert1", selection)
         self.assertIn("home.js?v=20260819marketalert1", home)
-        self.assertIn("selection.js?v=20260819marketalert1", selection)
+        self.assertIn("selection.js?v=20260915sentimentv06", selection)
 
 
 if __name__ == "__main__":

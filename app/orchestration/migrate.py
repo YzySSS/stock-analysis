@@ -41,6 +41,7 @@ from app.orchestration.selection_trade_plan_v4_schema import (
     ensure_selection_trade_plan_v4_schema,
 )
 from app.orchestration.sentiment_consistency_schema import ensure_sentiment_consistency_schema
+from app.orchestration.sentiment_v06_schema import ensure_sentiment_v06_schema
 from app.orchestration.stock_popularity_schema import ensure_stock_popularity_schema
 from app.orchestration.stock_status_pit_schema import ensure_stock_status_pit_schema
 from app.orchestration.stock_technical_feature_schema import ensure_stock_technical_feature_schema
@@ -141,6 +142,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0036",
         "strategy factor evaluation manifest-scope performance index",
         ensure_strategy_factor_evaluation_performance_index,
+    ),
+    Migration(
+        "0037",
+        "sentiment V0.6 canonical event evidence and stock relation schema",
+        ensure_sentiment_v06_schema,
     ),
 )
 

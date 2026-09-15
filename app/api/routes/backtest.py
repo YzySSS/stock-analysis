@@ -16,7 +16,9 @@ from app.shared.index_universe import ALL_A_UNIVERSE_CODE, universe_label
 router = APIRouter(tags=["backtest"])
 backtest_repository = BacktestRepository()
 
-SENTIMENT_STRATEGY_IDS = frozenset({"a_share_sentiment", "a_share_sentiment_v05"})
+SENTIMENT_STRATEGY_IDS = frozenset(
+    {"a_share_sentiment", "a_share_sentiment_v05", "a_share_sentiment_v06"}
+)
 
 
 def _to_float(value: object) -> float | None:
@@ -124,6 +126,7 @@ def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str
     base_names = {
         "a_share_sentiment": "A股舆情选股",
         "a_share_sentiment_v05": "A股舆情选股 v0.5",
+        "a_share_sentiment_v06": "A股舆情选股 v0.6",
     }
     base = base_names.get(strategy_id or "", strategy_id or "-")
     if not strategy_version:

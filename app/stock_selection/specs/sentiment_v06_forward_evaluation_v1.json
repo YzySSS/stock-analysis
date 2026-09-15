@@ -1,0 +1,111 @@
+{
+  "spec_id": "sentiment_v06_forward_evaluation_v1",
+  "strategy_id": "a_share_sentiment_v06",
+  "strategy_version": "0.6.0",
+  "status": "preregistered_not_started",
+  "timezone": "Asia/Shanghai",
+  "decision_groups": [
+    "11:00:00",
+    "13:30:00",
+    "14:30:00"
+  ],
+  "manual_runs": {
+    "included": true,
+    "pool": "manual_separate",
+    "must_not_merge_with_fixed_groups": true
+  },
+  "horizons_trade_days": {
+    "primary": 3,
+    "auxiliary": [
+      1,
+      5
+    ]
+  },
+  "benchmarks": [
+    "000300.SH",
+    "000905.SH",
+    "000852.SH"
+  ],
+  "execution": {
+    "version": "sentiment-v06-execution-v1",
+    "entry": "next_executable_quote_after_decision",
+    "minimum_entry_delay_seconds": 60,
+    "exit": "first_executable_quote_on_or_after_horizon",
+    "entry_window_ends_at_valid_until": true,
+    "entry_session_counts_as_holding_session_one": true,
+    "t_plus_one_sellable": true,
+    "honor_suspension": true,
+    "honor_limit_block": true,
+    "honor_price_range": true,
+    "blocked_exit_carries_forward": true,
+    "target_session_exit_price": "close",
+    "post_target_delayed_exit_price": "next_executable_open",
+    "unfilled_is_terminal_sample_state": true,
+    "default_round_trip_cost_pct": 0.25,
+    "round_trip_cost_includes_slippage": true,
+    "slippage_assumption_bps_each_side": 5,
+    "fees_and_tax_assumption_pct": 0.15,
+    "terminal_events_immutable": true
+  },
+  "denominators": [
+    "all_decisions",
+    "all_recalled_candidates",
+    "all_scored_candidates",
+    "all_displayed_candidates",
+    "conditions_met_candidates",
+    "filled_simulated_entries",
+    "empty_decisions",
+    "data_failed_decisions",
+    "untriggered_candidates",
+    "unfilled_candidates"
+  ],
+  "comparisons": [
+    "recall",
+    "scoring",
+    "gating",
+    "end_to_end"
+  ],
+  "metrics": [
+    "net_excess_return",
+    "mae",
+    "mfe",
+    "first_stop_hit",
+    "average_win",
+    "average_loss",
+    "tail_loss",
+    "recall_coverage",
+    "empty_rate",
+    "conditions_met_rate",
+    "fill_rate",
+    "concentration"
+  ],
+  "sampling": {
+    "group_keys": [
+      "decision_trade_date",
+      "decision_group",
+      "canonical_event_id"
+    ],
+    "same_stock_same_day_not_independent": true,
+    "overlapping_horizons_not_independent": true,
+    "ordered_splits": [
+      "development",
+      "calibration",
+      "locked_test"
+    ],
+    "embargo_trade_days": 5,
+    "block_bootstrap": true,
+    "multiple_testing_control": "fdr"
+  },
+  "maturity": {
+    "engineering_days": 20,
+    "initial_direction_days": 30,
+    "medium_report_days": 120,
+    "full_cycle_days": 252
+  },
+  "promotion": {
+    "automatic": false,
+    "human_approval_required": true,
+    "calendar_days_alone_sufficient": false,
+    "schedule_enabled": false
+  }
+}

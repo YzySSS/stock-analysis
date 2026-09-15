@@ -1638,6 +1638,9 @@ class SentimentSnapshotMaterializationService:
                 ai_mode="local_core",
                 metadata={
                     "materializer_version": MATERIALIZER_VERSION,
+                    "strategy_component_versions": dict(
+                        config.get("versions") or {}
+                    ),
                     "external_provider_calls": False,
                     "selection_core": "StockSelector.run",
                     "input_read_view_batch_id": read_view.batch_id,
@@ -1910,6 +1913,7 @@ class SentimentSnapshotMaterializationService:
             "read_view": read_view,
             "candidate_rows": candidate_rows,
             "strategy_config_hash": strategy_config_hash,
+            "strategy_component_versions": dict(config.get("versions") or {}),
             "implementation_hash": implementation_hash,
             "output_hash": output_hash,
             "input_metadata": input_metadata,
@@ -1985,6 +1989,9 @@ class SentimentSnapshotMaterializationService:
         freshness_seconds = self._freshness_seconds(audit, audit.datasets)
         metadata = {
             "materializer_version": MATERIALIZER_VERSION,
+            "strategy_component_versions": dict(
+                output.get("strategy_component_versions") or {}
+            ),
             "external_provider_calls": False,
             "selection_core": "StockSelector.run",
             "input_read_view_batch_id": read_view.batch_id,
@@ -2116,6 +2123,30 @@ class SentimentSnapshotMaterializationService:
                     "ai_status": item.get("ai_status")
                     or item.get("ai_overlay_state")
                     or "not_available",
+                    "factor_schema_version": item.get("factor_schema_version")
+                    or explain.get("factor_schema_version"),
+                    "evidence_quality": item.get("evidence_quality")
+                    or explain.get("evidence_quality")
+                    or {},
+                    "candidate_lanes": list(item.get("candidate_lanes") or []),
+                    "primary_lane": item.get("primary_lane"),
+                    "lane_scores": item.get("lane_scores") or {},
+                    "entry_eligibility": item.get("entry_eligibility"),
+                    "entry_block_reasons": list(
+                        item.get("entry_block_reasons") or []
+                    ),
+                    "entry_gate_results": item.get("entry_gate_results") or {},
+                    "decision_as_of": item.get("decision_as_of"),
+                    "valid_until": item.get("valid_until"),
+                    "evaluation_method_version": item.get(
+                        "evaluation_method_version"
+                    )
+                    or explain.get("evaluation_method_version"),
+                    "evaluation_spec_hash": item.get("evaluation_spec_hash")
+                    or explain.get("evaluation_spec_hash"),
+                    "research_entry_assessment": item.get(
+                        "research_entry_assessment"
+                    ),
                 }
             )
         return rows

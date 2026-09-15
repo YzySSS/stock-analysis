@@ -22,6 +22,9 @@ from app.strategies.service import StrategyService
 
 
 AUTOMATIC_OBSERVATION_SOURCE = "automatic_observation"
+PREREGISTERED_INTRADAY_EXEMPTION = (
+    "separate_preregistered_intraday_protocol_not_activated"
+)
 AUTOMATIC_OBSERVATION_MODE = "paired_first_n_trade_days"
 SUPPORTED_OBSERVATION_ENGINE = "sentiment_snapshot_pair"
 
@@ -153,6 +156,12 @@ def discover_automatic_observation_policies(
             continue
         override = dict(meta.get("automatic_observation") or {})
         if override.get("enabled", True) is False:
+            if (
+                override.get("exemption") == PREREGISTERED_INTRADAY_EXEMPTION
+                and str((meta.get("capability") or {}).get("evidence_status") or "")
+                == "protocol_preregistered_not_started"
+            ):
+                continue
             raise ValueError(
                 f"shadow strategy {strategy_id} cannot opt out of the "
                 "mandatory automatic observation policy"
