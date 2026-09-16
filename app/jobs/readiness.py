@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from app.jobs.errors import sanitize_error_message
@@ -12,11 +12,16 @@ from app.shared.instrument_policy import (
     STOCK_DAILY_COMPLETENESS_RATIO,
     STOCK_INSTRUMENT_TYPE,
 )
+from app.shared.market_clock import SHANGHAI_TZ, to_shanghai_wall_clock
 
 
 WORKER_STALE_SECONDS = 45
 QUEUE_WARNING_SECONDS = 5 * 60
 TASK_RUNNING_STALE_SECONDS = 60 * 60
+DATA_FRESHNESS_CUTOFF_TIME = time(18, 45)
+INDEPENDENT_CALENDAR_EXCHANGE = "SSE"
+INDEPENDENT_CALENDAR_SOURCE = "tushare.trade_cal"
+INDEPENDENT_CALENDAR_RECENT_DAYS = 46
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,40 @@ SELECT
     ) AS daily_kline_latest_complete_trade_date,
     (SELECT MAX(trade_date) FROM factor_input_daily) AS factor_input_latest_trade_date,
     (SELECT MAX(updated_at) FROM stock_basic) AS stock_basic_latest_updated_at
+"""
+
+
+INDEPENDENT_CALENDAR_SNAPSHOT_SQL = f"""
+SELECT
+    COUNT(*) AS calendar_row_count,
+    MIN(cal_date) AS calendar_coverage_start_date,
+    MAX(cal_date) AS calendar_coverage_end_date,
+    MAX(updated_at) AS calendar_latest_updated_at,
+    COALESCE(SUM(CASE WHEN cal_date=%s THEN 1 ELSE 0 END), 0) AS current_date_row_count,
+    MAX(CASE WHEN cal_date=%s THEN is_open ELSE NULL END) AS current_date_is_open,
+    COALESCE(SUM(CASE WHEN source<>%s THEN 1 ELSE 0 END), 0) AS unexpected_source_count,
+    COALESCE(SUM(
+        CASE WHEN cal_date BETWEEN DATE_SUB(
+            %s, INTERVAL {INDEPENDENT_CALENDAR_RECENT_DAYS - 1} DAY
+        ) AND %s THEN 1 ELSE 0 END
+    ), 0) AS recent_calendar_day_count,
+    MAX(
+        CASE WHEN is_open=1 AND cal_date<=%s THEN cal_date ELSE NULL END
+    ) AS expected_latest_trade_date,
+    COALESCE(SUM(
+        CASE WHEN is_open=1
+                  AND cal_date>COALESCE(%s, '1000-01-01')
+                  AND cal_date<=%s
+             THEN 1 ELSE 0 END
+    ), 0) AS daily_kline_missing_trade_days,
+    COALESCE(SUM(
+        CASE WHEN is_open=1
+                  AND cal_date>COALESCE(%s, '1000-01-01')
+                  AND cal_date<=%s
+             THEN 1 ELSE 0 END
+    ), 0) AS factor_input_missing_trade_days
+FROM etf_rotation_trade_calendar
+WHERE exchange_code=%s
 """
 
 
@@ -259,12 +298,170 @@ def _serialize_data_snapshot(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _data_snapshots() -> dict[str, Any]:
+def _freshness_reference(now: datetime | None = None) -> dict[str, Any]:
+    wall_clock = to_shanghai_wall_clock(now or datetime.now(SHANGHAI_TZ))
+    current_date = wall_clock.date()
+    completed_through_date = (
+        current_date
+        if wall_clock.time() >= DATA_FRESHNESS_CUTOFF_TIME
+        else current_date - timedelta(days=1)
+    )
+    return {
+        "current_date": current_date,
+        "completed_through_date": completed_through_date,
+        "cutoff_time": DATA_FRESHNESS_CUTOFF_TIME.strftime("%H:%M:%S"),
+        "timezone": "Asia/Shanghai",
+    }
+
+
+def _date_text(value: Any) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _serialize_independent_calendar_snapshot(
+    row: dict[str, Any],
+    *,
+    reference: dict[str, Any],
+) -> dict[str, Any]:
+    current_date = reference["current_date"]
+    calendar_rows = int(row.get("calendar_row_count") or 0)
+    current_date_rows = int(row.get("current_date_row_count") or 0)
+    recent_days = int(row.get("recent_calendar_day_count") or 0)
+    unexpected_sources = int(row.get("unexpected_source_count") or 0)
+    expected_trade_date = _date_text(row.get("expected_latest_trade_date"))
+    issues: list[str] = []
+
+    if calendar_rows == 0:
+        issues.append("独立交易日历无可用数据")
+    if current_date_rows != 1:
+        issues.append(f"独立交易日历未完整覆盖当前日期 {current_date}")
+    if recent_days != INDEPENDENT_CALENDAR_RECENT_DAYS:
+        issues.append(
+            "独立交易日历最近 "
+            f"{INDEPENDENT_CALENDAR_RECENT_DAYS} 个自然日不连续（实际 {recent_days} 日）"
+        )
+    if unexpected_sources:
+        issues.append(
+            "独立交易日历包含 "
+            f"{unexpected_sources} 条非 {INDEPENDENT_CALENDAR_SOURCE} 来源记录"
+        )
+    if expected_trade_date is None:
+        issues.append(
+            "独立交易日历无法确定截至 "
+            f"{reference['completed_through_date']} 的最近交易日"
+        )
+
+    current_date_is_open = row.get("current_date_is_open")
+    return {
+        "health": "error" if issues else "healthy",
+        "exchange_code": INDEPENDENT_CALENDAR_EXCHANGE,
+        "source": INDEPENDENT_CALENDAR_SOURCE,
+        "timezone": reference["timezone"],
+        "cutoff_time": reference["cutoff_time"],
+        "current_date": str(current_date),
+        "current_date_is_open": (
+            bool(int(current_date_is_open))
+            if current_date_is_open is not None
+            else None
+        ),
+        "completed_through_date": str(reference["completed_through_date"]),
+        "expected_latest_trade_date": expected_trade_date,
+        "coverage_start_date": _date_text(row.get("calendar_coverage_start_date")),
+        "coverage_end_date": _date_text(row.get("calendar_coverage_end_date")),
+        "latest_updated_at": _date_text(row.get("calendar_latest_updated_at")),
+        "recent_expected_calendar_days": INDEPENDENT_CALENDAR_RECENT_DAYS,
+        "recent_actual_calendar_days": recent_days,
+        "daily_kline_missing_trade_days": int(
+            row.get("daily_kline_missing_trade_days") or 0
+        ),
+        "factor_input_missing_trade_days": int(
+            row.get("factor_input_missing_trade_days") or 0
+        ),
+        "issues": issues,
+    }
+
+
+def _merge_independent_freshness(
+    data: dict[str, Any],
+    calendar: dict[str, Any],
+) -> dict[str, Any]:
+    merged = {
+        **data,
+        "independent_calendar": calendar,
+        "expected_latest_trade_date": calendar.get("expected_latest_trade_date"),
+        "daily_kline_missing_trade_days": int(
+            calendar.get("daily_kline_missing_trade_days") or 0
+        ),
+        "factor_input_missing_trade_days": int(
+            calendar.get("factor_input_missing_trade_days") or 0
+        ),
+    }
+    stale = (
+        merged["daily_kline_missing_trade_days"] > 0
+        or merged["factor_input_missing_trade_days"] > 0
+    )
+    if calendar.get("health") != "healthy" or stale:
+        merged["health"] = "error"
+    return merged
+
+
+def _data_hard_reasons(data: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if data.get("missing"):
+        reasons.append("关键数据表尚无可用数据")
+
+    calendar = data.get("independent_calendar") or {}
+    if calendar.get("health") != "healthy":
+        reasons.extend(str(item) for item in (calendar.get("issues") or []))
+        return reasons
+
+    expected_date = data.get("expected_latest_trade_date")
+    daily_missing = int(data.get("daily_kline_missing_trade_days") or 0)
+    factor_missing = int(data.get("factor_input_missing_trade_days") or 0)
+    if daily_missing:
+        reasons.append(
+            "日线落后独立交易日历 "
+            f"{daily_missing} 个交易日（最新 {data.get('daily_kline_latest_trade_date')}，"
+            f"应到 {expected_date}）"
+        )
+    if factor_missing:
+        reasons.append(
+            "历史输入层落后独立交易日历 "
+            f"{factor_missing} 个交易日（最新 {data.get('factor_input_latest_trade_date')}，"
+            f"应到 {expected_date}）"
+        )
+    return reasons
+
+
+def _data_snapshots(now: datetime | None = None) -> dict[str, Any]:
+    reference = _freshness_reference(now)
     with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(DATA_SNAPSHOT_SQL)
             row = cursor.fetchone() or {}
-    return _serialize_data_snapshot(row)
+            cursor.execute(
+                INDEPENDENT_CALENDAR_SNAPSHOT_SQL,
+                (
+                    reference["current_date"],
+                    reference["current_date"],
+                    INDEPENDENT_CALENDAR_SOURCE,
+                    reference["current_date"],
+                    reference["current_date"],
+                    reference["completed_through_date"],
+                    row.get("daily_kline_latest_complete_trade_date"),
+                    reference["completed_through_date"],
+                    row.get("factor_input_latest_trade_date"),
+                    reference["completed_through_date"],
+                    INDEPENDENT_CALENDAR_EXCHANGE,
+                ),
+            )
+            calendar_row = cursor.fetchone() or {}
+    data = _serialize_data_snapshot(row)
+    calendar = _serialize_independent_calendar_snapshot(
+        calendar_row,
+        reference=reference,
+    )
+    return _merge_independent_freshness(data, calendar)
 
 
 def _as_datetime(value: Any) -> datetime | None:
@@ -424,7 +621,9 @@ def recent_error_summaries(days: int = 7, limit: int = 12) -> list[dict[str, Any
 
 
 def build_operational_readiness() -> dict[str, Any]:
-    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    checked_at = to_shanghai_wall_clock(datetime.now(SHANGHAI_TZ)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     try:
         mysql_info = ping_mysql()
         workers = _worker_snapshots()
@@ -456,8 +655,7 @@ def build_operational_readiness() -> dict[str, Any]:
         for item in queues
         if item["stale_running_count"]
     )
-    if data.get("health") == "error":
-        hard_reasons.append("关键数据表尚无可用数据")
+    hard_reasons.extend(_data_hard_reasons(data))
     if not schema_plan.get("ready"):
         hard_reasons.append(f"数据库存在 {schema_plan.get('pending', 0)} 个待执行 migration")
 

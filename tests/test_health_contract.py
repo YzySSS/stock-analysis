@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from fastapi import Response
+
 from app.api.routes import health as health_route
 
 
@@ -44,6 +46,22 @@ class HealthContractTests(unittest.TestCase):
 
         self.assertEqual(payload["redis_status"], "degraded")
         self.assertIsNone(payload["data_snapshot_id"])
+
+    def test_not_ready_payload_sets_http_503(self):
+        response = Response()
+        with patch.object(
+            health_route,
+            "build_operational_readiness",
+            return_value={
+                "status": "not_ready",
+                "accepting_jobs": False,
+                "reasons": ["日线落后独立交易日历 1 个交易日"],
+            },
+        ):
+            payload = health_route.readiness(response)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(payload["accepting_jobs"])
 
 
 if __name__ == "__main__":

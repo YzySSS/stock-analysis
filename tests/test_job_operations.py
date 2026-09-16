@@ -9,8 +9,14 @@ from app.api.routes.system import LATEST_DATES_SQL, LATEST_KLINE_COUNTS_SQL, _la
 from app.jobs.errors import error_fingerprint, infer_error_code, sanitize_error_message
 from app.jobs.readiness import (
     DATA_SNAPSHOT_SQL,
+    INDEPENDENT_CALENDAR_RECENT_DAYS,
     WORKER_STALE_SECONDS,
+    _data_hard_reasons,
+    _freshness_reference,
+    _merge_independent_freshness,
     _serialize_data_snapshot,
+    _serialize_independent_calendar_snapshot,
+    build_operational_readiness,
     classify_worker_snapshot,
 )
 from app.jobs.retention import JobRetentionPolicy, JobRetentionService
@@ -214,6 +220,85 @@ class WorkerReadinessTests(unittest.TestCase):
         self.assertIn("HAVING COUNT(*) >=", normalized)
         self.assertIn("WHERE instrument_type='stock'", normalized)
         self.assertIn("daily_kline_latest_complete_trade_date", normalized)
+
+    def test_independent_calendar_cutoff_uses_last_completed_shanghai_trade_day(self):
+        morning = _freshness_reference(datetime(2026, 9, 16, 11, 55))
+        evening = _freshness_reference(datetime(2026, 9, 16, 18, 45))
+
+        self.assertEqual(str(morning["completed_through_date"]), "2026-09-15")
+        self.assertEqual(str(evening["completed_through_date"]), "2026-09-16")
+        self.assertEqual(evening["timezone"], "Asia/Shanghai")
+        self.assertEqual(evening["cutoff_time"], "18:45:00")
+
+    def test_independent_calendar_staleness_is_a_hard_readiness_failure(self):
+        data = _serialize_data_snapshot(
+            {
+                "daily_kline_latest_available_trade_date": "2026-08-31",
+                "daily_kline_latest_complete_trade_date": "2026-08-31",
+                "factor_input_latest_trade_date": "2026-08-31",
+                "stock_basic_latest_updated_at": "2026-09-16 01:30:00",
+            }
+        )
+        calendar = _serialize_independent_calendar_snapshot(
+            {
+                "calendar_row_count": 300,
+                "calendar_coverage_start_date": "2026-01-01",
+                "calendar_coverage_end_date": "2026-10-31",
+                "calendar_latest_updated_at": "2026-09-16 16:20:00",
+                "current_date_row_count": 1,
+                "current_date_is_open": 1,
+                "unexpected_source_count": 0,
+                "recent_calendar_day_count": INDEPENDENT_CALENDAR_RECENT_DAYS,
+                "expected_latest_trade_date": "2026-09-16",
+                "daily_kline_missing_trade_days": 12,
+                "factor_input_missing_trade_days": 12,
+            },
+            reference=_freshness_reference(datetime(2026, 9, 16, 19, 0)),
+        )
+        merged = _merge_independent_freshness(data, calendar)
+
+        self.assertEqual(calendar["health"], "healthy")
+        self.assertEqual(merged["health"], "error")
+        self.assertEqual(merged["expected_latest_trade_date"], "2026-09-16")
+        reasons = _data_hard_reasons(merged)
+        self.assertIn("日线落后独立交易日历 12 个交易日", reasons[0])
+        self.assertIn("历史输入层落后独立交易日历 12 个交易日", reasons[1])
+
+        with (
+            patch("app.jobs.readiness.ping_mysql", return_value={"db": "stock", "version": "8.0"}),
+            patch("app.jobs.readiness._worker_snapshots", return_value=[]),
+            patch("app.jobs.readiness._queue_snapshots", return_value=[]),
+            patch("app.jobs.readiness._critical_task_snapshots", return_value=[]),
+            patch("app.jobs.readiness._data_snapshots", return_value=merged),
+            patch(
+                "app.jobs.readiness.migration_plan",
+                return_value={"ready": True, "target": 37, "total": 37, "applied": 37, "pending": 0, "items": []},
+            ),
+        ):
+            readiness = build_operational_readiness()
+
+        self.assertEqual(readiness["status"], "not_ready")
+        self.assertFalse(readiness["accepting_jobs"])
+
+    def test_incomplete_independent_calendar_fails_closed(self):
+        calendar = _serialize_independent_calendar_snapshot(
+            {
+                "calendar_row_count": 45,
+                "calendar_coverage_start_date": "2026-08-02",
+                "calendar_coverage_end_date": "2026-09-15",
+                "current_date_row_count": 0,
+                "unexpected_source_count": 0,
+                "recent_calendar_day_count": 45,
+                "expected_latest_trade_date": "2026-09-15",
+            },
+            reference=_freshness_reference(datetime(2026, 9, 16, 11, 55)),
+        )
+
+        self.assertEqual(calendar["health"], "error")
+        self.assertTrue(
+            any("未完整覆盖当前日期" in item for item in calendar["issues"])
+        )
+        self.assertTrue(any("不连续" in item for item in calendar["issues"]))
 
     def test_system_latest_dates_sql_has_rendered_completeness_policy(self):
         self.assertNotIn("{STOCK_", LATEST_DATES_SQL)

@@ -180,6 +180,7 @@ systemctl enable --now \
 
 - [ ] `/api/health` 返回 200，`cache_mode=memory`、`redis_status=disabled`。
 - [ ] `/api/readiness` 返回 ready，五个必要 Worker 均为 healthy。
+- [ ] readiness 的独立 SSE 交易日历来源为 `tushare.trade_cal`，覆盖当前日期且近 46 个自然日连续；上海时区 18:45 后，日线与因子输入均达到当日最近开市日，否则返回 `503 not_ready`。
 - [ ] Dashboard、Selection、Tracking、Stocks、System、Portfolio、Backtest、Trade Strategies 页面均可打开。
 - [ ] 历史策略结果仍可查询。
 - [ ] 退役策略新建运行返回 `410 STRATEGY_RETIRED`。
