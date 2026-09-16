@@ -1103,7 +1103,10 @@ def run_lifecycle(policy: RealtimeLifecyclePolicy | None = None) -> dict[str, An
             }
             failures.append({"stage": "final_plan", **final_plan})
 
-        has_partial = any(item.get("status") == "partial" for item in rollups)
+        has_partial = any(
+            item.get("status") == "partial" or item.get("manifest_status") == "partial"
+            for item in rollups
+        )
         status = "partial" if failures or has_partial else "success"
         return {
             "status": status,

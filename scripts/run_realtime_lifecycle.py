@@ -47,7 +47,12 @@ def main() -> None:
         result = run_lifecycle(policy)
         processed_count = sum(1 for item in result.get("rollups", []) if item.get("status") in {"success", "partial"})
         skipped_count = sum(1 for item in result.get("rollups", []) if item.get("status") == "skipped")
-        problem_count = sum(1 for item in result.get("rollups", []) if item.get("status") in {"partial", "failed"})
+        problem_count = sum(
+            1
+            for item in result.get("rollups", [])
+            if item.get("status") in {"partial", "failed"}
+            or item.get("manifest_status") == "partial"
+        )
         failure_count = len(result.get("failures", []))
         task_status = result.get("status", "success")
         logger.finish(

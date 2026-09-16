@@ -220,6 +220,33 @@ class RealtimeLifecycleExecutionTests(unittest.TestCase):
         source_stats.assert_not_called()
         aggregate.assert_not_called()
 
+    def test_unchanged_partial_manifest_keeps_lifecycle_partial(self):
+        target = date(2026, 7, 22)
+        manifest = {
+            "status": "partial",
+            "source_fingerprint": "same",
+            "source_rows": 100,
+            "source_codes": 2,
+            "rollup_rows": 20,
+            "rollup_codes": 2,
+        }
+        with patch.object(realtime_lifecycle, "acquire_mysql_advisory_lock", side_effect=["lifecycle", "writer"]), patch.object(
+            realtime_lifecycle, "release_mysql_advisory_lock"
+        ), patch.object(realtime_lifecycle, "_date_rows", return_value=[target]), patch.object(
+            realtime_lifecycle, "ensure_daily_partition", return_value=False
+        ), patch.object(realtime_lifecycle, "_source_revision", return_value={"source_fingerprint": "same"}), patch.object(
+            realtime_lifecycle, "_manifest_rows_for_date", return_value={5: manifest, 15: manifest}
+        ), patch.object(realtime_lifecycle, "aggregate_trade_date") as aggregate, patch.object(
+            realtime_lifecycle, "copy_tracked_trade_date", return_value={"rows": 1}
+        ), patch.object(realtime_lifecycle, "apply_retention", return_value={}), patch.object(
+            realtime_lifecycle, "build_lifecycle_plan", return_value={}
+        ):
+            result = realtime_lifecycle.run_lifecycle()
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual([item["manifest_status"] for item in result["rollups"]], ["partial", "partial"])
+        aggregate.assert_not_called()
+
 
 class RealtimeWriterTests(unittest.TestCase):
     def test_realtime_window_preserves_morning_close_through_lunch_recess(self):
