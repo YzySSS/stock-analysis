@@ -195,6 +195,7 @@ class FundamentalPitSync:
         rows_by_key: dict[tuple[str, str, str, str], tuple[Any, ...]] = {}
         skipped_outside_universe = 0
         skipped_invalid = 0
+        skipped_reporting_order = 0
         valid_field_rows = 0
         for row in records:
             ts_code = (_clean_text(row.get("ts_code")) or "").upper()
@@ -206,6 +207,9 @@ class FundamentalPitSync:
             period_end_date = normalize_date(row.get("end_date"))
             if not announcement_date or not period_end_date:
                 skipped_invalid += 1
+                continue
+            if announcement_date < period_end_date:
+                skipped_reporting_order += 1
                 continue
             values = (
                 _to_float(row.get("roe")),
@@ -238,6 +242,7 @@ class FundamentalPitSync:
         return list(rows_by_key.values()), {
             "skipped_outside_universe": skipped_outside_universe,
             "skipped_invalid": skipped_invalid,
+            "skipped_reporting_order": skipped_reporting_order,
             "valid_field_rows": valid_field_rows,
         }
 

@@ -111,6 +111,35 @@ class FundamentalPitSyncTests(unittest.TestCase):
         self.assertEqual(row[10], 8.6)
         self.assertEqual(row[11], 1.11)
         self.assertEqual(stats["skipped_outside_universe"], 1)
+        self.assertEqual(stats["skipped_reporting_order"], 0)
+        self.assertEqual(stats["valid_field_rows"], 1)
+
+    def test_normalization_rejects_announcement_before_period_end(self):
+        rows, stats = FundamentalPitSync._normalize_rows(
+            [
+                {
+                    "ts_code": "603400.SH",
+                    "ann_date": "20260422",
+                    "end_date": "20260630",
+                    "update_flag": "0",
+                    "roe": 3.6869,
+                },
+                {
+                    "ts_code": "603400.SH",
+                    "ann_date": "20260803",
+                    "end_date": "20260630",
+                    "update_flag": "1",
+                    "roe": 3.6869,
+                },
+            ],
+            {"603400.SH": "sh.603400"},
+            "pit-test",
+            "2026-09-16 12:00:00",
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][:5], ("sh.603400", "603400.SH", "2026-08-03", "2026-06-30", "1"))
+        self.assertEqual(stats["skipped_reporting_order"], 1)
         self.assertEqual(stats["valid_field_rows"], 1)
 
     def test_refresh_rejects_source_coverage_below_existing_floor(self):
