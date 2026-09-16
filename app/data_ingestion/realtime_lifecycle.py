@@ -135,6 +135,42 @@ def is_partitioned(table_name: str) -> bool:
     return any(row.get("partition_name") for row in table_partitions(table_name))
 
 
+def _partition_boundary_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if text.upper() == "MAXVALUE":
+        return None
+    if len(text) >= 2 and text[0] in {"'", '"'} and text[-1] == text[0]:
+        text = text[1:-1]
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise RuntimeError(f"unsupported RANGE partition boundary: {value!r}") from exc
+
+
+def _partition_split_source(
+    partitions: Sequence[dict[str, Any]],
+    target_boundary: date,
+) -> tuple[str, date | None]:
+    future_partition: str | None = None
+    for row in partitions:
+        partition_name = str(row.get("partition_name") or "")
+        if not partition_name:
+            continue
+        boundary = _partition_boundary_date(row.get("partition_description"))
+        if boundary is None:
+            future_partition = partition_name
+            continue
+        if boundary == target_boundary:
+            raise RuntimeError(
+                f"partition boundary {target_boundary.isoformat()} already belongs to {partition_name}"
+            )
+        if boundary > target_boundary:
+            return partition_name, boundary
+    if future_partition:
+        return future_partition, None
+    raise RuntimeError("partitioned table has no MAXVALUE partition")
+
+
 def ensure_daily_partition(table_name: str, trade_date: str | date | datetime) -> bool:
     if table_name not in PARTITIONED_TABLES:
         raise ValueError(f"unsupported partitioned table: {table_name}")
@@ -149,14 +185,23 @@ def ensure_daily_partition(table_name: str, trade_date: str | date | datetime) -
     if "p_future" not in names:
         raise RuntimeError(f"{table_name} has no p_future partition")
     boundary = (target + timedelta(days=1)).isoformat()
+    source_partition, source_boundary = _partition_split_source(
+        partitions,
+        date.fromisoformat(boundary),
+    )
+    if not source_partition.replace("_", "").isalnum() or not source_partition.startswith("p"):
+        raise RuntimeError(f"unsafe partition identifier: {source_partition!r}")
+    source_boundary_sql = (
+        "MAXVALUE" if source_boundary is None else f"'{source_boundary.isoformat()}'"
+    )
     with mysql_maintenance_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""
                 ALTER TABLE {table_name}
-                REORGANIZE PARTITION p_future INTO (
+                REORGANIZE PARTITION {source_partition} INTO (
                     PARTITION {partition_name} VALUES LESS THAN ('{boundary}'),
-                    PARTITION p_future VALUES LESS THAN (MAXVALUE)
+                    PARTITION {source_partition} VALUES LESS THAN ({source_boundary_sql})
                 )
                 """
             )

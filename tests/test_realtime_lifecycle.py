@@ -11,6 +11,8 @@ from app.data_ingestion.realtime_lifecycle import (
     RealtimeLifecyclePolicy,
     _chunks,
     _manifest_matches_legacy_source,
+    _partition_boundary_date,
+    _partition_split_source,
     _rollup_sql,
     expired_trade_dates,
     partition_name_for_date,
@@ -60,6 +62,35 @@ class RealtimeLifecyclePolicyTests(unittest.TestCase):
         self.assertIn("code IN (%s,%s)", sql)
         self.assertEqual(list(_chunks(["a", "b", "c"], 2)), [["a", "b"], ["c"]])
 
+    def test_partition_boundary_parser_accepts_mysql_range_values(self):
+        self.assertEqual(_partition_boundary_date("'2026-09-17'"), date(2026, 9, 17))
+        self.assertIsNone(_partition_boundary_date("MAXVALUE"))
+        with self.assertRaisesRegex(RuntimeError, "unsupported RANGE partition boundary"):
+            _partition_boundary_date("TO_DAYS(2026-09-17)")
+
+    def test_partition_split_source_inserts_historical_gap_into_covering_partition(self):
+        partitions = [
+            {"partition_name": "p20260831", "partition_description": "'2026-09-01'"},
+            {"partition_name": "p20260916", "partition_description": "'2026-09-17'"},
+            {"partition_name": "p_future", "partition_description": "MAXVALUE"},
+        ]
+        self.assertEqual(
+            _partition_split_source(partitions, date(2026, 9, 2)),
+            ("p20260916", date(2026, 9, 17)),
+        )
+        self.assertEqual(
+            _partition_split_source(partitions, date(2026, 9, 18)),
+            ("p_future", None),
+        )
+
+    def test_partition_split_source_fails_closed_on_existing_boundary(self):
+        partitions = [
+            {"partition_name": "legacy_name", "partition_description": "'2026-09-02'"},
+            {"partition_name": "p_future", "partition_description": "MAXVALUE"},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "already belongs to legacy_name"):
+            _partition_split_source(partitions, date(2026, 9, 2))
+
     def test_legacy_manifest_backfill_requires_matching_complete_source(self):
         source = {
             "source_rows": 100,
@@ -79,6 +110,48 @@ class RealtimeLifecyclePolicyTests(unittest.TestCase):
 
 
 class RealtimeLifecycleExecutionTests(unittest.TestCase):
+    def test_ensure_daily_partition_splits_the_partition_covering_a_historical_gap(self):
+        statements = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql):
+                statements.append(" ".join(sql.split()))
+
+        class Connection:
+            def cursor(self):
+                return Cursor()
+
+        @contextmanager
+        def fake_maintenance_conn(*_args, **_kwargs):
+            yield Connection()
+
+        partitions = [
+            {"partition_name": "p20260831", "partition_description": "'2026-09-01'"},
+            {"partition_name": "p20260916", "partition_description": "'2026-09-17'"},
+            {"partition_name": "p_future", "partition_description": "MAXVALUE"},
+        ]
+        with patch.object(realtime_lifecycle, "table_partitions", return_value=partitions), patch.object(
+            realtime_lifecycle,
+            "mysql_maintenance_conn",
+            fake_maintenance_conn,
+        ):
+            created = realtime_lifecycle.ensure_daily_partition(
+                "stock_realtime_bar_rollup",
+                "2026-09-01",
+            )
+
+        self.assertTrue(created)
+        self.assertEqual(len(statements), 1)
+        self.assertIn("REORGANIZE PARTITION p20260916", statements[0])
+        self.assertIn("PARTITION p20260901 VALUES LESS THAN ('2026-09-02')", statements[0])
+        self.assertIn("PARTITION p20260916 VALUES LESS THAN ('2026-09-17')", statements[0])
+
     def test_latest_date_runs_first_and_one_interval_failure_does_not_abort_later_work(self):
         dates = [date(2026, 7, 20), date(2026, 7, 22), date(2026, 7, 21)]
         aggregate_calls = []
