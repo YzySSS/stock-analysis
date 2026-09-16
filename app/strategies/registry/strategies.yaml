@@ -84,6 +84,8 @@ strategies:
       required_datasets: [daily_kline, factor_input_daily, stock_moneyflow_daily, stock_chip_daily, sector_opinion_daily]
       minimum_coverage: 0.98
       maximum_data_age_days: 0
+      requires_published_snapshot: true
+      requires_current_day_snapshot: true
       runtime_status: enabled
       backtest_status: disabled
       validation_status: shadow_only

@@ -86,7 +86,8 @@ class StrategyCapabilityService:
                         (SELECT MAX(trade_date) FROM factor_input_daily) AS factor_input_date,
                         (SELECT MAX(trade_date) FROM stock_moneyflow_daily) AS moneyflow_date,
                         (SELECT MAX(trade_date) FROM stock_chip_daily) AS chip_date,
-                        (SELECT MAX(as_of_datetime) FROM sector_opinion_daily) AS sector_opinion_at
+                        (SELECT MAX(as_of_datetime) FROM sector_opinion_daily) AS sector_opinion_at,
+                        NOW(6) AS snapshot_now
                     """
                 )
                 row = cursor.fetchone() or {}
@@ -143,10 +144,43 @@ class StrategyCapabilityService:
                 else:
                     counts["sector_opinion_rows"] = 0
 
+                cursor.execute(
+                    """
+                    SELECT
+                        manifest.snapshot_id,
+                        manifest.strategy_id,
+                        manifest.strategy_version,
+                        manifest.trade_date,
+                        manifest.decision_as_of,
+                        manifest.candidate_count,
+                        manifest.coverage_ratio,
+                        manifest.published_at
+                    FROM sentiment_candidate_snapshot_manifest manifest
+                    INNER JOIN (
+                        SELECT strategy_id, strategy_version, MAX(id) AS latest_id
+                        FROM sentiment_candidate_snapshot_manifest
+                        WHERE status='ready'
+                          AND quality_status='passed'
+                          AND published_at IS NOT NULL
+                        GROUP BY strategy_id, strategy_version
+                    ) latest ON latest.latest_id=manifest.id
+                    """
+                )
+                strategy_snapshot_rows = cursor.fetchall() or []
+
         reference_trade_date = row.get("reference_trade_date")
+        strategy_snapshots = {
+            f"{item.get('strategy_id')}:{item.get('strategy_version')}": dict(item)
+            for item in strategy_snapshot_rows
+            if isinstance(item, dict)
+            and item.get("strategy_id")
+            and item.get("strategy_version")
+        }
         return {
             "stock_count": int(row.get("stock_count") or 0),
             "reference_trade_date": reference_trade_date,
+            "snapshot_now": row.get("snapshot_now"),
+            "strategy_snapshots": strategy_snapshots,
             "datasets": {
                 "daily_kline": {
                     "latest_at": reference_trade_date,
@@ -290,7 +324,14 @@ class StrategyCapabilityService:
         backtest_status = str(capability.get("backtest_status") or "disabled")
         validation_status = str(capability.get("validation_status") or "unvalidated")
         evidence_status = str(capability.get("evidence_status") or "none")
+        requires_published_snapshot = bool(
+            capability.get("requires_published_snapshot", False)
+        )
+        requires_current_day_snapshot = bool(
+            capability.get("requires_current_day_snapshot", False)
+        )
         status = str(strategy_meta.get("status") or "unknown")
+        strategy_version = str(strategy_meta.get("version") or "")
         normalized_instrument = str(instrument_type or "stock").strip().lower()
         executable = bool(strategy_meta.get("executable", True))
 
@@ -307,6 +348,35 @@ class StrategyCapabilityService:
             for name in required_datasets
         ]
         data_ready = bool(required_datasets) and all(item.get("ready") for item in dataset_statuses)
+        runtime_snapshot = dict(
+            (snapshot.get("strategy_snapshots") or {}).get(
+                f"{strategy_id}:{strategy_version}"
+            )
+            or {}
+        )
+        snapshot_ready = not requires_published_snapshot
+        snapshot_reason = "不要求候选快照"
+        if requires_published_snapshot:
+            if not runtime_snapshot.get("snapshot_id"):
+                snapshot_ready = False
+                snapshot_reason = "没有 ready/passed 候选快照"
+            elif requires_current_day_snapshot:
+                current_date = self._as_date(snapshot.get("snapshot_now"))
+                decision_date = self._as_date(runtime_snapshot.get("decision_as_of"))
+                if current_date is None or decision_date is None:
+                    snapshot_ready = False
+                    snapshot_reason = "无法确认候选快照日期"
+                elif decision_date != current_date:
+                    snapshot_ready = False
+                    snapshot_reason = (
+                        f"最新候选快照日期 {decision_date} 不是当前日期 {current_date}"
+                    )
+                else:
+                    snapshot_ready = True
+                    snapshot_reason = "今日候选快照已发布"
+            else:
+                snapshot_ready = True
+                snapshot_reason = "候选快照已发布"
 
         common_reasons = []
         if not executable:
@@ -322,6 +392,8 @@ class StrategyCapabilityService:
             for item in dataset_statuses
             if not item.get("ready")
         )
+        if not snapshot_ready:
+            common_reasons.append(f"候选快照：{snapshot_reason}")
 
         runtime_reasons = list(common_reasons)
         if runtime_status not in self.RUNTIME_ENABLED_STATUSES:
@@ -354,6 +426,10 @@ class StrategyCapabilityService:
             availability = "data_not_ready"
             availability_label = "数据未就绪"
             availability_note = next((reason for reason in runtime_reasons if "：" in reason), "必需数据未达到门槛。")
+        elif requires_published_snapshot and not snapshot_ready:
+            availability = "snapshot_not_ready"
+            availability_label = "等待今日快照"
+            availability_note = snapshot_reason
         elif runtime_status == "prototype":
             availability = "prototype"
             availability_label = "原型"
@@ -379,6 +455,14 @@ class StrategyCapabilityService:
             "required_datasets": required_datasets,
             "dataset_statuses": dataset_statuses,
             "data_ready": data_ready,
+            "requires_published_snapshot": requires_published_snapshot,
+            "requires_current_day_snapshot": requires_current_day_snapshot,
+            "snapshot_ready": snapshot_ready,
+            "snapshot_reason": snapshot_reason,
+            "runtime_snapshot": {
+                key: str(value) if value is not None else None
+                for key, value in runtime_snapshot.items()
+            },
             "runtime_status": runtime_status,
             "runtime_ready": runtime_ready,
             "runtime_reasons": self._unique(runtime_reasons),

@@ -22,6 +22,19 @@ def ready_snapshot(
     return {
         "stock_count": 100,
         "reference_trade_date": "2026-07-15",
+        "snapshot_now": "2026-07-15 16:00:00",
+        "strategy_snapshots": {
+            "a_share_sentiment_v06:0.6.0": {
+                "snapshot_id": "sentiment-v06-ready",
+                "strategy_id": "a_share_sentiment_v06",
+                "strategy_version": "0.6.0",
+                "trade_date": "2026-07-15",
+                "decision_as_of": "2026-07-15 14:30:00",
+                "candidate_count": 3,
+                "coverage_ratio": 0.99,
+                "published_at": "2026-07-15 14:30:05",
+            }
+        },
         "datasets": {
             "daily_kline": {"latest_at": "2026-07-15", "covered_codes": 100},
             "factor_input_daily": {"latest_at": "2026-07-15", "covered_codes": factor_codes},
@@ -47,6 +60,7 @@ class StrategyCapabilityContractTests(unittest.TestCase):
                 "moneyflow_date": "2026-07-21",
                 "chip_date": "2026-07-21",
                 "sector_opinion_at": "2026-07-22 14:45:00",
+                "snapshot_now": "2026-07-22 15:00:00",
             },
             {"count": 99},
             {"count": 100},
@@ -54,6 +68,18 @@ class StrategyCapabilityContractTests(unittest.TestCase):
             {"count": 90},
             {"count": 99},
             {"count": 12},
+        ]
+        cursor.fetchall.return_value = [
+            {
+                "snapshot_id": "sentiment-v06-ready",
+                "strategy_id": "a_share_sentiment_v06",
+                "strategy_version": "0.6.0",
+                "trade_date": "2026-07-21",
+                "decision_as_of": "2026-07-22 14:30:00",
+                "candidate_count": 3,
+                "coverage_ratio": 0.99,
+                "published_at": "2026-07-22 14:30:05",
+            }
         ]
 
         with patch(
@@ -67,6 +93,10 @@ class StrategyCapabilityContractTests(unittest.TestCase):
         self.assertIn("daily_sb.instrument_type='stock'", first_sql)
         self.assertEqual(snapshot["reference_trade_date"], "2026-07-21")
         self.assertEqual(snapshot["datasets"]["daily_kline"]["covered_codes"], 99)
+        self.assertEqual(
+            snapshot["strategy_snapshots"]["a_share_sentiment_v06:0.6.0"]["snapshot_id"],
+            "sentiment-v06-ready",
+        )
 
     def test_registry_exposes_frozen_and_manual_experimental_sentiment_versions(self):
         service = StrategyService(dataset_snapshot=ready_snapshot())
@@ -104,6 +134,35 @@ class StrategyCapabilityContractTests(unittest.TestCase):
             by_id["a_share_sentiment_v06"]["validation_status"], "shadow_only"
         )
         self.assertEqual(by_id["a_share_sentiment_v06"]["availability"], "experimental")
+        self.assertTrue(by_id["a_share_sentiment_v06"]["snapshot_ready"])
+
+    def test_v06_requires_a_ready_snapshot_from_current_day(self):
+        snapshot = ready_snapshot()
+        snapshot["strategy_snapshots"] = {}
+
+        item = StrategyService(dataset_snapshot=snapshot).get_strategy_capability(
+            "a_share_sentiment_v06"
+        )
+
+        self.assertTrue(item["data_ready"])
+        self.assertFalse(item["snapshot_ready"])
+        self.assertFalse(item["runtime_ready"])
+        self.assertEqual(item["availability"], "snapshot_not_ready")
+        self.assertIn("没有 ready/passed 候选快照", item["runtime_reasons"][0])
+
+    def test_v06_rejects_previous_day_snapshot(self):
+        snapshot = ready_snapshot()
+        snapshot["strategy_snapshots"]["a_share_sentiment_v06:0.6.0"][
+            "decision_as_of"
+        ] = "2026-07-14 14:30:00"
+
+        item = StrategyService(dataset_snapshot=snapshot).get_strategy_capability(
+            "a_share_sentiment_v06"
+        )
+
+        self.assertFalse(item["snapshot_ready"])
+        self.assertFalse(item["runtime_ready"])
+        self.assertIn("不是当前日期", item["snapshot_reason"])
 
     def test_loadable_v05_is_runtime_ready_but_explicitly_experimental(self):
         item = StrategyService(dataset_snapshot=ready_snapshot()).get_strategy_capability(

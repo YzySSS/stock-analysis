@@ -129,6 +129,15 @@ bash scripts/setup_kline_cron.sh --print-only | grep materialize_sentiment_candi
 
 日志位于 `logs/sentiment_candidate_snapshot_materialize.log`；退出码 `2` 表示输入质量门未通过，旧完整快照仍可继续读取。
 
+`a_share_sentiment_v06 / 0.6.0` 继续保持 `shadow_only`，但为了让人工研究入口在每个交易日拥有当日快照，Cron 会在 `09:32`、`11:02`、`13:32`、`14:32` 和 `18:57` 独立执行：
+
+```bash
+.venv/bin/python scripts/materialize_sentiment_candidate_snapshot.py \
+  --strategy-id a_share_sentiment_v06 --allow-shadow
+```
+
+前四次用于盘中研究，`18:57` 用于晚间复盘。该调度只发布不可变候选快照，不写普通选股结果、不生成交易计划、不启用自动观察或自动晋级；候选是否仍在五分钟有效期内，以结果中的 `decision_as_of / valid_until` 为准。能力接口还要求存在**当前自然日**的 `ready/passed` 快照，否则返回“等待今日快照”，禁止页面把“基础数据就绪”误报成“策略可运行”。
+
 ### 本地 MySQL 读模型物化
 
 `0023` 中的 `stock_realtime_rank_snapshot`、`tracking_summary_daily` 和

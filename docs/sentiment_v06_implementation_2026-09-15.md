@@ -153,8 +153,11 @@ SHA-256 为 `037f57554eaa79dbf849d6f78e84714ec0235ec1e67b9c1bd1af816864582eb5`�
    `.venv/bin/python scripts/materialize_sentiment_candidate_snapshot.py --strategy-id a_share_sentiment_v06 --allow-shadow`。
 6. 验证 Selection、Stock Detail、Tracking、旧策略快照、API/Worker、队列和本地/公网
    健康；确认 v0.6 不产生 `trade_plan`，全市场提醒仍不阻断手动选股。
-7. 不安装 11:00/13:30/14:30 定时采样。待最小样本、主要判据、尾部限制和报告
-   适配另行冻结并审批后，再单独启用前瞻观察。
+7. 每个交易日可安装 `09:32 / 11:02 / 13:32 / 14:32 / 18:57` 的研究快照
+   物化，保证人工选择与晚间复盘有当日 `ready/passed` 快照。该任务不写
+   `selection_result`，也不等价于启动预登记的固定时点前瞻观察。
+8. `11:00 / 13:30 / 14:30` 前瞻协议仍保持未启动；待最小样本、主要判据、
+   尾部限制和报告适配另行冻结并审批后，再单独启用 observation/outcome 链路。
 
 ## 8. 回滚
 
