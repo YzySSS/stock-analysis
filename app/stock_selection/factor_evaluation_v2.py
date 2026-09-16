@@ -657,6 +657,8 @@ class StrategyFactorEvaluationRepository:
         trace_rows: Sequence[Mapping[str, Any]],
         source_lineage: Sequence[Mapping[str, Any]],
         trace_mode: str = "full_forward_trace",
+        pre_filter_count: int | None = None,
+        allow_empty_trace: bool = False,
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         rows = [dict(row) for row in trace_rows]
@@ -664,7 +666,7 @@ class StrategyFactorEvaluationRepository:
             raise ValueError("snapshot_id, strategy_id and strategy_version are required")
         if not strategy_config_hash:
             raise ValueError("strategy_config_hash is required")
-        if not rows:
+        if not rows and not allow_empty_trace:
             return {
                 "status": "skipped",
                 "reason": "empty_factor_trace",
@@ -678,7 +680,14 @@ class StrategyFactorEvaluationRepository:
                 "trace_mode": trace_mode,
             }
         )
-        pre_filter_count = sum(bool(row.get("in_pre_filter", True)) for row in rows)
+        stored_pre_filter_count = sum(
+            bool(row.get("in_pre_filter", True)) for row in rows
+        )
+        manifest_pre_filter_count = (
+            stored_pre_filter_count
+            if pre_filter_count is None
+            else max(0, int(pre_filter_count))
+        )
         eligible_count = sum(bool(row.get("in_eligible_pool")) for row in rows)
         selected_count = sum(bool(row.get("is_selected")) for row in rows)
         earliest_execution = datetime.combine(
@@ -759,7 +768,7 @@ class StrategyFactorEvaluationRepository:
                         decision_as_of,
                         earliest_execution,
                         int(expected_entity_count),
-                        pre_filter_count,
+                        manifest_pre_filter_count,
                         eligible_count,
                         selected_count,
                         trace_mode,
@@ -823,7 +832,7 @@ class StrategyFactorEvaluationRepository:
             "snapshot_id": snapshot_id,
             "manifest_id": manifest_id,
             "row_count": len(rows),
-            "pre_filter_count": pre_filter_count,
+            "pre_filter_count": manifest_pre_filter_count,
             "eligible_count": eligible_count,
             "selected_count": selected_count,
         }
@@ -1351,7 +1360,10 @@ class StrategyFactorEvaluationRepository:
                               AND s.strategy_version=%s
                               AND {scope_sql}
                               AND (
-                                  m.trace_mode='full_forward_trace'
+                                  m.trace_mode IN (
+                                      'full_forward_trace',
+                                      'eligible_pool_forward_trace'
+                                  )
                                   OR %s='selected_top_k'
                               )
                             ORDER BY s.trade_date, s.code

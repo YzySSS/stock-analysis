@@ -1930,15 +1930,23 @@ class SentimentSnapshotMaterializationService:
         source_lineage: Sequence[Mapping[str, Any]],
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        trace_rows = list(
+        full_trace_rows = list(
             getattr(selector, "last_factor_evaluation_trace", None) or []
         )
-        if not trace_rows:
+        if not full_trace_rows:
             return {
                 "status": "skipped",
                 "reason": "selector_factor_trace_empty",
                 "snapshot_id": published_snapshot_id,
             }
+        trace_rows = [
+            row
+            for row in full_trace_rows
+            if bool(row.get("in_eligible_pool")) or bool(row.get("is_selected"))
+        ]
+        pre_filter_count = sum(
+            bool(row.get("in_pre_filter", True)) for row in full_trace_rows
+        )
         return self.factor_evaluation_repository.persist_snapshot(
             snapshot_id=published_snapshot_id,
             source_snapshot_id=published_snapshot_id,
@@ -1950,10 +1958,15 @@ class SentimentSnapshotMaterializationService:
             expected_entity_count=audit.expected_entity_count,
             trace_rows=trace_rows,
             source_lineage=source_lineage,
-            trace_mode="full_forward_trace",
+            trace_mode="eligible_pool_forward_trace",
+            pre_filter_count=pre_filter_count,
+            allow_empty_trace=True,
             metadata={
                 "selection_result_written": False,
                 "selection_core": "StockSelector.run",
+                "storage_scope": "eligible_pool_only",
+                "full_trace_row_count": len(full_trace_rows),
+                "stored_trace_row_count": len(trace_rows),
                 **dict(metadata or {}),
             },
         )

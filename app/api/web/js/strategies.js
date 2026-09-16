@@ -241,11 +241,17 @@ function renderFactorTraceSummary(data = null) {
   if (!container) return;
   const rows = data?.trace_summary || [];
   const full = rows.find((item) => item.trace_mode === 'full_forward_trace') || {};
+  const compact = rows.find((item) => item.trace_mode === 'eligible_pool_forward_trace') || {};
   const historical = rows.find((item) => item.trace_mode === 'selected_only_historical') || {};
+  const forwardSnapshotCount = Number(full.snapshot_days || 0) + Number(compact.snapshot_days || 0);
+  const forwardEligibleRows = Number(full.eligible_rows || 0) + Number(compact.eligible_rows || 0);
+  const forwardSelectedRows = Number(full.selected_rows || 0) + Number(compact.selected_rows || 0);
+  const firstForwardDate = [full.first_trade_date, compact.first_trade_date].filter(Boolean).sort()[0] || '-';
+  const lastForwardDate = [full.last_trade_date, compact.last_trade_date].filter(Boolean).sort().at(-1) || '-';
   container.innerHTML = `
-    <article class="stat-card"><div class="stat-label">完整前向快照</div><div class="stat-value">${full.snapshot_days ?? 0} 日</div><small>${full.first_trade_date || '-'} → ${full.last_trade_date || '-'}</small></article>
-    <article class="stat-card"><div class="stat-label">硬门槛候选样本</div><div class="stat-value">${full.eligible_rows ?? 0}</div><small>可用于横截面 IC</small></article>
-    <article class="stat-card"><div class="stat-label">最终入选样本</div><div class="stat-value">${Number(full.selected_rows || 0) + Number(historical.selected_rows || 0)}</div><small>旧样本只做入选后复盘</small></article>
+    <article class="stat-card"><div class="stat-label">前向研究快照</div><div class="stat-value">${forwardSnapshotCount} 份</div><small>${firstForwardDate} → ${lastForwardDate}</small></article>
+    <article class="stat-card"><div class="stat-label">硬门槛候选样本</div><div class="stat-value">${forwardEligibleRows}</div><small>仅候选池明细用于横截面 IC</small></article>
+    <article class="stat-card"><div class="stat-label">最终入选样本</div><div class="stat-value">${forwardSelectedRows + Number(historical.selected_rows || 0)}</div><small>旧样本只做入选后复盘</small></article>
     <article class="stat-card"><div class="stat-label">研究状态</div><div class="stat-value">${escapeHtml(data?.status === 'ready' ? '已有成熟标签' : '采集中')}</div><small>不自动改权重</small></article>
   `;
 }

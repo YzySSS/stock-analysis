@@ -195,6 +195,19 @@ class FakeSnapshotRepository:
         )
 
 
+class FakeFactorEvaluationRepository:
+    def __init__(self):
+        self.calls = []
+
+    def persist_snapshot(self, **kwargs):
+        self.calls.append(kwargs)
+        return {
+            "status": "created",
+            "snapshot_id": kwargs["snapshot_id"],
+            "row_count": len(kwargs["trace_rows"]),
+        }
+
+
 class IntersectionCursor:
     def __init__(self, covered_entities: int):
         self.covered_entities = covered_entities
@@ -350,6 +363,84 @@ class SentimentSnapshotMaterializationTests(unittest.TestCase):
         self.assertEqual(inputs.commit_count, 1)
         self.assertEqual(selector_calls, [])
         self.assertEqual(snapshots.calls, [])
+
+    def test_factor_trace_persists_only_eligible_pool_rows(self):
+        factor_repository = FakeFactorEvaluationRepository()
+        service = SentimentSnapshotMaterializationService(
+            factor_evaluation_repository=factor_repository,  # type: ignore[arg-type]
+        )
+        selector = FakeSelector([], [])
+        selector.last_factor_evaluation_trace = [
+            {
+                "code": "sh.600000",
+                "in_pre_filter": True,
+                "in_eligible_pool": False,
+                "is_selected": False,
+            },
+            {
+                "code": "sh.600001",
+                "in_pre_filter": True,
+                "in_eligible_pool": True,
+                "is_selected": False,
+            },
+            {
+                "code": "sh.600002",
+                "in_pre_filter": True,
+                "in_eligible_pool": False,
+                "is_selected": True,
+            },
+        ]
+
+        result = service._persist_factor_trace(
+            published_snapshot_id="snapshot-1",
+            selector=selector,  # type: ignore[arg-type]
+            audit=input_audit(),
+            strategy_meta={"id": "a_share_sentiment", "version": "0.4.4"},
+            strategy_config_hash="a" * 64,
+            source_lineage=[],
+        )
+
+        self.assertEqual(result["row_count"], 2)
+        call = factor_repository.calls[0]
+        self.assertEqual(
+            [row["code"] for row in call["trace_rows"]],
+            ["sh.600001", "sh.600002"],
+        )
+        self.assertEqual(call["trace_mode"], "eligible_pool_forward_trace")
+        self.assertEqual(call["pre_filter_count"], 3)
+        self.assertTrue(call["allow_empty_trace"])
+        self.assertEqual(call["metadata"]["full_trace_row_count"], 3)
+        self.assertEqual(call["metadata"]["stored_trace_row_count"], 2)
+
+    def test_factor_trace_preserves_zero_candidate_manifest(self):
+        factor_repository = FakeFactorEvaluationRepository()
+        service = SentimentSnapshotMaterializationService(
+            factor_evaluation_repository=factor_repository,  # type: ignore[arg-type]
+        )
+        selector = FakeSelector([], [])
+        selector.last_factor_evaluation_trace = [
+            {
+                "code": "sh.600000",
+                "in_pre_filter": True,
+                "in_eligible_pool": False,
+                "is_selected": False,
+            }
+        ]
+
+        result = service._persist_factor_trace(
+            published_snapshot_id="snapshot-empty",
+            selector=selector,  # type: ignore[arg-type]
+            audit=input_audit(),
+            strategy_meta={"id": "a_share_sentiment", "version": "0.4.4"},
+            strategy_config_hash="b" * 64,
+            source_lineage=[],
+        )
+
+        self.assertEqual(result["row_count"], 0)
+        call = factor_repository.calls[0]
+        self.assertEqual(call["trace_rows"], [])
+        self.assertEqual(call["pre_filter_count"], 1)
+        self.assertTrue(call["allow_empty_trace"])
 
     @patch(
         "app.stock_selection.sentiment_snapshot_materializer."
