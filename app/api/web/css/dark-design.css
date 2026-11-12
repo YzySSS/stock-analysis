@@ -957,3 +957,11 @@ body[data-ui="dark-v1"][data-page] .quote-sub-grid span:last-child b { font-size
  body[data-ui="dark-v1"][data-page] .home-leadership-card > strong { font-size: 13px; }
  body[data-ui="dark-v1"][data-page] .tracking-compact-table:not(.show-evidence) :is(th,td) { font-size: 12px; }
 }
+
+/* Concept QA: recent runs follow the chart and span both columns. */
+body[data-ui="dark-v1"][data-page] .backtest-research-workspace > :is(.backtest-recent-card,.backtest-fullwidth-evidence) { grid-column: 1 / -1; min-width: 0; }
+body[data-ui="dark-v1"][data-page] .backtest-equity-card { min-height: 0 !important; }
+@media (max-width: 640px) {
+  body[data-ui="dark-v1"][data-page="home"] .home-card-market-item { height: auto; min-height: 132px !important; }
+  body[data-ui="dark-v1"][data-page="home"] #home-market-breadth { font-size: clamp(12px, 3.8vw, 18px); white-space: nowrap; }
+}

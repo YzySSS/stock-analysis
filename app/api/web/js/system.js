@@ -83,8 +83,12 @@ function renderReadiness(readiness = {}, container, overallEl) {
   }
   const workerRows = workers.map(worker => {
     const queue = queues[worker.worker_type] || {};
-    const ok = worker.health === 'healthy' && queue.health === 'healthy';
-    return `<div class="worker-compact-row"><strong>${escapeHtml(worker.label || worker.worker_type)}</strong><span class="badge ${ok ? 'status-ok' : 'status-warn'}">${escapeHtml(worker.health === 'healthy' ? (worker.process_status === 'running' ? '执行中' : '在线') : worker.health || '未知')}</span><span>队列 ${escapeHtml(queue.queued_count ?? 0)}</span><small>心跳 ${escapeHtml(worker.heartbeat_age_seconds ?? '-')} 秒前 · 运行 ${escapeHtml(queue.running_count ?? 0)} · 失联 ${escapeHtml(queue.stale_running_count ?? 0)} · 24h失败 ${escapeHtml(queue.failed_24h_count ?? 0)}${worker.current_job_id ? ` · 当前任务 ${escapeHtml(worker.current_job_id)}` : ''}</small></div>`;
+    const healthClass = worker.health === 'healthy' && queue.health === 'healthy'
+      ? 'status-ok'
+      : worker.health === 'stale' || worker.health === 'missing' || queue.health === 'error'
+        ? 'status-error'
+        : 'status-warn';
+    return `<div class="worker-compact-row"><strong>${escapeHtml(worker.label || worker.worker_type)}</strong><span class="badge ${healthClass}">${escapeHtml(worker.health === 'healthy' ? (worker.process_status === 'running' ? '执行中' : '在线') : worker.health || '未知')}</span><span>队列 ${escapeHtml(queue.queued_count ?? 0)}</span><small>心跳 ${escapeHtml(worker.heartbeat_age_seconds ?? '-')} 秒前 · 运行 ${escapeHtml(queue.running_count ?? 0)} · 失联 ${escapeHtml(queue.stale_running_count ?? 0)} · 24h失败 ${escapeHtml(queue.failed_24h_count ?? 0)}${worker.current_job_id ? ` · 当前任务 ${escapeHtml(worker.current_job_id)}` : ''}</small></div>`;
   }).join('');
   container.innerHTML = workerRows + `<details class="migration-compact"><summary>数据库结构 ${escapeHtml(migrations.applied ?? '-')} 已应用 / ${escapeHtml(migrations.pending ?? '-')} 待执行 · ${escapeHtml(migrations.health || '未知')}</summary><p>目标版本 ${escapeHtml(migrations.target || '-')} · 待迁移 ${escapeHtml((migrations.pending_versions || []).join(', ') || '无')}</p></details>` + (workers.length ? '' : '<div class="empty-state">暂无 Worker 心跳</div>');
 
