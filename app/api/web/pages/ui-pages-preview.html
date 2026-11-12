@@ -6,9 +6,12 @@
   <title>UI 概念设计预览 - 股票分析控制台</title>
   <link rel="icon" type="image/png" href="/favicon.ico" />
   <style>
-    :root { color-scheme: dark; --line:#21344f; --muted:#8fa3bd; --text:#e5eefb; --cyan:#38bdf8; }
+    :root { color-scheme: dark; --line:#21344f; --muted:#8fa3bd; --text:#e5eefb; --cyan:#83adff; }
     * { box-sizing: border-box; }
     body { margin:0; min-height:100vh; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--text); background:radial-gradient(circle at 12% 0%, rgba(14,116,144,.22), transparent 30%), radial-gradient(circle at 82% 8%, rgba(37,99,235,.16), transparent 28%), linear-gradient(180deg,#07111f 0%,#050b14 100%); }
+    html { scroll-behavior:smooth; scroll-padding-top:20px; }
+    .skip-link { position:absolute; left:20px; top:-80px; z-index:10; }
+    .skip-link:focus { top:12px; }
     .page { width:min(1720px, calc(100vw - 40px)); margin:0 auto; padding:24px 0 44px; }
     .hero { display:flex; justify-content:space-between; align-items:end; gap:16px; margin-bottom:18px; padding:18px; border:1px solid rgba(33,52,79,.72); border-radius:20px; background:linear-gradient(135deg, rgba(12,28,48,.72), rgba(7,17,31,.18)); box-shadow:0 18px 60px rgba(0,0,0,.24); }
     .eyebrow { margin:0 0 4px; color:var(--cyan); font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
@@ -31,38 +34,188 @@
     .image-link { display:block; padding:0; border:0; border-radius:0; background:#f3f5f7; }
     a:focus-visible { outline:3px solid var(--cyan); outline-offset:4px; }
     .caption { padding:16px 20px; font-size:14px; line-height:1.7; }
+    .collection { margin:32px 0 44px; }
+    .collection-head { margin-bottom:18px; }
+    .collection-head h2 { margin:0 0 10px; font-size:clamp(24px,3vw,32px); }
+    .collection-head p { max-width:1000px; line-height:1.8; }
+    .page-nav { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 24px; }
+    .page-nav a { font-size:14px; background:#131c28; }
+    .page-nav a:hover, .actions a:hover { border-color:var(--cyan); }
+    .dark-gallery { display:grid; gap:24px; }
+    .dark-gallery .card { scroll-margin-top:20px; background:#131c28; border-radius:16px; box-shadow:none; }
+    .dark-gallery .card-head { flex-wrap:wrap; padding:18px 20px; }
+    .dark-gallery h3 { font-size:22px; }
+    .dark-gallery .image-link { background:#0b1018; }
+    .dark-gallery .caption { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .caption a { padding:0; border:0; background:none; color:var(--cyan); }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
     .previous > h2 { margin:0 0 8px; font-size:22px; }
     .previous > p { margin-bottom:18px; }
     img { display:block; width:100%; height:auto; background:#0b1220; }
     .note { margin-top:14px; color:var(--muted); font-size:14px; line-height:1.7; }
-    @media (max-width: 980px) { .page{width:calc(100vw - 24px); padding-top:12px;} .hero{align-items:stretch; flex-direction:column;} .grid{grid-template-columns:1fr;} }
+    @media (max-width: 980px) { .page{width:calc(100vw - 24px); padding-top:12px;} .hero{align-items:stretch; flex-direction:column;} .hero > div{min-width:0;} .card-head{flex-wrap:wrap;} .page-nav a{padding:9px 11px;} .dark-gallery .card-head{padding:14px;} .dark-gallery h3{font-size:19px;} .grid{grid-template-columns:1fr;} }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#dark-collection">跳到深色概念图集</a>
   <main class="page">
     <header class="hero">
       <div>
         <p class="eyebrow">STOCK RESEARCH · UI CONCEPTS</p>
         <h1>股票分析控制台 · UI 设计预览</h1>
-        <p>先看视觉方向，再决定页面改版。这里的图表和数据均为设计示意，业务首页保持不变。</p>
+        <p>11 个页面，全新深色研究工作台。先看视觉方向，再决定改版；现有业务页面保持不变。</p>
       </div>
       <div class="actions">
         <a class="primary" href="/">打开当前真实首页</a>
-        <a href="/static/assets/ui-preview/pages/home-concept-light-20261112.png" target="_blank" rel="noopener">查看新概念图原图 ↗</a>
+        <a href="#dark-collection">浏览深色全套 · 11 页</a>
+        <a href="#light-concept">对比浅色方案</a>
       </div>
     </header>
 
-    <article class="card concept" aria-labelledby="concept-heading">
+    <section class="collection" id="dark-collection" aria-labelledby="dark-heading">
+      <div class="collection-head">
+        <p class="eyebrow">DARK COLLECTION · 11 PAGES · 2026.11.12</p>
+        <h2 id="dark-heading">深色研究工作台 · 全页面概念</h2>
+        <p>统一石墨黑画布、分层灰蓝卡片与克制的蓝色强调色。每页独立设计，保留 A 股红涨绿跌。由 OpenAI gpt-image-2.5-sunburst 生成；图片中的行情、策略参数、日期和功能均为设计示意，不代表真实数据、研究结论或已上线能力。</p>
+      </div>
+      <nav class="page-nav" aria-label="深色概念图页面目录">
+        <a href="#dark-home">首页</a>
+        <a href="#dark-selection">选股中心</a>
+        <a href="#dark-tracking">跟踪复盘</a>
+        <a href="#dark-portfolio">持仓管理</a>
+        <a href="#dark-backtest">回测中心</a>
+        <a href="#dark-strategies">选股策略</a>
+        <a href="#dark-trade-strategies">交易策略</a>
+        <a href="#dark-system">数据状态</a>
+        <a href="#dark-etf-rotation">ETF 轮动</a>
+        <a href="#dark-stock-detail">个股详情</a>
+        <a href="#dark-login">登录页</a>
+      </nav>
+      <div class="dark-gallery">
+      <article class="card" id="dark-home" aria-labelledby="dark-home-heading">
+        <div class="card-head">
+          <h3 id="dark-home-heading">01 · 首页</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/home-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开首页深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/home-concept-dark-20261112.png" width="1672" height="941" fetchpriority="high" loading="eager" decoding="async" alt="首页深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-selection" aria-labelledby="dark-selection-heading">
+        <div class="card-head">
+          <h3 id="dark-selection-heading">02 · 选股中心</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/selection-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开选股中心深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/selection-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="选股中心深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-tracking" aria-labelledby="dark-tracking-heading">
+        <div class="card-head">
+          <h3 id="dark-tracking-heading">03 · 跟踪复盘</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/tracking-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开跟踪复盘深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/tracking-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="跟踪复盘深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-portfolio" aria-labelledby="dark-portfolio-heading">
+        <div class="card-head">
+          <h3 id="dark-portfolio-heading">04 · 持仓管理</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/portfolio-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开持仓管理深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/portfolio-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="持仓管理深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-backtest" aria-labelledby="dark-backtest-heading">
+        <div class="card-head">
+          <h3 id="dark-backtest-heading">05 · 回测中心</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/backtest-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开回测中心深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/backtest-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="回测中心深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-strategies" aria-labelledby="dark-strategies-heading">
+        <div class="card-head">
+          <h3 id="dark-strategies-heading">06 · 选股策略</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/strategies-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开选股策略深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/strategies-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="选股策略深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-trade-strategies" aria-labelledby="dark-trade-strategies-heading">
+        <div class="card-head">
+          <h3 id="dark-trade-strategies-heading">07 · 交易策略</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/trade-strategies-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开交易策略深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/trade-strategies-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="交易策略深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-system" aria-labelledby="dark-system-heading">
+        <div class="card-head">
+          <h3 id="dark-system-heading">08 · 数据状态</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/system-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开数据状态深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/system-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="数据状态深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-etf-rotation" aria-labelledby="dark-etf-rotation-heading">
+        <div class="card-head">
+          <h3 id="dark-etf-rotation-heading">09 · ETF 轮动</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/etf-rotation-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开ETF 轮动深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/etf-rotation-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="ETF 轮动深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-stock-detail" aria-labelledby="dark-stock-detail-heading">
+        <div class="card-head">
+          <h3 id="dark-stock-detail-heading">10 · 个股详情</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/stock-detail-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开个股详情深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/stock-detail-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="个股详情深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      <article class="card" id="dark-login" aria-labelledby="dark-login-heading">
+        <div class="card-head">
+          <h3 id="dark-login-heading">11 · 登录页</h3>
+          <span>深色概念 · Image 2.5 · 1672 × 941</span>
+        </div>
+        <a class="image-link" href="/static/assets/ui-preview/pages/login-concept-dark-20261112.png" target="_blank" rel="noopener" aria-label="打开登录页深色概念图原图（新窗口）">
+          <img src="/static/assets/ui-preview/pages/login-concept-dark-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="登录页深色 UI 概念图：石墨黑背景、灰蓝卡片与蓝色控件，内容为设计示意">
+        </a>
+        <div class="caption"><p>点击图片查看完整原图；图中文字、参数和数据仅作设计示意。</p><a href="#dark-collection">返回页面目录 ↑</a></div>
+      </article>
+      </div>
+    </section>
+
+    <article class="card concept" id="light-concept" aria-labelledby="concept-heading">
       <div class="card-head">
         <div>
-          <p class="eyebrow">NEW CONCEPT · 2026.11.12</p>
+          <p class="eyebrow">LIGHT CONCEPT · 2026.11.12</p>
           <h2 id="concept-heading">首页概念 · 清透研究工作台</h2>
           <p>浅色画布、清晰的信息层级与轻量卡片，让市场概览、研究候选和策略跟踪更容易阅读。</p>
         </div>
         <span>Image 2.5 · 1672 × 941</span>
       </div>
       <a class="image-link" href="/static/assets/ui-preview/pages/home-concept-light-20261112.png" target="_blank" rel="noopener" aria-label="打开首页概念图原图（新窗口）">
-        <img src="/static/assets/ui-preview/pages/home-concept-light-20261112.png" width="1672" height="941" fetchpriority="high" alt="浅色股票研究工作台概念图：侧边导航、市场指数、研究候选与策略表现卡片">
+        <img src="/static/assets/ui-preview/pages/home-concept-light-20261112.png" width="1672" height="941" loading="lazy" decoding="async" alt="浅色股票研究工作台概念图：侧边导航、市场指数、研究候选与策略表现卡片">
       </a>
       <p class="caption">点击图片查看原图。由 OpenAI gpt-image-2.5-sunburst 生成；本图仅用于确认视觉风格，不代表真实行情、研究结论或已上线功能。</p>
     </article>
