@@ -3,39 +3,38 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
-<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="/favicon.ico?v=20260729brand1" rel="icon" type="image/png"/>
+<link href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" rel="apple-touch-icon"/>
 <title>股票分析台 - 跟踪复盘</title>
-<link rel="stylesheet" href="/static/css/base.css"/>
-<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
-<link rel="stylesheet" href="/static/css/components.css"/>
-<link rel="stylesheet" href="/static/css/pages.css?v=20260611a"/>
-<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
-
-<meta name="theme-color" content="#0B1018"/>
-<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
+<link href="/static/css/base.css" rel="stylesheet"/>
+<link href="/static/css/layout.css?v=20260723auth3" rel="stylesheet"/>
+<link href="/static/css/components.css" rel="stylesheet"/>
+<link href="/static/css/pages.css?v=20260611a" rel="stylesheet"/>
+<link href="/static/css/brand.css?v=20260729brand1" rel="stylesheet"/>
+<meta content="#0B1018" name="theme-color"/>
+<link href="/static/css/dark-design.css?v=20261113fidelity2" rel="stylesheet"/>
 </head>
 <body data-page="tracking" data-ui="dark-v1">
 <div class="app-shell dashboard-shell">
-<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<aside aria-label="主导航" class="sidebar" id="stock-sidebar">
 <div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
-<nav class="nav" aria-label="工作台页面">
-<a href="/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
-<a href="/selection" data-nav="selection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
-<a href="/tracking" data-nav="tracking" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
-<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
-<a href="/backtest" data-nav="backtest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
-<a href="/strategies" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
-<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a><a href="/etf-rotation" data-nav="etf-rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
-<a href="/system" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+<nav aria-label="工作台页面" class="nav">
+<a data-nav="home" href="/"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a data-nav="selection" href="/selection"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a aria-current="page" class="active" data-nav="tracking" href="/tracking"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 17l5-6 5 3 8-10M3 21h18"></path></svg><span>跟踪复盘</span></a>
+<a data-nav="portfolio" href="/portfolio"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a data-nav="backtest" href="/backtest"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a data-nav="strategies" href="/strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 4 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a data-nav="trade-strategies" href="/trade-strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6h7m4 0h7M3 12h12m4 0h2M3 18h4m4 0h10M14 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0M19 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0M11 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0"></path></svg><span>交易策略</span></a><a data-nav="etf-rotation" href="/etf-rotation"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M12 3v9h9M21 12a9 9 0 1 1-9-9a9 9 0 0 1 9 9Z"></path></svg><span>ETF 轮动</span></a>
+<a data-nav="system" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
 </nav>
 </aside>
 <main class="main-content dashboard-main tracking-dashboard"><div class="workspace-topbar">
-<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
-<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>跟踪复盘</span></nav>
-<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
-<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+<button aria-controls="stock-sidebar" aria-expanded="false" aria-label="展开导航" class="workspace-menu" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav aria-label="面包屑" class="workspace-breadcrumb"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>跟踪复盘</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input autocomplete="off" data-global-stock-search-input="" id="workspace-stock-search" maxlength="24" placeholder="搜索股票代码" type="search"/><button aria-label="查看股票" data-global-stock-search-btn="" type="submit"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg></button></form>
+<a aria-label="数据与工作台设置" class="workspace-status-link" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 3 3 1 2 5-2 2v3l-4 3-3-1-3 1-4-3v-3l-2-2 2-5 3-1Z M15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0"></path></svg></a>
 </div>
 <section class="dashboard-hero tracking-hero">
 <div class="dashboard-hero-copy">
@@ -43,45 +42,7 @@
 <h1>跟踪复盘</h1>
 <p class="page-desc">以选股日期为起点，让结果可追溯；研究表现与执行记录分别复盘。</p>
 </div>
-
-</section><section class="stat-grid compact-stats hero-stats tracking-stat-strip">
-<article class="stat-card">
-<div class="stat-label">复盘条目数</div>
-<div id="tracking-stat-count" class="stat-value">-</div>
-</article>
-<article class="stat-card">
-<div class="stat-label">仍在跟踪</div>
-<div id="tracking-stat-active-count" class="stat-value">-</div>
-</article>
-<article class="stat-card">
-<div class="stat-label">平均收益率</div>
-<div id="tracking-stat-avg" class="stat-value">-</div>
-</article>
-<article class="stat-card">
-<div class="stat-label">胜率</div>
-<div id="tracking-stat-win-rate" class="stat-value">-</div>
-</article>
-<article class="stat-card">
-<div class="stat-label">超额收益</div>
-<div id="tracking-stat-excess-return" class="stat-value">-</div>
-</article>
-<article class="stat-card">
-<div class="stat-label">最大浮盈</div>
-<div id="tracking-stat-max-gain" class="stat-value up">-</div>
-</article>
-<article class="stat-card">
-<div class="stat-label">最大回撤</div>
-<div id="tracking-stat-max-drawdown" class="stat-value down">-</div>
-</article>
-</section>
-<section class="card tracking-table-console">
-<div class="card-header">
-<div>
-<p class="card-kicker">Records</p>
-<h2>个股复盘列表</h2>
-<p id="tracking-summary-text" class="muted">正在加载...</p>
-</div>
-<div class="toolbar tracking-filters">
+</section><div class="toolbar tracking-filters card">
 <label class="tracking-filter-field">
 <span class="muted">策略</span>
 <select id="tracking-strategy-id">
@@ -91,8 +52,8 @@
 <label class="tracking-filter-field tracking-date-field">
 <span class="muted">选股日期</span>
 <span class="date-input-shell" id="tracking-selection-date-shell">
-<span id="tracking-selection-date-display" class="date-input-display">全部日期</span>
-<input id="tracking-selection-date" type="date" aria-label="选股日期筛选"/>
+<span class="date-input-display" id="tracking-selection-date-display">全部日期</span>
+<input aria-label="选股日期筛选" id="tracking-selection-date" type="date"/>
 </span>
 </label>
 <label class="tracking-filter-field tracking-page-size-field">
@@ -104,10 +65,42 @@
 <option value="100">100</option>
 </select>
 </label>
-<button id="refresh-tracking-page" class="btn btn-secondary" type="button">刷新</button>
+<button class="btn btn-secondary" id="refresh-tracking-page" type="button">刷新</button>
+</div><section class="tracking-concept-workspace"><section class="tracking-main-column"><section class="stat-grid compact-stats hero-stats tracking-stat-strip">
+<article class="stat-card">
+<div class="stat-label">复盘条目数</div>
+<div class="stat-value" id="tracking-stat-count">-</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">仍在跟踪</div>
+<div class="stat-value" id="tracking-stat-active-count">-</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">平均收益率</div>
+<div class="stat-value" id="tracking-stat-avg">-</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">胜率</div>
+<div class="stat-value" id="tracking-stat-win-rate">-</div>
+</article>
+</section><details class="tracking-extra-stats"><summary>收益与风险统计</summary><div class="stat-grid"><article class="stat-card">
+<div class="stat-label">超额收益</div>
+<div class="stat-value" id="tracking-stat-excess-return">-</div>
+</article><article class="stat-card">
+<div class="stat-label">最大浮盈</div>
+<div class="stat-value up" id="tracking-stat-max-gain">-</div>
+</article><article class="stat-card">
+<div class="stat-label">最大回撤</div>
+<div class="stat-value down" id="tracking-stat-max-drawdown">-</div>
+</article></div></details><section class="card tracking-table-console">
+<div class="card-header">
+<div>
+<p class="card-kicker">Records</p>
+<h2>个股复盘列表</h2>
+<p class="muted" id="tracking-summary-text">正在加载...</p>
 </div>
-</div>
-<div class="table-wrap tracking-detail-table">
+<label class="tracking-detail-toggle"><input id="tracking-show-evidence" type="checkbox"/> 完整数据与操作</label></div>
+<div class="table-wrap tracking-detail-table tracking-compact-table">
 <table>
 <thead>
 <tr>
@@ -118,7 +111,7 @@
 <th>实时价</th>
 <th>实时区间收益</th>
 <th>超额收益</th>
-<th>跟踪天数</th>
+<th>观察进度</th>
 <th>最大浮盈</th>
 <th>最大回撤</th>
 <th>状态</th>
@@ -128,40 +121,36 @@
 </tr>
 </thead>
 <tbody id="tracking-results-body">
-<tr><td colspan="14" class="muted">加载中...</td></tr>
+<tr><td class="muted" colspan="14">加载中...</td></tr>
 </tbody>
 </table>
 </div>
 <div class="tracking-pagination">
-<div id="tracking-pagination-summary" class="muted">加载中...</div>
+<div class="muted" id="tracking-pagination-summary">加载中...</div>
 <div class="tracking-pagination-actions">
-<button id="tracking-prev-page" class="btn btn-secondary" type="button">上一页</button>
-<button id="tracking-next-page" class="btn btn-secondary" type="button">下一页</button>
+<button class="btn btn-secondary" id="tracking-prev-page" type="button">上一页</button>
+<button class="btn btn-secondary" id="tracking-next-page" type="button">下一页</button>
 </div>
 </div>
-</section><section class="tracking-review-grid">
-<article class="card review-summary-card">
+</section><article class="card review-summary-card">
 <div class="card-header">
 <p class="card-kicker">Overview</p>
 <h2>复盘概览</h2>
 </div>
-<div id="tracking-review-summary" class="list-stack empty-state">加载中...</div>
-</article>
-<article class="card review-notes-card">
+<div class="list-stack empty-state" id="tracking-review-summary">加载中...</div>
+</article></section><aside class="tracking-inspector"><section class="card tracking-selected-card"><h2 id="tracking-selected-name">研究观察</h2><p class="muted" id="tracking-selected-meta">选择列表中的股票查看观察证据</p><div class="tracking-selected-path" id="tracking-selected-path"></div></section><article class="card review-notes-card">
 <div class="card-header">
 <div>
 <p class="card-kicker">Attribution</p>
 <h2>复盘备注 / 成败归因</h2>
 </div>
-<button id="tracking-deep-review" class="btn btn-primary" type="button">详细复盘</button>
+<button class="btn btn-primary" id="tracking-deep-review" type="button">详细复盘</button>
 </div>
-<div id="tracking-review-notes" class="note-block">加载中...</div>
-</article>
-</section>
-
+<div class="note-block" id="tracking-review-notes">加载中...</div>
+</article></aside></section>
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
-<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
-<script src="/static/js/tracking.js?v=20260915sentimentv06"></script>
+<script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/tracking.js?v=20260915sentimentv06&amp;ui=20261113fidelity2"></script>
 </body>
 </html>

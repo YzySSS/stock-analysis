@@ -357,3 +357,38 @@ document.addEventListener('DOMContentLoaded', () => {
   bindLogoutControl();
   bindTooltips();
 });
+
+// Display-only controls introduced by the concept-fidelity layout.
+document.addEventListener('DOMContentLoaded', () => {
+  qs('#selection-show-evidence')?.addEventListener('change', (event) => {
+    qs('.selection-detail-table')?.classList.toggle('show-evidence', event.target.checked);
+  });
+  qs('#strategy-show-probes')?.addEventListener('change', (event) => {
+    qs('.factor-weight-card')?.classList.toggle('show-probes', event.target.checked);
+  });
+  qsa('.strategy-concept-tabs a').forEach((link) => link.addEventListener('click', () => {
+    const target = document.querySelector(link.getAttribute('href'));
+    const details = target?.closest('details');
+    if (details) details.open = true;
+    qsa('.strategy-concept-tabs a').forEach((tab) => tab.classList.toggle('active', tab === link));
+  }));
+  const state = qs('#selection-run-state');
+  const timeline = qs('.selection-state-timeline');
+  if (!state || !timeline) return;
+  const sync = () => {
+    const text = state.textContent;
+    const error = /失败|取消|错误/.test(text);
+    const complete = !error && /完成|成功/.test(text);
+    const active = !error && /运行|计算|排队/.test(text) && !/待运行/.test(text);
+    timeline.classList.toggle('is-complete', complete);
+    timeline.classList.toggle('is-running', active);
+    timeline.classList.toggle('is-error', error);
+    const labels = error ? ['需复核证据', text, '未完成']
+      : complete ? ['检查已完成', '计算已完成', '结果已生成']
+      : active ? ['检查与计算进行中', '请稍候', '等待结果']
+      : ['等待检查', '等待运行', '暂无本次结果'];
+    timeline.querySelectorAll('small').forEach((el, index) => { el.textContent = labels[index]; });
+  };
+  sync();
+  new MutationObserver(sync).observe(state, { childList: true, subtree: true, characterData: true });
+});

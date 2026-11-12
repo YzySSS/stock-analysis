@@ -43,6 +43,8 @@ function renderSectorList(selector, sectors, emptyText) {
     return;
   }
   container.innerHTML = sectors.slice(0, 5).map((item, index) => {
+    const maxMagnitude = Math.max(1,...sectors.map(s => Math.abs(Number(s.net_amount ?? s.amount_weighted_pct_chg ?? s.avg_pct_chg ?? 0))));
+    const barWidth = Math.min(100,Math.max(0,Math.abs(Number(item.net_amount ?? item.amount_weighted_pct_chg ?? item.avg_pct_chg ?? 0)) / maxMagnitude * 100));
     const typeLabel = item.sector_type_label || '行业';
     const isFundFlow = item.net_amount != null;
     const mainValue = isFundFlow ? formatSectorAmount(item.net_amount, item.source_unit) : formatPercent(item.amount_weighted_pct_chg ?? item.avg_pct_chg);
@@ -56,7 +58,7 @@ function renderSectorList(selector, sectors, emptyText) {
           <strong>${escapeHtml(item.name || '-')}</strong>
           <small>${escapeHtml(typeLabel)} · ${escapeHtml(item.stock_count ?? '-')} 只</small>
         </span>
-        <span class="sector-flow">
+        <span class="sector-bar-track" aria-hidden="true"><i style="width:${barWidth}%"></i></span><span class="sector-flow">
           <b>${mainValue}</b>
           <small>${extraLine}</small>
         </span>
@@ -240,6 +242,7 @@ function renderMarketOverview(overview) {
   const bjLimitText = bjLimit ? ` · 北证 ${bjLimit.up ?? 0}/${bjLimit.down ?? 0}` : '';
   setText('#home-market-big-move', `大涨 ${overview.strong_up_count ?? '-'} · 大跌 ${overview.strong_down_count ?? '-'}${bjLimitText}`);
   updateMarketTimeCard();
+  renderMarketVisual(overview);
   renderSectorList('#home-strong-sectors', overview.strong_sectors, '暂无强势板块统计');
   renderSectorList('#home-weak-sectors', overview.weak_sectors, '暂无弱势板块统计');
 }
@@ -496,11 +499,11 @@ function renderScenarioForecast(scenario) {
       .map((text) => String(text).replace(/^主线强度/, '行业综合强度'))
       .join(' · ');
     return `
-      <article class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)} ${primary ? 'market-mainline' : ''} ${branch ? 'market-branch' : ''}">
+      <article tabindex="0" title="${escapeHtml(roleLabel + ' · ' + evidence + ' · ' + (item.contradictions || []).join('；'))}" class="home-leadership-card ${strengthClass(item.leadership_state)} cycle-${cycleClass(item.cycle_state)} ${primary ? 'market-mainline' : ''} ${branch ? 'market-branch' : ''}">
         <div><span>${escapeHtml(roleLabel)}</span><b>${formatNumber(item.leadership_score, 1)}</b></div>
         <strong>${escapeHtml(item.sector_name || '-')}</strong>
-        <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">行情阶段 · ${escapeHtml(cycleDisplayLabel(item))}</em>
-        <small>${escapeHtml(evidence || '等待证据')}</small>
+        <em class="home-leadership-cycle ${cycleClass(item.cycle_state)}">${escapeHtml(primary ? '主线' : branch ? '支线' : radarStrengthLabel(item))} · ${escapeHtml(cycleDisplayLabel(item))}</em>
+        <span class="home-leadership-meter" title="行业强度 ${formatNumber(item.leadership_score, 1)}"><i style="width:${Math.max(0,Math.min(100,Number(item.leadership_score || 0)))}%"></i></span><small>${escapeHtml(evidence || '等待证据')}</small>
         ${(item.contradictions || []).length ? `<p>${escapeHtml((item.contradictions || []).join('；'))}</p>` : ''}
       </article>
     `;
@@ -563,35 +566,13 @@ function renderMarketTiming(timing) {
 
 function renderTrackingCards(items = []) {
   if (!items.length) return '<div class="empty-state">暂无跟踪数据。可以先去选股中心运行一次策略。</div>';
-  return items.map((item) => {
-    const pct = item.price_change_pct;
-    const pctClass = getPctClass(pct);
-    const detailUrl = `/stocks/${encodeURIComponent(item.code || '')}`;
-    return `
-      <article class="home-tracking-card">
-        <a href="${detailUrl}" class="home-tracking-card-main">
-          <div class="home-tracking-card-head">
-            <div>
-              <strong>${escapeHtml(item.name || item.code || '-')}</strong>
-              <span>${escapeHtml(item.code || '-')}</span>
-            </div>
-            ${item.rank_no != null ? `<em>#${escapeHtml(item.rank_no)}</em>` : ''}
-          </div>
-          <div class="home-tracking-return ${pctClass}">${formatPercent(pct)}</div>
-          <div class="home-tracking-meta">
-            <span>入选 ${escapeHtml(item.selection_datetime || item.selection_date || '-')}</span>
-            <span>跟踪 ${escapeHtml(item.tracking_days ?? '-')} 日</span>
-          </div>
-          <div class="home-tracking-price-row">
-            <span>入选价 <b>${formatPrice(item.selected_open_price ?? item.selected_close_price)}</b></span>
-            <span>实时价 <b>${formatPrice(item.current_price)}</b></span>
-            <span>分数 <b>${formatNumber(item.score, 2)}</b></span>
-          </div>
-          <small>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')} · ${escapeHtml(item.realtime_quote_time || '暂无实时快照')}</small>
-        </a>
-      </article>
-    `;
-  }).join('');
+  return `<div class="table-wrap"><table class="home-tracking-table"><thead><tr><th>股票</th><th>入选日期</th><th>研究策略</th><th>区间表现</th><th>操作</th></tr></thead><tbody>${items.map((item) => `<tr>
+    <td><strong>${escapeHtml(item.name || item.code || '-')}</strong><small>${escapeHtml(item.code || '-')}</small></td>
+    <td>${escapeHtml(item.selection_date || String(item.selection_datetime || '-').slice(0,10))}</td>
+    <td>${escapeHtml(item.strategy_display_name || item.strategy_id || '-')}<small>仅研究观察</small></td>
+    <td class="${getPctClass(item.price_change_pct) || ''}">${formatPercent(item.price_change_pct)}</td>
+    <td><a href="/stocks/${encodeURIComponent(item.code || '')}">查看复盘 ›</a></td>
+  </tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderRiskTags(tags = []) {
@@ -817,3 +798,22 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(updateMarketTimeCard, 1000);
   loadHomePage();
 });
+
+// A real industry cross-section occupies the concept's market chart slot. No
+// fabricated index time series: the data scope and quote clock are explicit.
+function renderMarketVisual(overview) {
+  const el = qs('#home-market-visual-chart');
+  if (!el) return;
+  const byName = new Map([...(overview.strong_sectors || []), ...(overview.weak_sectors || [])].map(s => [s.name, s]));
+  const items = [...byName.values()].filter(s => s.amount_weighted_pct_chg != null || s.avg_pct_chg != null).slice(0,10);
+  setText('#home-visual-evidence', `真实行业涨跌截面 · ${overview.latest_quote_time || '行情时间待补'} · 非指数分时`);
+  if (!items.length) { el.innerHTML = '<div class="empty-state">当前接口尚无可用行业快照，不填充示例走势。</div>'; return; }
+  const values = items.map(s => Number(s.amount_weighted_pct_chg ?? s.avg_pct_chg));
+  const max = Math.max(1,...values.map(Math.abs));
+  const width=700,base=92,step=620/items.length;
+  el.innerHTML = `<svg viewBox="0 0 700 185" role="img" aria-label="行业涨跌幅截面，非时间序列">
+    ${[20,56,92,128,164].map(y=>`<line x1="40" y1="${y}" x2="690" y2="${y}" stroke="#2b3b50" stroke-dasharray="3 3"/>`).join('')}
+    <text x="2" y="23" fill="#93a4b8" font-size="11">${max.toFixed(1)}%</text><text x="12" y="96" fill="#93a4b8" font-size="11">0</text><text x="0" y="162" fill="#93a4b8" font-size="11">-${max.toFixed(1)}%</text>
+    ${items.map((item,i)=>{ const v=values[i],h=Math.abs(v)/max*66,x=48+i*step; return `<rect x="${x}" y="${v>=0?base-h:base}" width="${Math.min(36,step-14)}" height="${Math.max(1,h)}" rx="2" fill="${v>=0?'#ef7279':'#3abb9e'}"/><text x="${x}" y="${v>=0?base-h-6:base+h+13}" fill="#c9d4e4" font-size="10">${v.toFixed(1)}%</text><text x="${x}" y="181" fill="#93a4b8" font-size="10">${escapeHtml(String(item.name).slice(0,4))}</text>`;}).join('')}
+  </svg>`;
+}

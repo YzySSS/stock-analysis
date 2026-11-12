@@ -396,8 +396,9 @@ function renderInteractiveLineChart(svgSelector, rawPoints, options) {
     return;
   }
 
-  const width = 640;
+  const width = Math.max(360, Math.round(svg.clientWidth || 640));
   const height = 220;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const padding = { left: 44, right: 24, top: 28, bottom: 34 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
@@ -472,8 +473,8 @@ function renderInteractiveLineChart(svgSelector, rawPoints, options) {
 
   hitArea.addEventListener('pointermove', handleMove);
   hitArea.addEventListener('pointerdown', handleMove);
-  hitArea.addEventListener('pointerleave', () => showPoint(lastIndex));
-  showPoint(lastIndex);
+  hitArea.addEventListener('pointerleave', () => { focus.style.display = 'none'; });
+  focus.style.display = 'none';
 }
 
 function getDateParts(dateText) {
@@ -578,6 +579,7 @@ function setupKlineTabs(history) {
     renderPriceChart(filtered, state.period);
   };
 
+  window.addEventListener('resize', render);
   periodButtons.forEach((button) => {
     button.addEventListener('click', () => {
       state.period = button.dataset.klinePeriod || 'day';
@@ -610,8 +612,9 @@ function renderPriceChart(history, period = 'day') {
     return;
   }
 
-  const width = 640;
+  const width = Math.max(360, Math.round(svg.clientWidth || 640));
   const height = 220;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const padding = { left: 42, right: 18, top: 22, bottom: 24 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
@@ -708,8 +711,8 @@ function renderPriceChart(history, period = 'day') {
 
   hitArea.addEventListener('pointermove', handleMove);
   hitArea.addEventListener('pointerdown', handleMove);
-  hitArea.addEventListener('pointerleave', () => showPoint(lastIndex));
-  showPoint(lastIndex);
+  hitArea.addEventListener('pointerleave', () => { focus.style.display = 'none'; });
+  focus.style.display = 'none';
 }
 
 function normalizeIntradayBars(bars = [], meta = {}) {
@@ -835,8 +838,9 @@ function renderIntradayChart(points, meta = {}) {
     return;
   }
 
-  const width = 640;
+  const width = Math.max(360, Math.round(svg.clientWidth || 640));
   const height = 220;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const padding = { left: 44, right: 24, top: 30, bottom: 36 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
@@ -949,8 +953,8 @@ function renderIntradayChart(points, meta = {}) {
 
   hitArea.addEventListener('pointermove', handleMove);
   hitArea.addEventListener('pointerdown', handleMove);
-  hitArea.addEventListener('pointerleave', () => showPoint(lastDataIndex ?? chartPoints.length - 1));
-  showPoint(lastDataIndex ?? chartPoints.length - 1);
+  hitArea.addEventListener('pointerleave', () => { focus.style.display = 'none'; });
+  focus.style.display = 'none';
 }
 
 function renderSelectionHistory(items) {

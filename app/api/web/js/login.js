@@ -17,7 +17,8 @@ function requestedDestination() {
 passwordToggle.addEventListener('click', () => {
   const revealing = passwordInput.type === 'password';
   passwordInput.type = revealing ? 'text' : 'password';
-  passwordToggle.textContent = revealing ? '隐藏' : '显示';
+  passwordToggle.classList.toggle('is-revealed', revealing);
+  passwordToggle.setAttribute('aria-pressed', String(revealing));
   passwordToggle.setAttribute('aria-label', revealing ? '隐藏密码' : '显示密码');
   passwordInput.focus();
 });

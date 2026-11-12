@@ -3,39 +3,38 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
-<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="/favicon.ico?v=20260729brand1" rel="icon" type="image/png"/>
+<link href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" rel="apple-touch-icon"/>
 <title>股票分析台 - 数据状态</title>
-<link rel="stylesheet" href="/static/css/base.css"/>
-<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
-<link rel="stylesheet" href="/static/css/components.css"/>
-<link rel="stylesheet" href="/static/css/pages.css?v=20260726errorrecovery1"/>
-<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
-
-<meta name="theme-color" content="#0B1018"/>
-<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
+<link href="/static/css/base.css" rel="stylesheet"/>
+<link href="/static/css/layout.css?v=20260723auth3" rel="stylesheet"/>
+<link href="/static/css/components.css" rel="stylesheet"/>
+<link href="/static/css/pages.css?v=20260726errorrecovery1" rel="stylesheet"/>
+<link href="/static/css/brand.css?v=20260729brand1" rel="stylesheet"/>
+<meta content="#0B1018" name="theme-color"/>
+<link href="/static/css/dark-design.css?v=20261113fidelity2" rel="stylesheet"/>
 </head>
 <body data-page="system" data-ui="dark-v1">
 <div class="app-shell dashboard-shell">
-<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<aside aria-label="主导航" class="sidebar" id="stock-sidebar">
 <div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
-<nav class="nav" aria-label="工作台页面">
-<a href="/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
-<a href="/selection" data-nav="selection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
-<a href="/tracking" data-nav="tracking"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
-<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
-<a href="/backtest" data-nav="backtest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
-<a href="/strategies" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
-<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a><a href="/etf-rotation" data-nav="etf-rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
-<a href="/system" data-nav="system" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+<nav aria-label="工作台页面" class="nav">
+<a data-nav="home" href="/"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a data-nav="selection" href="/selection"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a data-nav="tracking" href="/tracking"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 17l5-6 5 3 8-10M3 21h18"></path></svg><span>跟踪复盘</span></a>
+<a data-nav="portfolio" href="/portfolio"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a data-nav="backtest" href="/backtest"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a data-nav="strategies" href="/strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 4 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a data-nav="trade-strategies" href="/trade-strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6h7m4 0h7M3 12h12m4 0h2M3 18h4m4 0h10M14 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0M19 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0M11 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0"></path></svg><span>交易策略</span></a><a data-nav="etf-rotation" href="/etf-rotation"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M12 3v9h9M21 12a9 9 0 1 1-9-9a9 9 0 0 1 9 9Z"></path></svg><span>ETF 轮动</span></a>
+<a aria-current="page" class="active" data-nav="system" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
 </nav>
 </aside>
 <main class="main-content dashboard-main system-dashboard system-ops-main"><div class="workspace-topbar">
-<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
-<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>数据状态</span></nav>
-<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
-<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+<button aria-controls="stock-sidebar" aria-expanded="false" aria-label="展开导航" class="workspace-menu" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav aria-label="面包屑" class="workspace-breadcrumb"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>数据状态</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input autocomplete="off" data-global-stock-search-input="" id="workspace-stock-search" maxlength="24" placeholder="搜索股票代码" type="search"/><button aria-label="查看股票" data-global-stock-search-btn="" type="submit"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg></button></form>
+<a aria-label="数据与工作台设置" class="workspace-status-link" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 3 3 1 2 5-2 2v3l-4 3-3-1-3 1-4-3v-3l-2-2 2-5 3-1Z M15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0"></path></svg></a>
 </div>
 <section class="system-ops-frame">
 <header class="system-ops-titlebar">
@@ -45,91 +44,89 @@
 <p>数据是否齐全、及时、可用，一眼看清。</p>
 </div>
 <div class="header-actions">
-<button id="refresh-system-page" class="btn btn-secondary" type="button">刷新状态</button>
+<button class="btn btn-secondary" id="refresh-system-page" type="button">刷新状态</button>
 </div>
 </header>
 <section class="system-top-metric-grid">
-<article id="system-api-panel" class="system-top-metric-card">加载中...</article>
-<article id="system-db-panel" class="system-top-metric-card">加载中...</article>
-<article id="system-latest-date-panel" class="system-top-metric-card">加载中...</article>
-<article id="system-last-run-panel" class="system-top-metric-card">加载中...</article>
+<article class="system-top-metric-card" id="system-api-panel">加载中...</article><article class="system-top-metric-card" id="system-latest-date-panel">加载中...</article>
+<article class="system-top-metric-card" id="system-db-panel">加载中...</article>
+
+<article class="system-top-metric-card" id="system-last-run-panel">加载中...</article>
 </section>
 <section class="system-readiness-workspace"><section class="card system-baseline-console">
 <div class="card-header">
 <div>
 <p class="card-kicker">Baseline</p>
-<h2>数据基准总览</h2>
+<h2><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg>数据基准总览</h2>
 </div>
-<span id="system-baseline-overall" class="system-section-note">覆盖率计算中...</span>
+<span class="system-section-note" id="system-baseline-overall">覆盖率计算中...</span>
 </div>
-<div id="system-baseline-panel" class="system-baseline-grid status-panel">加载中...</div>
+<div class="system-baseline-grid status-panel" id="system-baseline-panel">加载中...</div>
 </section><section class="card system-schedule-console">
 <div class="card-header">
 <div>
 <p class="card-kicker">Readiness</p>
 <h2>Worker 与队列健康</h2>
 </div>
-<span id="system-readiness-overall" class="system-section-note">检查中...</span>
+<span class="system-section-note" id="system-readiness-overall">检查中...</span>
 </div>
-<div id="system-readiness-panel" class="system-task-grid status-panel">加载中...</div>
+<div class="system-task-grid status-panel" id="system-readiness-panel">加载中...</div>
 </section></section>
-
-<section class="system-ops-grid merged-task-monitor">
+<section class="system-secondary-grid"><section class="system-ops-grid merged-task-monitor">
 <article class="card system-schedule-console">
 <div class="card-header">
 <div>
 <p class="card-kicker">Task Monitor</p>
-<h2>任务监控</h2>
+<h2><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 7v6h4"></path></svg>任务监控</h2>
 </div>
 <span class="system-section-note">计划时间 + 最近执行状态</span>
 </div>
-<div id="system-coverage-panel" class="system-task-grid status-panel">加载中...</div>
+<div class="system-task-grid status-panel" id="system-coverage-panel">加载中...</div>
 </article>
-<div id="system-task-run-panel" hidden=""></div>
+<div hidden="" id="system-task-run-panel"></div>
 </section>
-<section class="system-note-grid">
 <article class="card system-note-card">
 <div class="card-header compact-card-header">
 <p class="card-kicker">Sentiment</p>
 <h2>舆情质量详情</h2>
 </div>
-<div id="system-sentiment-quality-panel" class="status-panel">加载中...</div>
+<div class="status-panel" id="system-sentiment-quality-panel">加载中...</div>
 </article>
 <article class="card system-note-card">
 <div class="card-header compact-card-header">
 <p class="card-kicker">Data Quality</p>
 <h2>核心数据质量</h2>
 </div>
-<div id="system-gap-panel" class="status-panel">加载中...</div>
-<div id="system-field-missing-panel" class="status-panel hidden"></div>
-<div id="system-shortfall-panel" class="status-panel hidden"></div>
+<div class="status-panel" id="system-gap-panel">加载中...</div>
+<div class="status-panel hidden" id="system-field-missing-panel"></div>
+<div class="status-panel hidden" id="system-shortfall-panel"></div>
 </article>
 <article class="card system-note-card">
 <div class="card-header compact-card-header">
-<p class="card-kicker">Errors & Retention</p>
+<p class="card-kicker">Errors &amp; Retention</p>
 <h2>结构化错误与保留策略</h2>
 </div>
-<div id="system-job-error-panel" class="status-panel">加载中...</div>
+<div class="status-panel" id="system-job-error-panel">加载中...</div>
 </article>
 <article class="card system-note-card">
 <div class="card-header compact-card-header">
 <p class="card-kicker">Realtime Storage</p>
 <h2>分钟行情分层</h2>
 </div>
-<div id="system-realtime-lifecycle-panel" class="status-panel">加载中...</div>
+<div class="status-panel" id="system-realtime-lifecycle-panel">加载中...</div>
 </article>
 <article class="card system-note-card">
 <div class="card-header compact-card-header">
 <p class="card-kicker">Opinion Storage</p>
 <h2>舆情快照去重</h2>
 </div>
-<div id="system-market-opinion-storage-panel" class="status-panel">加载中...</div>
+<div class="status-panel" id="system-market-opinion-storage-panel">加载中...</div>
 </article>
 </section>
 </section>
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
-<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
-<script src="/static/js/system.js?v=20260726errorrecovery1"></script>
+<script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/system.js?v=20260726errorrecovery1&amp;ui=20261113fidelity2"></script>
 </body>
 </html>

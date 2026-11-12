@@ -266,6 +266,8 @@ async function loadDeepReviewStatus() {
 }
 
 function renderTrackingTable(items, summary = {}) {
+  renderTrackingInspector(items[0] || null);
+  window.conceptTrackingItems = items;
   const body = qs('#tracking-results-body');
   if (!items.length) {
     body.innerHTML = renderEmptyRow(14, '暂无跟踪数据');
@@ -308,7 +310,7 @@ function renderTrackingTable(items, summary = {}) {
         </td>
         <td class="${getPctClass(pct)}">${formatPercent(pct)}</td>
         <td class="${getPctClass(excessReturn)}">${formatPercent(excessReturn)}</td>
-        <td>${item.tracking_days ?? '-'}</td>
+        <td><span class="badge status-muted">${escapeHtml(item.tracking_days ?? '-')} 日</span></td>
         <td class="up">${formatPercent(item.max_gain_pct)}</td>
         <td class="down">${formatPercent(item.max_drawdown_pct)}</td>
         <td>
@@ -326,7 +328,7 @@ function renderTrackingTable(items, summary = {}) {
             ${escapeHtml(statsToggleLabel(includeInStats, statsWindowExpired))}
           </button>
         </td>
-        <td><button class="btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}">删除</button></td>
+        <td><button class="btn btn-secondary btn-sm" type="button" data-inspect-tracking>查看</button><button class="tracking-delete-action btn btn-danger btn-sm" type="button" data-action="delete-tracking-item" data-code="${escapeHtml(item.code || '')}" data-selection-date="${escapeHtml(item.selection_date || '')}" data-strategy-id="${escapeHtml(item.strategy_id || '')}">删除</button></td>
       </tr>
     `;
   }).join('');
@@ -743,4 +745,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     qs('#tracking-summary-text').textContent = `初始化失败: ${error.message}`;
     qs('#tracking-results-body').innerHTML = renderEmptyRow(13, error.message);
   }
+});
+
+function renderTrackingInspector(item) {
+  const name=qs('#tracking-selected-name'), meta=qs('#tracking-selected-meta'), chart=qs('#tracking-selected-path');
+  if (!name || !meta || !chart) return;
+  if (!item) { name.textContent='研究观察';meta.textContent='暂无可查看的跟踪记录';chart.innerHTML='';return; }
+  name.textContent=item.name || item.code || '-';
+  meta.textContent=`${item.code || '-'} · 入选 ${item.selection_date || '-'} · 仅研究观察`;
+  const start=Number(item.selected_open_price ?? item.selected_close_price),end=Number(item.current_price);
+  if (!(start>0 && end>0)) { chart.innerHTML='<div class="empty-state">缺少有效价格，不绘制观察路径。</div>';return; }
+  const min=Math.min(start,end)*.98,max=Math.max(start,end)*1.02;
+  const y=v=>125-(v-min)/(max-min)*95;
+  chart.innerHTML=`<p class="muted" style="font-size:11px">入选与最新价格 · 仅两个实测时点</p><svg viewBox="0 0 320 150" role="img" aria-label="入选价与最新价对比，不代表完整价格路径"><line x1="30" y1="${y(start)}" x2="285" y2="${y(end)}" stroke="#568bfa" stroke-width="2" stroke-dasharray="4 4"/><circle cx="30" cy="${y(start)}" r="4" fill="#568bfa"/><circle cx="285" cy="${y(end)}" r="4" fill="#568bfa"/><text x="15" y="${y(start)-9}" fill="#cbd5e1" font-size="12">${start.toFixed(3)}</text><text x="250" y="${y(end)-9}" fill="#cbd5e1" font-size="12">${end.toFixed(3)}</text><text x="10" y="147" fill="#93a4b8" font-size="10">${escapeHtml(item.selection_date || '入选日')}</text><text x="200" y="147" fill="#93a4b8" font-size="10">${escapeHtml(String(item.realtime_quote_time || '最新行情').slice(0,10))}</text></svg><div class="observation-facts"><span>观察 ${escapeHtml(item.tracking_days ?? '-')} 日</span><span class="${getPctClass(item.price_change_pct) || ''}">区间 ${formatPercent(item.price_change_pct)}</span></div>`;
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  qs('#tracking-show-evidence')?.addEventListener('change',e=>qs('.tracking-compact-table')?.classList.toggle('show-evidence',e.target.checked));
+  qs('#tracking-results-body')?.addEventListener('click',e=>{
+    if(e.target.closest('a') || (e.target.closest('button') && !e.target.closest('[data-inspect-tracking]'))) return;
+    const row=e.target.closest('[data-tracking-key]');
+    const item=(window.conceptTrackingItems || []).find(i=>`${i.code || ''}__${i.selection_date || ''}__${i.strategy_id || ''}`===row?.dataset.trackingKey);
+    if(item){renderTrackingInspector(item);qsa('#tracking-results-body tr').forEach(r=>r.classList.toggle('selected-row',r===row));}
+  });
 });

@@ -3,40 +3,39 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
-<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="/favicon.ico?v=20260729brand1" rel="icon" type="image/png"/>
+<link href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" rel="apple-touch-icon"/>
 <title>股票分析台 - ETF 轮动</title>
-<link rel="stylesheet" href="/static/css/base.css"/>
-<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
-<link rel="stylesheet" href="/static/css/components.css"/>
-<link rel="stylesheet" href="/static/css/pages.css?v=20260727etfcycle1"/>
-<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
-
-<meta name="theme-color" content="#0B1018"/>
-<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
+<link href="/static/css/base.css" rel="stylesheet"/>
+<link href="/static/css/layout.css?v=20260723auth3" rel="stylesheet"/>
+<link href="/static/css/components.css" rel="stylesheet"/>
+<link href="/static/css/pages.css?v=20260727etfcycle1" rel="stylesheet"/>
+<link href="/static/css/brand.css?v=20260729brand1" rel="stylesheet"/>
+<meta content="#0B1018" name="theme-color"/>
+<link href="/static/css/dark-design.css?v=20261113fidelity2" rel="stylesheet"/>
 </head>
 <body data-page="etf-rotation" data-ui="dark-v1">
 <div class="app-shell">
-<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<aside aria-label="主导航" class="sidebar" id="stock-sidebar">
 <div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
-<nav class="nav" aria-label="工作台页面">
-<a href="/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
-<a href="/selection" data-nav="selection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
-<a href="/tracking" data-nav="tracking"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
-<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
-<a href="/backtest" data-nav="backtest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
-<a href="/strategies" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
-<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a>
-<a href="/etf-rotation" data-nav="etf-rotation" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
-<a href="/system" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+<nav aria-label="工作台页面" class="nav">
+<a data-nav="home" href="/"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a data-nav="selection" href="/selection"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a data-nav="tracking" href="/tracking"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 17l5-6 5 3 8-10M3 21h18"></path></svg><span>跟踪复盘</span></a>
+<a data-nav="portfolio" href="/portfolio"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a data-nav="backtest" href="/backtest"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a data-nav="strategies" href="/strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 4 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a data-nav="trade-strategies" href="/trade-strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6h7m4 0h7M3 12h12m4 0h2M3 18h4m4 0h10M14 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0M19 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0M11 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0"></path></svg><span>交易策略</span></a>
+<a aria-current="page" class="active" data-nav="etf-rotation" href="/etf-rotation"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M12 3v9h9M21 12a9 9 0 1 1-9-9a9 9 0 0 1 9 9Z"></path></svg><span>ETF 轮动</span></a>
+<a data-nav="system" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
 </nav>
 </aside>
 <main class="main-content etf-rotation-page"><div class="workspace-topbar">
-<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
-<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>ETF 轮动</span></nav>
-<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
-<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+<button aria-controls="stock-sidebar" aria-expanded="false" aria-label="展开导航" class="workspace-menu" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav aria-label="面包屑" class="workspace-breadcrumb"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>ETF 轮动</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input autocomplete="off" data-global-stock-search-input="" id="workspace-stock-search" maxlength="24" placeholder="搜索股票代码" type="search"/><button aria-label="查看股票" data-global-stock-search-btn="" type="submit"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg></button></form>
+<a aria-label="数据与工作台设置" class="workspace-status-link" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 3 3 1 2 5-2 2v3l-4 3-3-1-3 1-4-3v-3l-2-2 2-5 3-1Z M15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0"></path></svg></a>
 </div>
 <header class="page-header etf-rotation-hero">
 <div>
@@ -44,38 +43,13 @@
 <h1>行业轮动 ETF</h1>
 <p>收盘后评估行业与明确映射的 ETF，下一交易日开盘起只做前向观察。允许空仓，不自动下单，也不写入个股选股统计。</p>
 </div>
-<span id="etf-rotation-model-badge" class="badge status-muted">加载模型...</span>
+<span class="badge status-muted" id="etf-rotation-model-badge">加载模型...</span>
 </header>
-<section id="etf-rotation-empty" class="card empty-state" hidden="">
+<section class="card empty-state" hidden="" id="etf-rotation-empty">
         尚无 ETF 轮动信号。数据任务完成后，这里会显示第一份不可变影子观察。
       </section>
-<section id="etf-rotation-content" hidden="">
-<div class="etf-rotation-metrics">
-<article class="stat-card">
-<span class="stat-label">信号日期</span>
-<strong id="etf-signal-date" class="stat-value">-</strong>
-</article>
-<article class="stat-card">
-<span class="stat-label">运行状态</span>
-<strong id="etf-signal-status" class="stat-value">-</strong>
-</article>
-<article class="stat-card">
-<span class="stat-label">市场状态</span>
-<strong id="etf-timing-state" class="stat-value">-</strong>
-</article>
-<article class="stat-card">
-<span class="stat-label">完整候选</span>
-<strong id="etf-universe-coverage" class="stat-value">-</strong>
-</article>
-<article class="stat-card">
-<span class="stat-label">达标 / 入选</span>
-<strong id="etf-selection-count" class="stat-value">-</strong>
-</article>
-<article class="stat-card">
-<span class="stat-label">最早观察</span>
-<strong id="etf-earliest-execution" class="stat-value">-</strong>
-</article>
-</div>
+<section hidden="" id="etf-rotation-content"><section class="card etf-selection-callout"><span class="empty-selection-mark">−</span><div><h2 id="etf-callout-title">等待真实快照</h2><p class="muted" id="etf-callout-note">允许空仓，等待条件满足</p></div><span class="badge status-muted">仅研究观察 · 尚未验证</span></section>
+<section class="card etf-concept-metrics"><div><span>行业覆盖</span><b id="etf-concept-coverage">-</b></div><div><span>完整数据</span><b id="etf-concept-complete">-</b></div><div><span>合格候选</span><b id="etf-concept-eligible">-</b></div><div><span>入选</span><b id="etf-concept-selected">-</b></div></section>
 <section class="etf-candidate-workspace"><section class="card">
 <div class="card-header with-actions">
 <div>
@@ -83,24 +57,14 @@
 <h2>行业与 ETF 候选</h2>
 </div>
 <span class="muted">硬门槛失败会保留证据，但不会入选</span>
-</div>
+<label><input id="etf-show-evidence" type="checkbox"/> 评分与明细</label></div>
 <div class="table-wrap etf-rotation-table-wrap">
-<table class="etf-rotation-table">
+<table class="etf-rotation-table etf-compact-table">
 <thead>
-<tr>
-<th>排名</th>
-<th>行业 / ETF</th>
-<th>综合分</th>
-<th>行业分</th>
-<th>ETF 分</th>
-<th>20日均成交额</th>
-<th>份额变化</th>
-<th>折溢价</th>
-<th>结论</th>
-</tr>
+<tr><th>行业 / ETF</th><th>周期阶段</th><th>数据状态</th><th>综合分</th><th>研究结论</th><th>行业 / ETF 分</th><th>20日均成交额</th><th>份额变化</th><th>折溢价</th></tr>
 </thead>
 <tbody id="etf-candidate-body">
-<tr><td colspan="9" class="muted">加载中...</td></tr>
+<tr><td class="muted" colspan="9">加载中...</td></tr>
 </tbody>
 </table>
 </div>
@@ -110,14 +74,39 @@
 <p class="card-kicker">Frozen Contract</p>
 <h2>固定口径</h2>
 </div>
-<ul id="etf-contract-list" class="plain-list"></ul>
+<ul class="plain-list" id="etf-contract-list"></ul>
 </article>
 <article class="card">
 <div class="card-header">
 <p class="card-kicker">Diagnostics</p>
 <h2>阻断与覆盖</h2>
 </div>
-<div id="etf-diagnostics" class="note-block muted">-</div>
+<div class="note-block muted" id="etf-diagnostics">-</div><details class="etf-context-disclosure"><summary>信号日期、市场状态与观察时钟</summary><div class="etf-rotation-metrics etf-context-metrics">
+<article class="stat-card">
+<span class="stat-label">信号日期</span>
+<strong class="stat-value" id="etf-signal-date">-</strong>
+</article>
+<article class="stat-card">
+<span class="stat-label">运行状态</span>
+<strong class="stat-value" id="etf-signal-status">-</strong>
+</article>
+<article class="stat-card">
+<span class="stat-label">市场状态</span>
+<strong class="stat-value" id="etf-timing-state">-</strong>
+</article>
+<article class="stat-card">
+<span class="stat-label">完整候选</span>
+<strong class="stat-value" id="etf-universe-coverage">-</strong>
+</article>
+<article class="stat-card">
+<span class="stat-label">达标 / 入选</span>
+<strong class="stat-value" id="etf-selection-count">-</strong>
+</article>
+<article class="stat-card">
+<span class="stat-label">最早观察</span>
+<strong class="stat-value" id="etf-earliest-execution">-</strong>
+</article>
+</div></details>
 </article>
 </section></section>
 <section class="card">
@@ -125,13 +114,12 @@
 <p class="card-kicker">Forward Evidence</p>
 <h2>下一开盘前向观察</h2>
 </div>
-<div id="etf-outcome-list" class="etf-outcome-list muted">尚无成熟观察。</div>
+<div class="etf-workflow research-workflow"><span><b>1</b>核对数据<small>校验来源与证据日期</small></span><i>→</i><span><b>2</b>更新行业阶段<small>沿用固定研究口径</small></span><i>→</i><span><b>3</b>复核候选条件<small>不满足则保持空仓</small></span><i>→</i><span><b>4</b>记录观察结论<small>等待下一观察窗口</small></span></div><div class="etf-outcome-list muted" id="etf-outcome-list">尚无成熟观察。</div>
 </section>
-
 </section>
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
-<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
-<script src="/static/js/etf-rotation.js?v=20260727etfcycle1"></script>
+<script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/etf-rotation.js?v=20260727etfcycle1&amp;ui=20261113fidelity2"></script>
 </body>
 </html>

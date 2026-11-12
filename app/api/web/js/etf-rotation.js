@@ -69,19 +69,15 @@ function renderCandidates(items = []) {
         : `<span class="badge status-muted" title="${escapeHtml(failedGateText(item.gates))}">未达标</span>`;
     return `
       <tr class="${item.is_selected ? 'is-selected' : ''}">
-        <td>${escapeHtml(item.rank_no)}</td>
-        <td>
-          <strong>${escapeHtml(item.sector_name)}</strong>
-          <small>${escapeHtml(item.ts_code)} · ${escapeHtml(item.fund_name)}</small>
-          <small>${escapeHtml(item.evidence?.sector_cycle_label || '周期待补证')}</small>
-        </td>
-        <td><b>${formatNumber(item.combined_score, 1)}</b></td>
-        <td>${formatNumber(item.sector_score, 1)}</td>
-        <td>${formatNumber(item.etf_score, 1)}</td>
+        <td><strong>${escapeHtml(item.sector_name)}</strong><small>${escapeHtml(item.ts_code)} · ${escapeHtml(item.fund_name)}</small></td>
+        <td><span class="badge status-muted">${escapeHtml(item.evidence?.sector_cycle_label || '周期待补证')}</span></td>
+        <td>${Object.keys(item.gates || {}).length > 0 && Object.values(item.gates || {}).every(Boolean) ? '条件完整' : '条件未满足'}</td>
+        <td><b>${formatNumber(item.combined_score,1)}</b></td>
+        <td>${conclusion}</td>
+        <td>${formatNumber(item.sector_score,1)} / ${formatNumber(item.etf_score,1)}</td>
         <td>${moneyText(item.average_amount_20d_yuan)}</td>
         <td class="${getPctClass(item.share_change_20d_pct) || ''}">${formatPercent(item.share_change_20d_pct)}</td>
-        <td class="${Math.abs(Number(item.premium_discount_pct)) > 1 ? 'down' : ''}">${formatPercent(item.premium_discount_pct)}</td>
-        <td>${conclusion}</td>
+        <td>${formatPercent(item.premium_discount_pct)}</td>
       </tr>
     `;
   }).join('');
@@ -111,13 +107,13 @@ function renderDiagnostics(item) {
   const diagnostics = item.diagnostics || {};
   const rejected = diagnostics.rejected_gate_counts || {};
   const rejectedText = Object.entries(rejected)
-    .map(([key, count]) => `${key}: ${count}`)
+    .map(([key, count]) => `${failedGateText({[key]: false})}: ${count}`)
     .join('；');
   qs('#etf-diagnostics').innerHTML = `
     <p><strong>完整池：</strong>${escapeHtml(diagnostics.complete_candidate_count || 0)} / ${escapeHtml(item.candidate_count || 0)}</p>
     <p><strong>择时上限：</strong>${escapeHtml(item.selection_cap || 0)} 只</p>
     <p><strong>阻断项：</strong>${escapeHtml(rejectedText || '无')}</p>
-    <p><strong>运行 ID：</strong>${escapeHtml(item.run_id || '-')}</p>
+    <details><summary>运行证据标识</summary><p>${escapeHtml(item.run_id || '-')}</p></details>
   `;
 }
 
@@ -125,14 +121,15 @@ function renderContract(spec = {}) {
   const list = qs('#etf-contract-list');
   if (!list) return;
   const data = spec.data_contract || {};
-  list.innerHTML = [
+  const rules = [
     `固定 ${spec.sectors?.length || 0} 个行业篮子，每个篮子只映射 1 只 ETF`,
     `行业至少 ${data.minimum_sector_history_days || '-'} 个交易日，ETF 至少 ${data.minimum_etf_history_days || '-'} 个交易日`,
     `行业周期至少 ${data.minimum_sector_cycle_history_days || '-'} 个交易日；只允许启动、主升或主升回踩`,
     `20 日平均成交额不低于 ${moneyText(data.minimum_average_amount_20d_yuan)}`,
     `收盘决策，下一交易日开盘开始观察；最多 ${spec.maximum_selections || 0} 只`,
     '零候选是合法结果；缺数据不补值、不自动调参、不自动交易',
-  ].map((text) => `<li>${escapeHtml(text)}</li>`).join('');
+  ];
+  list.innerHTML = rules.slice(0, 2).map(text=>`<li>${escapeHtml(text)}</li>`).join('') + `<li><details><summary>完整固定口径</summary><ul>${rules.slice(2).map(text=>`<li>${escapeHtml(text)}</li>`).join('')}</ul></details></li>`;
 }
 
 function renderSignal(item, spec) {
@@ -144,6 +141,12 @@ function renderSignal(item, spec) {
   qs('#etf-universe-coverage').textContent = `${complete} / ${item.candidate_count || 0}`;
   qs('#etf-selection-count').textContent = `${item.eligible_count || 0} / ${item.selected_count || 0}`;
   qs('#etf-earliest-execution').textContent = dateTimeText(item.earliest_execution_at);
+  qs('#etf-concept-coverage').textContent=String(item.candidate_count || 0);
+  qs('#etf-concept-complete').textContent=String(complete);
+  qs('#etf-concept-eligible').textContent=String(item.eligible_count || 0);
+  qs('#etf-concept-selected').textContent=String(item.selected_count || 0);
+  qs('#etf-callout-title').textContent=item.selected_count ? '已有影子候选' : item.status === 'blocked' ? '数据待补证，暂无合格候选' : '暂无合格候选';
+  qs('#etf-callout-note').textContent=`信号 ${item.trade_date || '-'} · ${item.status === 'blocked' ? '数据阻断，保留空仓；不填补证据' : '允许空仓，等待条件满足'}`;
   renderCandidates(item.candidates || []);
   renderOutcomes(item.outcomes || []);
   renderDiagnostics(item);
@@ -171,3 +174,5 @@ async function loadEtfRotation() {
 }
 
 document.addEventListener('DOMContentLoaded', loadEtfRotation);
+
+document.addEventListener('DOMContentLoaded',()=>{qs('#etf-show-evidence')?.addEventListener('change',e=>qs('.etf-compact-table')?.classList.toggle('show-evidence',e.target.checked));});

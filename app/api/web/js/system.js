@@ -32,38 +32,22 @@ async function loadSystemPage() {
     const readiness = data.readiness || {};
     const taskMap = Object.fromEntries(taskRuns.map((item) => [item.task_name, item]));
 
+    const baselineItems = data.data_baseline?.items || [];
     panels.api.innerHTML = renderTopMetricCard({
-      icon: '⌘',
-      title: 'API状态',
-      state: data.status === 'ok' ? '正常' : '异常',
-      stateClass: data.status === 'ok' ? 'ok' : 'error',
-      lines: [`响应时间 ${elapsedMs} ms`, `Readiness ${formatReadinessStatus(readiness.status)}`],
-    });
-    panels.db.innerHTML = renderTopMetricCard({
-      icon: '▣',
-      title: '数据库状态',
-      state: data.health?.database ? '正常' : '异常',
-      stateClass: data.health?.database ? 'ok' : 'error',
-      lines: [`MySQL ${data.health?.version || '-'}`, `状态缓存 ${data.cache?.ttl_seconds ?? '-'}s`],
+      title: '核心数据', state: `${baselineItems.length} 项`, stateClass: 'neutral',
+      lines: [`Readiness ${formatReadinessStatus(readiness.status)}`, `API ${data.status === 'ok' ? '正常' : '异常'} · 数据库 ${data.health?.database ? '正常' : '异常'} · ${elapsedMs}ms`],
     });
     panels.latestDate.innerHTML = renderTopMetricCard({
-      icon: '▦',
-      title: '最新交易日',
-      state: latest.daily_kline_latest_trade_date || '-',
-      stateClass: 'neutral',
-      lines: [
-        `选股交易日 ${latest.selection_result_latest_trade_date || '-'}`,
-        latest.daily_kline_latest_is_partial
-          ? `最新可用 ${latest.daily_kline_latest_available_trade_date || '-'} 仅 ${latest.daily_kline_latest_available_count || 0} 条`
-          : 'A股正常交易',
-      ],
+      title: '最近交易日', state: latest.daily_kline_latest_trade_date || '-', stateClass: 'neutral',
+      lines: [latest.daily_kline_latest_is_partial ? `仅 ${latest.daily_kline_latest_available_count || 0} 条，未完整` : '日线行情证据日期', `选股 ${latest.selection_result_latest_trade_date || '-'}`],
+    });
+    panels.db.innerHTML = renderTopMetricCard({
+      title: '任务状态', state: `${taskRuns.filter(r => r.status === 'running').length} 运行中`, stateClass: 'neutral',
+      lines: [`最近状态 ${taskRuns.length} 项 · 已登记 ${schedules.length} 项`, `数据库 ${data.health?.version || '-'}`],
     });
     panels.lastRun.innerHTML = renderTopMetricCard({
-      icon: '◷',
-      title: '最后更新时间',
-      state: findLastUpdate(latest, taskRuns),
-      stateClass: 'neutral',
-      lines: [`本次耗时 ${elapsedMs}ms`, `有状态 ${taskRuns.length} / 已登记 ${schedules.length}`],
+      title: '待处理队列', state: String((readiness.queues || []).reduce((sum,q)=>sum+Number(q.queued_count || 0),0)), stateClass: 'neutral',
+      lines: [`最近更新 ${findLastUpdate(latest, taskRuns)}`, '真实队列 · 不含未来定时任务'],
     });
 
     renderBaseline(data.data_baseline || {}, panels.baseline, panels.baselineOverall);
@@ -97,48 +81,13 @@ function renderReadiness(readiness = {}, container, overallEl) {
     overallEl.textContent = `${formatReadinessStatus(status)}${readiness.reasons?.length ? ` · ${readiness.reasons.length} 项提示` : ''}`;
     overallEl.className = `system-section-note ${status === 'ready' ? 'ok' : status === 'degraded' ? 'warn' : 'error'}`;
   }
-  const migrationCard = `
-    <article class="system-task-card">
-      <div class="system-task-card-head">
-        <strong>Schema Migration</strong>
-        <span class="badge ${migrations.health === 'healthy' ? 'status-ok' : 'status-error'}">${migrations.health === 'healthy' ? '已就绪' : '待迁移'}</span>
-      </div>
-      <div class="system-task-schedule">目标版本 ${escapeHtml(migrations.target || '-')}</div>
-      <div class="system-task-times">
-        <span>已应用 ${escapeHtml(migrations.applied ?? '-')}</span>
-        <span>待执行 ${escapeHtml(migrations.pending ?? '-')}</span>
-      </div>
-      <div class="system-task-result">${migrations.pending_versions?.length ? `待执行 ${escapeHtml(migrations.pending_versions.join(', '))}` : '数据库结构已通过启动前检查'}</div>
-    </article>
-  `;
-  const workerCards = workers.map((worker) => {
+  const workerRows = workers.map(worker => {
     const queue = queues[worker.worker_type] || {};
-    const healthClass = worker.health === 'healthy' && queue.health === 'healthy'
-      ? 'status-ok'
-      : worker.health === 'stale' || worker.health === 'missing' || queue.health === 'error'
-        ? 'status-error'
-        : 'status-warn';
-    const statusLabel = worker.health === 'healthy' ? (worker.process_status === 'running' ? '执行中' : '在线') : worker.health;
-    return `
-      <article class="system-task-card">
-        <div class="system-task-card-head">
-          <strong>${escapeHtml(worker.label || worker.worker_type)}</strong>
-          <span class="badge ${healthClass}">${escapeHtml(statusLabel || '-')}</span>
-        </div>
-        <div class="system-task-schedule">心跳 ${escapeHtml(worker.heartbeat_age_seconds ?? '-')} 秒前 · 阈值 ${escapeHtml(worker.stale_after_seconds ?? '-')} 秒</div>
-        <div class="system-task-times">
-          <span>排队 ${escapeHtml(queue.queued_count ?? 0)}</span>
-          <span>运行 ${escapeHtml(queue.running_count ?? 0)}</span>
-        </div>
-        <div class="system-task-result">
-          当前任务 ${escapeHtml(worker.current_job_id || '空闲')}
-          <div class="muted">失联 ${escapeHtml(queue.stale_running_count ?? 0)} · 24h失败 ${escapeHtml(queue.failed_24h_count ?? 0)}</div>
-        </div>
-      </article>
-    `;
+    const ok = worker.health === 'healthy' && queue.health === 'healthy';
+    return `<div class="worker-compact-row"><strong>${escapeHtml(worker.label || worker.worker_type)}</strong><span class="badge ${ok ? 'status-ok' : 'status-warn'}">${escapeHtml(worker.health === 'healthy' ? (worker.process_status === 'running' ? '执行中' : '在线') : worker.health || '未知')}</span><span>队列 ${escapeHtml(queue.queued_count ?? 0)}</span><small>心跳 ${escapeHtml(worker.heartbeat_age_seconds ?? '-')} 秒前 · 运行 ${escapeHtml(queue.running_count ?? 0)} · 失联 ${escapeHtml(queue.stale_running_count ?? 0)} · 24h失败 ${escapeHtml(queue.failed_24h_count ?? 0)}${worker.current_job_id ? ` · 当前任务 ${escapeHtml(worker.current_job_id)}` : ''}</small></div>`;
   }).join('');
-  const emptyWorkers = workers.length ? '' : '<div class="empty-state">暂无 worker 心跳；请检查对应 systemd 服务。</div>';
-  container.innerHTML = migrationCard + workerCards + emptyWorkers;
+  container.innerHTML = workerRows + `<details class="migration-compact"><summary>数据库结构 ${escapeHtml(migrations.applied ?? '-')} 已应用 / ${escapeHtml(migrations.pending ?? '-')} 待执行 · ${escapeHtml(migrations.health || '未知')}</summary><p>目标版本 ${escapeHtml(migrations.target || '-')} · 待迁移 ${escapeHtml((migrations.pending_versions || []).join(', ') || '无')}</p></details>` + (workers.length ? '' : '<div class="empty-state">暂无 Worker 心跳</div>');
+
 }
 
 function renderJobErrors(items = [], policy = {}) {
@@ -288,19 +237,9 @@ function renderMarketOpinionStorage(item = {}) {
   `;
 }
 
-function renderTopMetricCard({ icon, title, state, stateClass = 'neutral', lines = [] }) {
-  return `
-    <div class="top-metric-head">
-      <div class="top-metric-icon">${escapeHtml(icon)}</div>
-      <div>
-        <span>${escapeHtml(title)}</span>
-        <b class="${stateClass}">${escapeHtml(state)}</b>
-      </div>
-    </div>
-    <div class="top-metric-body no-spark">
-      <div>${lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}</div>
-    </div>
-  `;
+function renderTopMetricCard({ title, state, stateClass = 'neutral', lines = [] }) {
+  const paths = { '核心数据':'M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0', '最近交易日':'M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16', '任务状态':'M2 12h5l3-8 4 16 3-8h5', '待处理队列':'m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 4 8 5 8-5' };
+  return `<div class="top-metric-head"><div><span class="top-metric-label"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[title] || ''}"></path></svg>${escapeHtml(title)}</span><b class="${stateClass}">${escapeHtml(state)}</b></div></div><div class="top-metric-body no-spark"><div>${lines.map(line=>`<span>${escapeHtml(line)}</span>`).join('')}</div></div>`;
 }
 
 function findLastUpdate(latest = {}, taskRuns = []) {
@@ -324,22 +263,11 @@ function renderBaseline(baseline = {}, container, overallEl) {
   const validValues = items.map((item) => Number(item.value)).filter((value) => Number.isFinite(value));
   const overall = validValues.length ? validValues.reduce((sum, value) => sum + value, 0) / validValues.length : null;
   if (overallEl) overallEl.textContent = `覆盖率均值 ${overall == null ? '-' : `${overall.toFixed(2)}%`}`;
-  container.innerHTML = items.map((item) => {
-    const value = Number(item.value);
-    const pct = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
-    return `
-      <article class="baseline-card ${item.key || ''}">
-        <div class="baseline-card-head">
-          <span>${baselineIcon(item.key)}</span>
-          <b>${escapeHtml(item.label || '-')}</b>
-        </div>
-        <strong>${Number.isFinite(value) ? `${value.toFixed(2)}%` : '-'}</strong>
-        <div class="baseline-progress"><i style="width:${pct}%"></i></div>
-        <p>${escapeHtml(item.done ?? '-')} / ${escapeHtml(item.total ?? '-')}</p>
-        <small>${escapeHtml(item.unit || '记录数')}</small>
-      </article>
-    `;
-  }).join('');
+  container.innerHTML = `<table class="baseline-table"><thead><tr><th>数据类型</th><th>记录覆盖</th><th>覆盖率</th><th>证据</th></tr></thead><tbody>${items.map(item=>{
+    const v=item.value == null ? null : Number(item.value), pct=Number.isFinite(v) ? Math.max(0,Math.min(100,v)) : 0;
+    return `<tr><td>${escapeHtml(item.label || '-')}</td><td>${escapeHtml(item.done ?? '-')} / ${escapeHtml(item.total ?? '-')}</td><td><span class="baseline-coverage">${v == null || !Number.isFinite(v) ? '-' : v.toFixed(2)+'%'}<i style="width:${pct*.7}px"></i></span></td><td><span class="badge ${v == null ? 'status-warn' : 'status-muted'}">${v == null ? '待补证' : '真实覆盖'}</span></td></tr>`;
+  }).join('')}</tbody></table>`;
+
 }
 
 function baselineIcon(key) {

@@ -233,8 +233,9 @@ function renderBacktestChart(curve = []) {
     return;
   }
 
-  const width = 720;
-  const height = 336;
+  const width = Math.max(360, Math.round(svg.clientWidth || 720));
+  const height = 290;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   const padding = { left: 62, right: 26, top: 28, bottom: 44 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
@@ -333,8 +334,8 @@ function renderBacktestChart(curve = []) {
   };
   hitArea.addEventListener('pointermove', handleMove);
   hitArea.addEventListener('pointerdown', handleMove);
-  hitArea.addEventListener('pointerleave', () => showPoint(chart.length - 1));
-  showPoint(chart.length - 1);
+  hitArea.addEventListener('pointerleave', () => { focus.style.display = 'none'; });
+  focus.style.display = 'none';
 }
 
 
@@ -766,3 +767,5 @@ refreshBacktestPage().catch((error) => {
   if (messageShell) messageShell.hidden = false;
   if (message) message.textContent = `页面初始化失败：${error.message}`;
 });
+
+window.addEventListener('resize', () => renderBacktestChart(currentBacktestCurve));

@@ -3,50 +3,48 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>股票分析台 - 首页</title>
-<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
-<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
-<link rel="stylesheet" href="/static/css/base.css"/>
-<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
-<link rel="stylesheet" href="/static/css/components.css"/>
-<link rel="stylesheet" href="/static/css/pages.css?v=20260819marketalert1"/>
-<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
-
-<meta name="theme-color" content="#0B1018"/>
-<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
+<link href="/favicon.ico?v=20260729brand1" rel="icon" type="image/png"/>
+<link href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" rel="apple-touch-icon"/>
+<link href="/static/css/base.css" rel="stylesheet"/>
+<link href="/static/css/layout.css?v=20260723auth3" rel="stylesheet"/>
+<link href="/static/css/components.css" rel="stylesheet"/>
+<link href="/static/css/pages.css?v=20260819marketalert1" rel="stylesheet"/>
+<link href="/static/css/brand.css?v=20260729brand1" rel="stylesheet"/>
+<meta content="#0B1018" name="theme-color"/>
+<link href="/static/css/dark-design.css?v=20261113fidelity2" rel="stylesheet"/>
 </head>
 <body data-page="home" data-ui="dark-v1">
 <div class="app-shell dashboard-shell">
-<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<aside aria-label="主导航" class="sidebar" id="stock-sidebar">
 <div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
-<nav class="nav" aria-label="工作台页面">
-<a href="/" data-nav="home" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
-<a href="/selection" data-nav="selection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
-<a href="/tracking" data-nav="tracking"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
-<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
-<a href="/backtest" data-nav="backtest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
-<a href="/strategies" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
-<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a><a href="/etf-rotation" data-nav="etf-rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
-<a href="/system" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+<nav aria-label="工作台页面" class="nav">
+<a aria-current="page" class="active" data-nav="home" href="/"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a data-nav="selection" href="/selection"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a data-nav="tracking" href="/tracking"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 17l5-6 5 3 8-10M3 21h18"></path></svg><span>跟踪复盘</span></a>
+<a data-nav="portfolio" href="/portfolio"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a data-nav="backtest" href="/backtest"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a data-nav="strategies" href="/strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 4 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a data-nav="trade-strategies" href="/trade-strategies"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6h7m4 0h7M3 12h12m4 0h2M3 18h4m4 0h10M14 6a2 2 0 1 0-4 0 2 2 0 0 0 4 0M19 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0M11 18a2 2 0 1 0-4 0 2 2 0 0 0 4 0"></path></svg><span>交易策略</span></a><a data-nav="etf-rotation" href="/etf-rotation"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M12 3v9h9M21 12a9 9 0 1 1-9-9a9 9 0 0 1 9 9Z"></path></svg><span>ETF 轮动</span></a>
+<a data-nav="system" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
 </nav>
 </aside>
 <main class="main-content dashboard-main home-dashboard home-portal-main"><div class="workspace-topbar">
-<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
-<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>首页</span></nav>
-<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
-<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+<button aria-controls="stock-sidebar" aria-expanded="false" aria-label="展开导航" class="workspace-menu" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav aria-label="面包屑" class="workspace-breadcrumb"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>首页</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input autocomplete="off" data-global-stock-search-input="" id="workspace-stock-search" maxlength="24" placeholder="搜索股票代码" type="search"/><button aria-label="查看股票" data-global-stock-search-btn="" type="submit"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg></button></form>
+<a aria-label="数据与工作台设置" class="workspace-status-link" href="/system"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M9 3h6l1 3 3 1 2 5-2 2v3l-4 3-3-1-3 1-4-3v-3l-2-2 2-5 3-1Z M15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0"></path></svg></a>
 </div>
 <section class="home-portal-frame home-card-layout-frame">
 <header class="home-card-titlebar">
 <h1>市场总览</h1>
 <span>看清市场，再做决策</span>
 <div class="dashboard-actions home-card-actions">
-<a class="btn btn-primary" href="/selection">运行选股</a>
-<a class="btn btn-secondary" href="/tracking">查看复盘</a>
+<a class="btn btn-primary" href="/selection"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"></path></svg>运行选股</a>
+<a class="btn btn-secondary" href="/tracking"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16"></path></svg>查看复盘</a>
 </div></header>
-
-<section id="home-market-risk-alert" class="market-risk-alert" aria-live="assertive" hidden=""></section><section class="home-card-market-grid">
+<section aria-live="assertive" class="market-risk-alert" hidden="" id="home-market-risk-alert"></section><section class="home-card-market-grid">
 <article class="home-card-market-item market-strength-item">
 <span>市场强度</span>
 <strong id="home-market-strength">-</strong>
@@ -60,10 +58,10 @@
 <article class="home-card-market-item market-breadth-item">
 <span>涨 / 跌 / 平</span>
 <strong id="home-market-breadth">-</strong>
-<div class="market-breadth-bar" aria-hidden="true">
-<i id="home-breadth-up" class="up" style="width:0%"></i>
-<i id="home-breadth-flat" class="flat" style="width:0%"></i>
-<i id="home-breadth-down" class="down" style="width:0%"></i>
+<div aria-hidden="true" class="market-breadth-bar">
+<i class="up" id="home-breadth-up" style="width:0%"></i>
+<i class="flat" id="home-breadth-flat" style="width:0%"></i>
+<i class="down" id="home-breadth-down" style="width:0%"></i>
 </div>
 <small id="home-market-active">-</small>
 </article>
@@ -75,9 +73,9 @@
 <article class="home-card-market-item home-market-time-card">
 <div class="market-time-title">行情时间 <em>ⓘ</em></div>
 <div class="market-time-body">
-<div class="market-time-clock" aria-hidden="true">
-<i id="home-clock-hour" class="clock-hand hour"></i>
-<i id="home-clock-minute" class="clock-hand minute"></i>
+<div aria-hidden="true" class="market-time-clock">
+<i class="clock-hand hour" id="home-clock-hour"></i>
+<i class="clock-hand minute" id="home-clock-minute"></i>
 </div>
 <div class="market-time-info">
 <b id="home-market-session">交易状态</b>
@@ -86,37 +84,37 @@
 <small id="home-market-weekday">星期-</small>
 </div>
 </div>
-<small id="home-market-countdown" class="market-time-countdown">距离早盘 --:--:--</small>
+<small class="market-time-countdown" id="home-market-countdown">距离早盘 --:--:--</small>
 </article>
-</section><section class="home-overview-grid"><section class="home-leadership-panel card">
+</section><section class="home-overview-grid"><section class="card home-market-visual"><div class="card-header with-actions"><h2>市场走势</h2><span class="badge status-muted">行业涨跌截面</span></div><p class="muted" id="home-visual-evidence">真实行业快照 · 非指数分时</p><div class="home-market-visual-chart" id="home-market-visual-chart"></div></section><section class="home-leadership-panel card">
 <div class="home-research-panel-head">
 <div>
-<span>Market Mainline & Sector Cycle</span>
-<h3>市场主线与行业周期雷达</h3>
+<span>Market Mainline &amp; Sector Cycle</span>
+<h3>市场主线与行业周期</h3>
 </div>
 <b id="home-leadership-status">市场主线：计算中...</b>
 </div>
-<div id="home-leadership-grid" class="home-leadership-grid">
+<div class="home-leadership-grid" id="home-leadership-grid">
 <div class="empty-state">加载中...</div>
 </div>
-</section><section class="home-card-tracking-section card">
+</section></section><section class="home-lower-grid"><section class="home-card-tracking-section card">
 <div class="card-header with-actions">
 <div>
 <p class="card-kicker">Tracking</p>
-<h2>最近跟踪预览</h2>
+<h2>最近跟踪</h2>
 </div>
-<span id="home-tracking-summary" class="muted">加载中...</span>
+<span class="muted" id="home-tracking-summary">加载中...</span>
 </div>
-<div id="home-tracking-preview" class="home-tracking-card-grid">
+<div class="home-tracking-card-grid" id="home-tracking-preview">
 <div class="empty-state">加载中...</div>
 </div>
-</section></section><section class="home-card-sector-grid">
+</section><section class="home-card-sector-grid card">
 <article class="sector-card positive-sector-card">
 <div class="card-header">
 <p class="card-kicker">Fund Inflow</p>
 <h2>资金流入板块</h2>
 </div>
-<div id="home-strong-sectors" class="home-sector-list">
+<div class="home-sector-list" id="home-strong-sectors">
 <div class="empty-state">加载中...</div>
 </div>
 </article>
@@ -125,17 +123,17 @@
 <p class="card-kicker">Fund Outflow</p>
 <h2>资金流出板块</h2>
 </div>
-<div id="home-weak-sectors" class="home-sector-list">
+<div class="home-sector-list" id="home-weak-sectors">
 <div class="empty-state">加载中...</div>
 </div>
 </article>
-</section><section class="home-market-timing-section card">
+<h2 class="sector-unified-title">热点与板块资金</h2></section></section><details class="home-research-disclosure"><summary><strong>市场择时与研究情景</strong><span>仅研究观察 · 展开证据</span></summary><section class="home-market-timing-section card">
 <div class="card-header with-actions">
 <div>
 <p class="card-kicker">Market Timing</p>
 <h2>市场择时</h2>
 </div>
-<span id="home-market-timing-summary" class="muted">加载中...</span>
+<span class="muted" id="home-market-timing-summary">加载中...</span>
 </div>
 <div class="home-market-timing-grid">
 <article class="home-market-timing-main" id="home-market-timing-main">
@@ -144,12 +142,12 @@
 <b id="home-market-timing-state">加载中...</b>
 <small id="home-market-timing-action">等待市场快照</small>
 </article>
-<div id="home-market-timing-signals" class="home-market-timing-signals">
+<div class="home-market-timing-signals" id="home-market-timing-signals">
 <div class="empty-state">加载中...</div>
 </div>
 </div>
-<div id="home-market-timing-reasons" class="home-market-timing-reasons"></div>
-<section class="home-research-layer" aria-label="研究影子层">
+<div class="home-market-timing-reasons" id="home-market-timing-reasons"></div>
+<section aria-label="研究影子层" class="home-research-layer">
 <article class="home-research-panel home-timing-v20-panel">
 <div class="home-research-panel-head">
 <div>
@@ -158,7 +156,7 @@
 </div>
 <b id="home-timing-v20-status">加载中...</b>
 </div>
-<div id="home-timing-v20-body" class="home-timing-v20-body">
+<div class="home-timing-v20-body" id="home-timing-v20-body">
 <div class="empty-state">加载中...</div>
 </div>
 </article>
@@ -170,21 +168,20 @@
 </div>
 <b id="home-scenario-status">加载中...</b>
 </div>
-<div id="home-scenario-forecast" class="home-scenario-grid">
+<div class="home-scenario-grid" id="home-scenario-forecast">
 <div class="empty-state">加载中...</div>
 </div>
 </article>
 </section>
-
-</section><section class="home-hot-theme-section card">
+</section></details><details class="home-research-disclosure"><summary><strong>热点主题与短线情绪</strong><span>展开详细研究</span></summary><section class="home-hot-theme-section card">
 <div class="card-header with-actions">
 <div>
 <p class="card-kicker">Hot Themes</p>
 <h2>热点主题</h2>
 </div>
-<span id="home-hot-theme-summary" class="muted">加载中...</span>
+<span class="muted" id="home-hot-theme-summary">加载中...</span>
 </div>
-<div id="home-hot-themes" class="home-hot-theme-list">
+<div class="home-hot-theme-list" id="home-hot-themes">
 <div class="empty-state">加载中...</div>
 </div>
 </section><section class="home-short-emotion-section card">
@@ -193,7 +190,7 @@
 <p class="card-kicker">Emotion Watch</p>
 <h2>短线情绪观察</h2>
 </div>
-<span id="home-emotion-summary" class="muted">加载中...</span>
+<span class="muted" id="home-emotion-summary">加载中...</span>
 </div>
 <div class="home-emotion-grid">
 <article class="home-emotion-panel">
@@ -201,7 +198,7 @@
 <h3>连板池</h3>
 <span>高度 / 题材 / 封板状态</span>
 </div>
-<div id="home-limit-up-pool" class="home-emotion-list">
+<div class="home-emotion-list" id="home-limit-up-pool">
 <div class="empty-state">加载中...</div>
 </div>
 </article>
@@ -210,15 +207,15 @@
 <h3>热点强势观察</h3>
 <span>冲板潜力 / 分歧反包 / 观察池</span>
 </div>
-<div id="home-reversal-watch-pool" class="home-emotion-list">
+<div class="home-emotion-list" id="home-reversal-watch-pool">
 <div class="empty-state">加载中...</div>
 </div>
 </article>
 </div>
-</section></section>
+</section></details></section>
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
-<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
-<script src="/static/js/home.js?v=20260819marketalert1"></script>
+<script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/home.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
 </body>
 </html>

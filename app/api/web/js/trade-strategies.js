@@ -56,22 +56,20 @@ function renderTradeStrategyDetail(item) {
     return;
   }
   if (title) title.textContent = item.display_name || item.strategy_id;
-  detail.innerHTML = `
-    <div><strong>策略 ID</strong></div>
-    <div>${escapeHtml(item.strategy_id || '-')}</div>
-    <div><strong>版本</strong></div>
-    <div>${escapeHtml(item.version || '-')}</div>
-    <div><strong>状态</strong></div>
-    <div>${escapeHtml(item.status || '-')}</div>
-    <div><strong>买入规则</strong></div>
-    <div>${escapeHtml(ruleSummary(item.buy_rule || {}))}</div>
-    <div><strong>卖出规则</strong></div>
-    <div>${escapeHtml(ruleSummary(item.sell_rule || {}))}</div>
-    <div><strong>成本默认</strong></div>
-    <div>${item.cost_rule?.enabled ? '开启' : '默认关闭'}</div>
-    <div><strong>成交约束</strong></div>
-    <div>${item.execution_rule?.enabled ? '开启' : '默认关闭'}</div>
-  `;
+  const rows = [
+    ['入场条件', ruleSummary(item.buy_rule || {})],
+    ['持有与退出', ruleSummary(item.sell_rule || {})],
+    ['仓位管理', '持仓资金与候选数量由回测参数确定；本规则不自动下单或补仓。'],
+    ['风险约束', `成本默认${item.cost_rule?.enabled ? '开启' : '关闭'}；成交约束默认${item.execution_rule?.enabled ? '开启' : '关闭'}。可在回测高级设置中显式调整，不直接下单。`],
+  ];
+  detail.innerHTML = rows.map(([title,text],i) => `<section class="trade-rule-row"><b>${String(i+1).padStart(2,'0')}</b><strong>${title}</strong><p>${escapeHtml(text)}</p></section>`).join('');
+  const overview = qs('#trade-parameter-overview');
+  if (overview) overview.innerHTML = [
+    ['规则类型',item.display_name || item.strategy_id], ['版本',item.version || '-'],
+    ['持有/退出偏移',item.sell_rule?.exit_day_offset != null ? `${item.sell_rule.exit_day_offset} 个交易日` : '按规则条件'],
+    ['成交成本', item.cost_rule?.enabled ? '默认开启' : '默认关闭'], ['成交约束',item.execution_rule?.enabled ? '默认开启' : '默认关闭'],
+  ].map(([label,value])=>`<div class="parameter-line"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('') + `<details class="research-details"><summary>规则标识与原始参数</summary><p>${escapeHtml(item.strategy_id || '-')} · ${escapeHtml(item.status || '-')}</p><pre>${escapeHtml(JSON.stringify({buy:item.buy_rule,sell:item.sell_rule},null,2))}</pre></details>`;
+
 }
 
 async function loadTradeStrategies() {

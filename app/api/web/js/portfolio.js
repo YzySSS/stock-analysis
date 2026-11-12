@@ -250,6 +250,7 @@ function renderOutcomeTable(outcomes = []) {
 
 function renderTable(positions = []) {
   const body = qs('#portfolio-table-body');
+  renderIndustryAllocation(positions);
   if (!body) return;
   if (!positions.length) {
     body.innerHTML = renderEmptyRow(10, '暂无持仓，先在上方添加一只股票。');
@@ -725,3 +726,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadStrategies();
   await loadPortfolio();
 });
+
+function renderIndustryAllocation(positions=[]) {
+  const chart=qs('#portfolio-industry-chart'); if(!chart) return;
+  const groups=new Map();let total=0;
+  for(const p of positions){const value=Number(p.market?.quote?.latest_price)*Number(p.quantity);if(!Number.isFinite(value)||value<=0)continue;const industry=p.industry || p.market?.basic?.industry || '行业待补证';groups.set(industry,(groups.get(industry)||0)+value);total+=value;}
+  if(!total){chart.classList.add('empty-state');chart.textContent='暂无有效持仓市值，添加记录后显示真实行业占比。';return;}
+  chart.classList.remove('empty-state');chart.innerHTML=[...groups].sort((a,b)=>b[1]-a[1]).map(([name,value])=>`<div class="allocation-row"><span>${escapeHtml(name)}</span><div><i style="width:${value/total*100}%"></i></div><b>${(value/total*100).toFixed(1)}%</b></div>`).join('');
+}
+document.addEventListener('DOMContentLoaded',()=>{qs('#portfolio-show-evidence')?.addEventListener('change',e=>qs('.portfolio-table-card')?.classList.toggle('show-evidence',e.target.checked));});
