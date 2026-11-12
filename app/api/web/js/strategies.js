@@ -536,11 +536,12 @@ function renderForwardEvidence(evidence = null) {
   const isContaminated = evidence.evidence_status === 'contaminated_retained';
   const isAutomaticObservation = protocolInfo.observation_source === 'automatic_observation';
   const observationTargetDays = Number(protocolInfo.minimum_observation_days || 0);
+  const isContinuousObservation = isAutomaticObservation && protocolInfo.continuous === true;
   const entryRuleLabel = protocolInfo.entry_rule === 'same_day_open'
     ? '当日开盘（09:25 信号）'
     : '次日可交易开盘';
   const sourceLabel = isAutomaticObservation
-    ? `自动 ${observationTargetDays || '-'} 日配对观察`
+    ? (isContinuousObservation ? '持续自动配对观察' : `自动 ${observationTargetDays || '-'} 日配对观察`)
     : '固定前瞻观察';
   status.className = `badge ${isContaminated ? 'status-error' : 'status-warn'}`;
   status.textContent = isContaminated
@@ -553,7 +554,9 @@ function renderForwardEvidence(evidence = null) {
     : isPreliminary
     ? '已达到预设的初步观察门槛，但这不是交易有效性认证；继续积累样本并观察稳定性。'
     : isAutomaticObservation
-      ? `新策略按冻结版本自动收集 ${observationTargetDays || '约定'} 个交易日的 09:25 配对样本；与用户手动选股及其 14 天统计完全分开。`
+      ? (isContinuousObservation
+        ? '按冻结实现持续收集 09:25 配对研究样本；与旧实验及手动选股分开，不自动调参或晋级。'
+        : `新策略按冻结版本自动收集 ${observationTargetDays || '约定'} 个交易日的 09:25 配对样本；与用户手动选股及其 14 天统计完全分开。`)
       : '按冻结版本持续收集真实盘后信号；成熟收益、零候选日和 AI 降级日都会保留。';
 
   protocol.className = 'strategy-forward-protocol';

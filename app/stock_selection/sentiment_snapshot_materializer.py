@@ -1679,6 +1679,7 @@ class SentimentSnapshotMaterializationService:
         baseline_strategy_id: str,
         candidate_strategy_id: str,
         max_picks: int | None = None,
+        observation_window: tuple[datetime, datetime] | None = None,
     ) -> dict[str, Any]:
         """Run one enabled baseline and one shadow candidate on the same inputs.
 
@@ -1727,6 +1728,10 @@ class SentimentSnapshotMaterializationService:
             minimum_coverage_ratio=minimum_coverage,
         ) as prepared:
             audit = prepared.audit
+            if observation_window and not (
+                observation_window[0] <= audit.decision_as_of < observation_window[1]
+            ):
+                raise SentimentSnapshotMaterializationError('decision outside preregistered observation window')
             if not audit.passed:
                 prepared.commit()
                 raise SentimentSnapshotInputQualityError(audit)

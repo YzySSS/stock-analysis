@@ -13,6 +13,10 @@ automatic_observation_defaults:
   max_picks: 3
   minimum_realtime_coverage: 0.90
   engine: sentiment_snapshot_pair
+  continuous:
+    enabled: true
+    start_on: "2026-11-13"
+    epoch: opening_window_v2_20261113
 
 strategies:
   - id: a_share_sentiment

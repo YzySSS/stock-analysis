@@ -24,7 +24,7 @@ from starlette.responses import Response
 
 PASSWORD_SCHEME = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 600_000
-SESSION_VERSION = 1
+SESSION_VERSION = 2
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
 PUBLIC_EXACT_PATHS = frozenset(
@@ -132,6 +132,7 @@ class SiteAuthSettings:
     cookie_samesite: str = "lax"
     max_failed_attempts: int = 5
     failed_attempt_window_seconds: int = 5 * 60
+    session_epoch: str = '1'
 
     @classmethod
     def from_env(cls, environment: Mapping[str, str] | None = None) -> "SiteAuthSettings":
@@ -178,6 +179,10 @@ class SiteAuthSettings:
             session_secret=session_secret,
             session_ttl_seconds=session_ttl_seconds,
             cookie_secure=cookie_secure,
+            session_epoch=_required_environment_value(
+                {'SITE_AUTH_SESSION_EPOCH': values.get('SITE_AUTH_SESSION_EPOCH', '1')},
+                'SITE_AUTH_SESSION_EPOCH',
+            ),
         )
 
 
@@ -255,7 +260,13 @@ class SiteAuthenticator:
     ) -> None:
         self.settings = settings
         self.clock = clock
-        self._session_secret = settings.session_secret.encode("utf-8")
+        # Never expose the password hash in a token. A password or administrative
+        # epoch change invalidates every old token, even with an unchanged secret.
+        self._session_secret = hmac.new(
+            settings.session_secret.encode('utf-8'),
+            json.dumps([settings.username, settings.password_hash, settings.session_epoch]).encode('utf-8'),
+            hashlib.sha256,
+        ).digest()
         self.login_limiter = LoginAttemptLimiter(
             max_failed_attempts=settings.max_failed_attempts,
             window_seconds=settings.failed_attempt_window_seconds,

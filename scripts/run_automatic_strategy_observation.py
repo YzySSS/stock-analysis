@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +116,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.poll_seconds <= 0:
         parser.error("--poll-seconds must be positive")
 
-    today = date.fromisoformat(args.date) if args.date else date.today()
+    local_today = datetime.now(ZoneInfo('Asia/Shanghai')).date()
+    today = date.fromisoformat(args.date) if args.date else local_today
+    if not args.dry_run and today != local_today:
+        parser.error('historical dates are dry-run only; cannot backfill a prospective decision')
     service = AutomaticObservationCampaignService()
     deployment = verify_deployed_strategy_tags(service, today=today)
     policies = deployment["policies"]
@@ -220,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, default=str))
             return 0
+        service.prepare_campaigns(policies=pending_policies, implementation_commit=deployment['head'])
         readiness = wait_for_call_auction_snapshot(
             service,
             today=today,
@@ -237,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.finish(
                 TASK_NAME,
                 task_run_id,
-                "success",
+                "partial_success",
                 "automatic observation skipped: call auction snapshot not ready",
                 result,
             )
@@ -251,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.finish(
             TASK_NAME,
             task_run_id,
-            "success",
+            result['status'],
             "automatic paired strategy observation completed",
             result,
         )

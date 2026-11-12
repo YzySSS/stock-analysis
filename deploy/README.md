@@ -9,6 +9,48 @@
 模板不包含数据库密码、API token、TLS 私钥或站点登录凭据。部署前确认项目
 `.env` 和 MySQL 已独立准备；TLS 由 Certbot 在服务器上签发，证书文件不进入仓库。
 
+
+## 2026-11 研究可靠性更新
+
+本轮新增 migration `0038`（独立 cohort），不改变任何旧策略参数或历史快照。
+部署前运行完整回归与 migration plan；先对 `strategy_observation_campaign` 备份 schema/行/大小/SHA-256，再在 smoke 库验证幂等，最后生产 `--apply --target 0038`。
+
+自动观察从 2026-11-13 开新持续 cohort，不继续填旧 30 日实验。决策、计算和发布必须处于上海时间 `[09:25,09:29)`，迟到任务只留缺口。连续观察并不代表策略有效；实现或依赖变化必须更换 epoch（`automatic_observation_defaults.continuous`），不能把新实现放进旧 cohort。
+
+`requirements.lock.txt` 是本次实际测试环境的版本锁，不要用不受控 `pip install -U` 改研究环境。它不是多平台 wheel hash 锁；本轮未升级生产依赖。
+
+### 周/月诊断报告
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_strategy_research_review.py --period weekly
+PYTHONPATH=. .venv/bin/python scripts/run_strategy_research_review.py --period monthly
+```
+
+默认写 `logs/research-reviews/`（日志目录须可写），文件名带内容哈希，重跑不会覆盖旧内容。Cron 模板新增周六 06:30 与每月 1 日 06:40 两条任务；不要为了加这两条任务无差别覆盖手工维护的其它 Cron。
+报告为 research-only；诊断扣费固定 0.25%，未验证涨跌停/停牌/T+1 成交，不应称为真实可交易收益。v0.6 固定采样、完整模拟执行、参数搜索与晋级流程仍属后续阶段。
+
+### 登录会话撤销
+
+新版本上线首次会话格式变更会要求重新登录。改密码后，即使保留 session secret，旧会话也会失效。无需改密的全设备退出：
+
+```bash
+.venv/bin/python scripts/configure_site_auth.py --env-file /etc/stock-analysis/app.env --revoke-sessions
+systemctl restart stock-analysis-api.service
+```
+
+这是跨重启/跨实例的认证版本失效，不是浏览器 cookie 删除；生效点为 API 加载新配置。常规 `/logout` 仍只退出当前浏览器，不声称单 token 服务端撤销。
+
+### 专用用户模板的迁移边界（不能直接套在旧 /root 部署）
+
+五个 unit 模板现在假设：
+
+- 代码和完整 Git 元数据（供实现锁读取）位于 `/opt/stock-analysis/current`，root 拥有、应用用户只读；venv 在此路径重新创建，不能搬动含旧绝对 shebang 的 venv。
+- 专用无登录账号/组 `stock-analysis`；配置使用 root-only `/etc/stock-analysis/app.env`，由 systemd `EnvironmentFile` 加载，**不要 source 应用 .env**。
+- 数据写入位于 `/var/lib/stock-analysis`、日志在 `/var/log/stock-analysis`，只有这两处可写；原有 `logs`、`data_cache` 及实际使用的其它运行写目录必须先盘点、迁移和建立只读代码树中的符号链接，不能依赖代码目录写权限。
+- 迁移前备份旧代码目录、unit、Cron 与配置。为确切 Git checkout 配置 system Git `safe.directory`（只允许这一个 root 拥有的路径，禁止 `*`），保证低权限账号能执行研究指纹读取。
+- 用该用户验证 DB/Redis/供应商访问、migration --check、日志/缓存、API 和四 Worker，再启用 `ProtectHome=true`、`ProtectSystem=strict` 等模板沙箱。Cron 的账号、源码路径、日志和备份目的目录必须单独同步；模板中的 `/root/stock-analysis-backups` 不能由新服务账号访问。
+- 切换后本地 health 成功再探公网，检查五服务和队列；不通过时恢复旧 unit 与目录、daemon-reload 后重启。不要把“模板已改”记成“生产已非 root”。
+
 ## 依赖
 
 - Ubuntu/Debian：Nginx、OpenSSL、Certbot、Python 3 venv。

@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo
 
 from app.shared.db import mysql_conn
 from app.shared.strategy_loader import StrategyLoader
+from app.shared.research_identity import implementation_identity
 from app.stock_selection.forward_observation import (
     ForwardObservationRepository,
     ForwardProtocolDriftError,
@@ -27,6 +29,12 @@ PREREGISTERED_INTRADAY_EXEMPTION = (
 )
 AUTOMATIC_OBSERVATION_MODE = "paired_first_n_trade_days"
 SUPPORTED_OBSERVATION_ENGINE = "sentiment_snapshot_pair"
+OBSERVATION_DEADLINE = '09:29:00'
+
+
+def observation_window(signal_date: date, now: datetime) -> bool:
+    local = now.astimezone(ZoneInfo('Asia/Shanghai')) if now.tzinfo else now
+    return local.date() == signal_date and dt_time(9, 25) <= local.time() < dt_time(9, 29)
 
 
 def _json(value: Any) -> str:
@@ -95,6 +103,7 @@ class AutomaticObservationPolicy:
     max_picks: int
     minimum_realtime_coverage: float
     engine: str
+    campaign_epoch: str = ''
 
     @property
     def campaign_id(self) -> str:
@@ -103,7 +112,7 @@ class AutomaticObservationPolicy:
             (
                 f"{self.candidate_strategy_id}_{self.candidate_strategy_version}_"
                 f"{self.start_on.isoformat()}_{self.execution_time}_"
-                f"{self.target_trade_days}d"
+                f"{self.target_trade_days}d{('_' + self.campaign_epoch) if self.campaign_epoch else ''}"
             ),
         )
 
@@ -252,6 +261,12 @@ def discover_automatic_observation_policies(
                 engine=engine,
             )
         )
+    continuous = defaults.get('continuous') or {}
+    if continuous.get('enabled') and today >= date.fromisoformat(str(continuous['start_on'])):
+        policies = [replace(
+            policy, start_on=date.fromisoformat(str(continuous['start_on'])),
+            target_trade_days=0, campaign_epoch=str(continuous['epoch']),
+        ) for policy in policies]
     return policies
 
 
@@ -289,11 +304,14 @@ class AutomaticObservationCampaignRepository:
                     FROM stock_realtime_snapshot realtime
                     INNER JOIN stock_basic sb ON sb.code=realtime.code
                     WHERE realtime.trade_date=%s
+                      AND realtime.quote_time >= %s
+                      AND realtime.quote_time < %s
                       AND COALESCE(realtime.is_stale, 0)=0
                       AND sb.instrument_type='stock'
                       AND COALESCE(sb.is_delisted, 0)=0
                     """,
-                    (signal_date,),
+                    (signal_date, f'{signal_date} {execution_time}',
+                     f'{signal_date} {OBSERVATION_DEADLINE}'),
                 )
                 row = cursor.fetchone() or {}
         actual = int(row.get("actual_entities") or 0)
@@ -305,6 +323,7 @@ class AutomaticObservationCampaignRepository:
         ready = bool(
             latest_quote_time
             and latest_quote_time >= required_quote_time
+            and latest_quote_time < datetime.combine(signal_date, dt_time(9, 29))
             and coverage >= minimum_coverage
         )
         return {
@@ -328,7 +347,7 @@ class AutomaticObservationCampaignRepository:
         protocol_ids: Mapping[str, str],
     ) -> dict[str, Any]:
         metadata = {
-            "mode": AUTOMATIC_OBSERVATION_MODE,
+            "mode": AUTOMATIC_OBSERVATION_MODE if policy.target_trade_days else 'continuous_paired',
             "engine": policy.engine,
             "implementation_commit": implementation_commit,
             "manual_selection_table": "selection_result",
@@ -337,6 +356,8 @@ class AutomaticObservationCampaignRepository:
                 "strategy_forward_pick",
             ],
             "writes_selection_result": False,
+            "implementation_identity": implementation_identity(),
+            "clock_contract": 'opening_window_v2',
         }
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -408,6 +429,11 @@ class AutomaticObservationCampaignRepository:
                 f"automatic observation campaign drift: {', '.join(changed)}"
             )
         row["metadata_json"] = _json_value(row.get("metadata_json"), {})
+        if (row['metadata_json'].get('implementation_identity') != metadata['implementation_identity']
+                or row['metadata_json'].get('clock_contract') != 'opening_window_v2'):
+            raise ForwardProtocolDriftError(
+                'research implementation/clock drift: use a new campaign epoch; old evidence is retained'
+            )
         row["protocol_ids_json"] = actual["protocol_ids_json"]
         return row
 
@@ -439,11 +465,11 @@ class AutomaticObservationCampaignRepository:
                     SET completed_trade_days=%s,
                         last_signal_trade_date=%s,
                         status=CASE
-                            WHEN %s >= target_trade_days THEN 'completed'
+                            WHEN target_trade_days > 0 AND %s >= target_trade_days THEN 'completed'
                             ELSE 'active'
                         END,
                         completed_on=CASE
-                            WHEN %s >= target_trade_days
+                            WHEN target_trade_days > 0 AND %s >= target_trade_days
                             THEN COALESCE(completed_on, %s)
                             ELSE NULL
                         END
@@ -492,6 +518,7 @@ class AutomaticObservationCampaignService:
         forward_repository: ForwardObservationRepository | None = None,
         materializer: SentimentSnapshotMaterializationService | None = None,
         strategy_service: StrategyService | None = None,
+        clock=None,
     ) -> None:
         self.loader = loader or StrategyLoader()
         self.campaigns = (
@@ -502,6 +529,7 @@ class AutomaticObservationCampaignService:
             materializer or SentimentSnapshotMaterializationService()
         )
         self.strategy_service = strategy_service or StrategyService()
+        self.clock = clock or (lambda: datetime.now(ZoneInfo('Asia/Shanghai')))
 
     def policies(self, *, today: date) -> list[AutomaticObservationPolicy]:
         return discover_automatic_observation_policies(
@@ -517,6 +545,8 @@ class AutomaticObservationCampaignService:
     ) -> dict[str, Any]:
         if not policies:
             return {"ready": False, "reason": "no_automatic_observation_policy"}
+        if not observation_window(today, self.clock()):
+            return {'ready': False, 'reason': 'outside_observation_window'}
         minimum = max(policy.minimum_realtime_coverage for policy in policies)
         execution_times = {policy.execution_time for policy in policies}
         if len(execution_times) != 1:
@@ -565,12 +595,23 @@ class AutomaticObservationCampaignService:
                 )
             )
         return {
-            "status": "success",
+            "status": "partial_success" if any(r['status'] == 'missed_window' for r in results) else "success",
             "signal_trade_date": today.isoformat(),
             "campaign_count": len(results),
             "campaigns": results,
             "selection_result_written": False,
         }
+
+    def prepare_campaigns(self, *, policies, implementation_commit):
+        """Register expected work before waiting on quotes, including day-one failures."""
+        for policy in policies:
+            self.campaigns.ensure_campaign(
+                policy, implementation_commit=implementation_commit,
+                protocol_ids={role: policy.protocol_id(role, sid, version)
+                              for role, sid, version in (
+                                  ('baseline', policy.baseline_strategy_id, policy.baseline_strategy_version),
+                                  ('candidate', policy.candidate_strategy_id, policy.candidate_strategy_version))},
+            )
 
     def _run_policy(
         self,
@@ -591,6 +632,14 @@ class AutomaticObservationCampaignService:
                 policy.candidate_strategy_version,
             ),
         }
+        existing = self.campaigns.campaign_state(policy.campaign_id)
+        if str(existing.get('status') or '') == 'completed':
+            return self._campaign_payload(existing, status='completed')
+        if str(existing.get('last_signal_trade_date') or '')[:10] == today.isoformat():
+            return self._campaign_payload(existing, status='deduplicated')
+        if today >= policy.start_on and not observation_window(today, self.clock()):
+            return {'status': 'missed_window', 'campaign_id': policy.campaign_id,
+                    'reason': 'outside_observation_window', 'selection_result_written': False}
         campaign = self.campaigns.ensure_campaign(
             policy,
             implementation_commit=implementation_commit,
@@ -611,7 +660,11 @@ class AutomaticObservationCampaignService:
             baseline_strategy_id=policy.baseline_strategy_id,
             candidate_strategy_id=policy.candidate_strategy_id,
             max_picks=policy.max_picks,
+            observation_window=(datetime.combine(today, dt_time(9, 25)),
+                                datetime.combine(today, dt_time(9, 29))),
         )
+        if not observation_window(today, self.clock()):
+            raise RuntimeError('observation deadline crossed; no opening signal recorded')
         if materialized.get("status") != "success":
             raise RuntimeError(
                 f"paired materialization failed for {policy.campaign_id}"
@@ -685,6 +738,8 @@ class AutomaticObservationCampaignService:
                 "execution_time": policy.execution_time,
                 "entry_rule": policy.entry_rule,
                 "writes_selection_result": False,
+                "actual_deployment_commit": implementation_commit,
+                "clock_contract": 'opening_window_v2',
             }
             records.append(
                 {
@@ -700,6 +755,8 @@ class AutomaticObservationCampaignService:
                 }
             )
 
+        if not observation_window(today, self.clock()):
+            raise RuntimeError('observation deadline crossed before finalization; no opening signal recorded')
         observations = self.forward.finalize_paired_success(records)
         campaign = self.campaigns.refresh_progress(policy.campaign_id)
         return {
@@ -741,20 +798,21 @@ class AutomaticObservationCampaignService:
             "run_source": AUTOMATIC_OBSERVATION_SOURCE,
             "campaign_id": policy.campaign_id,
             "paired_role": role,
+            "continuous": policy.target_trade_days == 0,
             "writes_selection_result": False,
         }
         return ForwardProtocolSpec(
             protocol_id=protocol_id,
             strategy_id=strategy_id,
             strategy_version=strategy_version,
-            protocol_version="automatic_open_0925_v1",
+            protocol_version="automatic_open_0925_v2",
             execution_time=policy.execution_time,
             timezone=policy.timezone,
             entry_rule=policy.entry_rule,
             horizons=policy.horizons,
             benchmark_codes=policy.benchmark_codes,
-            minimum_observation_days=policy.target_trade_days,
-            minimum_candidate_count=policy.target_trade_days * policy.max_picks,
+            minimum_observation_days=policy.target_trade_days or 30,
+            minimum_candidate_count=(policy.target_trade_days or 30) * policy.max_picks,
             immutable_tag=immutable_tag,
             implementation_commit=implementation_commit,
             strategy_config_hash=strategy_config_hash(meta, config),
@@ -767,7 +825,8 @@ class AutomaticObservationCampaignService:
                 "strategy_meta": meta,
                 "strategy_config": config,
                 "methodology": {
-                    "signal_clock": "call_auction_09_25_asia_shanghai",
+                    "signal_clock": "opening_window_09_25_to_09_29_asia_shanghai",
+                    "latest_decision_exclusive": OBSERVATION_DEADLINE,
                     "entry_rule": policy.entry_rule,
                     "exit_rules": {
                         "1d": "signal_day_close",
@@ -778,6 +837,7 @@ class AutomaticObservationCampaignService:
                     "sample_policy": (
                         f"retain_exactly_{policy.target_trade_days}_successful_"
                         "paired_trade_days_including_zero_pick_days"
+                        if policy.target_trade_days else 'continuous_paired_trade_days_including_zero_pick_days'
                     ),
                     "manual_separation": (
                         "never_write_selection_result_or_manual_14_day_statistics"

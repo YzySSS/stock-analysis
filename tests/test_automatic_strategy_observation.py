@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -207,6 +207,7 @@ class AutomaticObservationServiceTests(unittest.TestCase):
             forward_repository=forward,
             materializer=materializer,
             strategy_service=strategy_service,
+            clock=lambda: datetime(2026, 8, 11, 9, 26),
         )
 
         result = service._run_policy(
@@ -221,6 +222,7 @@ class AutomaticObservationServiceTests(unittest.TestCase):
             baseline_strategy_id=policy.baseline_strategy_id,
             candidate_strategy_id=policy.candidate_strategy_id,
             max_picks=3,
+            observation_window=(datetime(2026, 8, 11, 9, 25), datetime(2026, 8, 11, 9, 29)),
         )
         self.assertEqual(forward.ensure_protocol.call_count, 2)
         protocol_specs = [
@@ -397,7 +399,9 @@ class AutomaticObservationExecutionTests(unittest.TestCase):
                 "scripts.run_automatic_strategy_observation.wait_for_call_auction_snapshot"
             ) as wait_for_snapshot,
             patch("builtins.print"),
+            patch("scripts.run_automatic_strategy_observation.datetime") as runtime_clock,
         ):
+            runtime_clock.now.return_value = datetime(2026, 8, 11, 9, 26)
             result = run_observation_main(
                 ["--date", "2026-08-11", "--wait-seconds", "0"]
             )
@@ -422,7 +426,7 @@ class AutomaticObservationFrontendTests(unittest.TestCase):
         self.assertIn("历史证据已污染 · 禁止比较", source)
         self.assertIn("当日开盘（09:25 信号）", source)
         self.assertIn("与用户手动选股及其 14 天统计完全分开", source)
-        self.assertIn("strategies.js?v=20260810v051", page)
+        self.assertIn("strategies.js?v=20261112research2", page)
 
 
 def _policy(

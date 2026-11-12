@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from app.orchestration.adj_factor_schema import ensure_adj_factor_manifest_schema
 from app.orchestration.automatic_observation_schema import ensure_automatic_observation_schema
+from app.orchestration.continuous_observation_schema import ensure_continuous_observation_schema
 from app.jobs.schema import ensure_job_ops_schema
 from app.orchestration.durable_task_schema import ensure_durable_task_schema
 from app.orchestration.etf_rotation_schema import ensure_etf_rotation_schema
@@ -148,6 +149,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         "sentiment V0.6 canonical event evidence and stock relation schema",
         ensure_sentiment_v06_schema,
     ),
+    Migration('0038', 'independent continuous observation cohorts', ensure_continuous_observation_schema),
 )
 
 

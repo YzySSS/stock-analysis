@@ -1395,6 +1395,7 @@ class ForwardObservationService:
                 "observation_source": protocol.get("observation_source"),
                 "strategy_version": protocol.get("strategy_version"),
                 "protocol_version": protocol.get("protocol_version"),
+                "continuous": bool((_from_json(protocol.get('request_json'), {}) or {}).get('continuous')),
                 "execution_time": _time_text(protocol.get("execution_time")),
                 "timezone": protocol.get("timezone"),
                 "entry_rule": protocol.get("entry_rule"),

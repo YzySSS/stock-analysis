@@ -22,6 +22,7 @@ AUTH_KEYS = (
     "SITE_AUTH_SESSION_SECRET",
     "SITE_AUTH_SESSION_TTL_SECONDS",
     "SITE_AUTH_COOKIE_SECURE",
+    "SITE_AUTH_SESSION_EPOCH",
 )
 
 
@@ -135,8 +136,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--keep-session-secret",
         action="store_true",
-        help="保留现有会话密钥；默认轮换并让全部旧会话失效",
+        help="保留现有会话密钥；改密仍会使旧会话失效",
     )
+    parser.add_argument('--revoke-sessions', action='store_true',
+                        help='只轮换认证版本；重启 API 后退出所有设备，不更改密码')
     return parser
 
 
@@ -144,6 +147,12 @@ def main() -> int:
     args = build_parser().parse_args()
     env_path = args.env_file.resolve()
     current = _read_current_values(env_path)
+    if args.revoke_sessions:
+        if not current.get('SITE_AUTH_PASSWORD_HASH'):
+            raise SystemExit('请先配置站点登录凭据')
+        _replace_env_values(env_path, {'SITE_AUTH_SESSION_EPOCH': secrets.token_hex(16)})
+        print('认证版本已轮换；重启 API 后全部旧会话失效（密码未改动）。')
+        return 0
     username = str(args.username or current.get("SITE_AUTH_USERNAME", "")).strip()
     if not username:
         raise SystemExit("首次配置必须提供 --username")
@@ -169,7 +178,7 @@ def main() -> int:
     )
     print(f"站点登录配置已更新: username={username}")
     print(f"环境文件: {env_path} (mode=600)")
-    print(f"旧会话失效: {'否' if keep_existing_secret else '是'}")
+    print('旧会话失效: 是（重启 API 后生效）')
     return 0
 
 

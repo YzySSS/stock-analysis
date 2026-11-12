@@ -17,6 +17,19 @@ SPEC_PATH = Path(__file__).resolve().parent / "specs" / "strategy_factor_evaluat
 PROTOCOL_ID = "strategy_factor_evaluation_v2"
 DEFAULT_BENCHMARK_CODE = "000300.SH"
 DEFAULT_ROUND_TRIP_COST_PCT = 0.25
+MAX_OUTCOME_ATTEMPTS = 5
+
+
+def _retryable_outcome_sql(alias: str) -> str:
+    # Aliases are internal constants, never request input. Ready labels and
+    # genuine execution blocks remain terminal; missing data retries are bounded.
+    return f"""COALESCE((
+        {alias}.execution_status='blocked'
+        AND {alias}.block_reason IN ('no_next_tradable_open',
+            'no_horizon_exit_quote', 'missing_adjustment_factor', 'incomplete_adjustment_path')
+        AND COALESCE(JSON_EXTRACT({alias}.metadata_json, '$.attempt_count'), 1) < {MAX_OUTCOME_ATTEMPTS}
+        AND {alias}.computed_at < DATE_SUB(NOW(), INTERVAL 1 DAY)
+    ), 0)"""
 
 
 def mature_horizon_cutoffs(
@@ -224,6 +237,22 @@ def load_factor_evaluation_spec() -> dict[str, Any]:
 
 def factor_evaluation_spec_hash() -> str:
     return _sha256(load_factor_evaluation_spec())
+
+
+def version_adjusted_path_evaluation(payload: dict[str, Any]) -> None:
+    """A new sampling/label contract must not overwrite legacy evaluation IDs."""
+    spec = load_factor_evaluation_spec()
+    spec = {**spec, 'protocol_id': 'strategy_factor_evaluation_adjusted_path_v3',
+            'sampling': 'first_valid_stock_day_366_calendar_days_50000_row_budget',
+            'label_contract': 'adjusted_path_v2_optimization_eligible_only'}
+    for section in ('evaluations', 'groups', 'ablations'):
+        for row in payload.get(section, []):
+            old_id = row['evaluation_id']
+            row['evaluation_id'] = old_id[:100] + ':ap2:' + _sha256(old_id)[:20]
+            if section == 'evaluations':
+                row['protocol_id'] = spec['protocol_id']
+                row['spec_hash'] = _sha256(spec)
+                row['details_json']['methodology'] = spec
 
 
 def maturity_state(
@@ -1006,7 +1035,7 @@ class StrategyFactorEvaluationRepository:
                 maturity_params: list[Any] = []
                 for horizon, cutoff_date in maturity_cutoffs:
                     maturity_clauses.append(
-                        """
+                        f"""
                         (
                             m.trade_date <= %s
                             AND EXISTS (
@@ -1019,6 +1048,7 @@ class StrategyFactorEvaluationRepository:
                                       FROM strategy_factor_outcome mo
                                       WHERE mo.factor_snapshot_id=ms.id
                                         AND mo.horizon_days=%s
+                                        AND NOT {_retryable_outcome_sql('mo')}
                                   )
                             )
                         )
@@ -1074,6 +1104,7 @@ class StrategyFactorEvaluationRepository:
                             ON os.id=o.factor_snapshot_id
                         WHERE os.manifest_id=%s
                           AND o.horizon_days IN ({horizon_placeholders})
+                          AND NOT {_retryable_outcome_sql('o')}
                         """,
                         (manifest["id"], *horizon_values),
                     )
@@ -1203,6 +1234,18 @@ class StrategyFactorEvaluationRepository:
                 benchmark_rows = {
                     row["trade_date"]: row for row in (cursor.fetchall() or [])
                 }
+                cursor.execute(
+                    f"""SELECT factor_snapshot_id, metadata_json, block_reason,
+                               label_hash, computed_at
+                        FROM strategy_factor_outcome
+                        WHERE factor_snapshot_id IN ({placeholders})
+                          AND horizon_days=%s""",
+                    [*(int(row['id']) for row in factor_rows), horizon_days],
+                )
+                prior_outcomes = {
+                    int(row['factor_snapshot_id']): row
+                    for row in (cursor.fetchall() or [])
+                }
         for row in price_rows:
             code = str(row["code"])
             price_by_code[code].setdefault("rows", []).append(row)
@@ -1243,10 +1286,12 @@ class StrategyFactorEvaluationRepository:
             elif not exit_row or exit_price is None or exit_price <= 0:
                 status = "blocked"
                 block_reason = "no_horizon_exit_quote"
+            elif not entry_adj or entry_adj <= 0 or not exit_adj or exit_adj <= 0:
+                status = "blocked"
+                block_reason = "missing_adjustment_factor"
             else:
-                adjusted = bool(entry_adj and exit_adj)
-                entry_basis = entry_price * entry_adj if adjusted else entry_price
-                exit_basis = exit_price * exit_adj if adjusted else exit_price
+                entry_basis = entry_price * entry_adj
+                exit_basis = exit_price * exit_adj
                 gross_return = (exit_basis / entry_basis - 1) * 100
                 cost_adjusted = gross_return - DEFAULT_ROUND_TRIP_COST_PCT
                 highs: list[float] = []
@@ -1255,14 +1300,20 @@ class StrategyFactorEvaluationRepository:
                     row_adj = _to_float(price_row.get("adj_factor"))
                     high = _to_float(price_row.get("high"))
                     low = _to_float(price_row.get("low"))
-                    if high is not None:
-                        highs.append(high * row_adj if adjusted and row_adj else high)
-                    if low is not None:
-                        lows.append(low * row_adj if adjusted and row_adj else low)
-                if highs:
+                    if row_adj and row_adj > 0 and high and high > 0 and low and low > 0:
+                        highs.append(high * row_adj)
+                        lows.append(low * row_adj)
+                complete_path = (
+                    len(prices.get('rows') or []) == horizon_days
+                    and len(highs) == horizon_days
+                    and len(lows) == horizon_days
+                )
+                if complete_path:
                     mfe = (max(highs) / entry_basis - 1) * 100
-                if lows:
                     mae = (min(lows) / entry_basis - 1) * 100
+                else:
+                    status = 'blocked'
+                    block_reason = 'incomplete_adjustment_path'
 
             excess = (
                 gross_return - benchmark_return
@@ -1279,15 +1330,32 @@ class StrategyFactorEvaluationRepository:
                 "gross_return_pct": gross_return,
                 "benchmark_return_pct": benchmark_return,
                 "execution_status": status,
+                "mfe_pct": mfe,
+                "mae_pct": mae,
+                "methodology_version": "adjusted_path_v2",
             }
+            prior = prior_outcomes.get(int(factor_row['id'])) or {}
+            prior_metadata = _json_value(prior.get('metadata_json'), {})
+            retry_history = list(prior_metadata.get('retry_history') or [])
+            if prior:
+                retry_history.append({
+                    'label_hash': prior.get('label_hash'),
+                    'block_reason': prior.get('block_reason'),
+                    'computed_at': str(prior.get('computed_at')),
+                })
             metadata = {
+                "methodology_version": "adjusted_path_v2",
+                "attempt_count": int(prior_metadata.get('attempt_count') or (1 if prior else 0)) + 1,
+                "retry_history": retry_history[-MAX_OUTCOME_ATTEMPTS:],
                 "entry_rule": "next_tradable_open",
                 "exit_rule": f"market_trading_day_{horizon_days}_close",
                 "adjustment_status": (
                     "adj_factor_total_return"
                     if entry_adj and exit_adj
-                    else "raw_price_explicit_fallback"
+                    else "missing_adjustment_factor"
                 ),
+                "path_risk_status": "ready" if mfe is not None and mae is not None else "incomplete_path",
+                "optimization_eligible": status == 'ready' and mfe is not None and mae is not None,
                 "round_trip_cost_pct": DEFAULT_ROUND_TRIP_COST_PCT,
                 "industry_excess_status": "not_available",
             }
@@ -1340,7 +1408,7 @@ class StrategyFactorEvaluationRepository:
                     with conn.cursor() as cursor:
                         cursor.execute(
                             f"""
-                            SELECT s.trade_date, s.score, s.factor_json,
+                            SELECT s.trade_date, s.code, s.score, s.factor_json,
                                    s.contribution_json,
                                    JSON_UNQUOTE(
                                        JSON_EXTRACT(
@@ -1358,6 +1426,8 @@ class StrategyFactorEvaluationRepository:
                                AND o.execution_status='ready'
                             WHERE s.strategy_id=%s
                               AND s.strategy_version=%s
+                              AND s.trade_date >= DATE_SUB(CURDATE(), INTERVAL 366 DAY)
+                              AND JSON_EXTRACT(o.metadata_json, '$.optimization_eligible') = true
                               AND {scope_sql}
                               AND (
                                   m.trace_mode IN (
@@ -1366,7 +1436,8 @@ class StrategyFactorEvaluationRepository:
                                   )
                                   OR %s='selected_top_k'
                               )
-                            ORDER BY s.trade_date, s.code
+                            ORDER BY s.trade_date, s.code, m.decision_as_of, s.id
+                            LIMIT 50001
                             """,
                             (
                                 int(horizon),
@@ -1376,6 +1447,14 @@ class StrategyFactorEvaluationRepository:
                             ),
                         )
                         records = cursor.fetchall() or []
+                if len(records) > 50000:
+                    raise RuntimeError('evaluation exceeds 50000-row budget; narrow the research window')
+                # A stock/day is one sampling unit, not one independent sample
+                # per 15-minute materialization. The first valid decision wins.
+                unique = {}
+                for record in records:
+                    unique.setdefault((record['trade_date'], record['code']), record)
+                records = list(unique.values())
                 computed = evaluate_factor_records(
                     records,
                     strategy_id=strategy_id,
@@ -1384,6 +1463,7 @@ class StrategyFactorEvaluationRepository:
                     horizon_days=int(horizon),
                     factor_keys=factor_keys,
                 )
+                version_adjusted_path_evaluation(computed)
                 self._save_evaluation_payload(computed)
                 written += len(computed["evaluations"])
                 summaries.append(

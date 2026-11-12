@@ -5,14 +5,25 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
-WorkingDirectory=/root/.openclaw/workspace/stock-analysis
-Environment=PYTHONPATH=/root/.openclaw/workspace/stock-analysis
+EnvironmentFile=/etc/stock-analysis/app.env
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/stock-analysis /var/log/stock-analysis
+StateDirectory=stock-analysis
+LogsDirectory=stock-analysis
+UMask=0077
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+User=stock-analysis
+Group=stock-analysis
+WorkingDirectory=/opt/stock-analysis/current
+Environment=PYTHONPATH=/opt/stock-analysis/current
 Environment=API_HOST=127.0.0.1
 Environment=API_PORT=8000
-ExecStartPre=/root/.openclaw/workspace/stock-analysis/.venv/bin/python -m app.orchestration.migrate --check
-ExecStart=/root/.openclaw/workspace/stock-analysis/.venv/bin/python -m uvicorn app.api.main:app --app-dir /root/.openclaw/workspace/stock-analysis --host 127.0.0.1 --port 8000
+ExecStartPre=/opt/stock-analysis/current/.venv/bin/python -m app.orchestration.migrate --check
+ExecStart=/opt/stock-analysis/current/.venv/bin/python -m uvicorn app.api.main:app --app-dir /opt/stock-analysis/current --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
 
