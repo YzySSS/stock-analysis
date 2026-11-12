@@ -1,261 +1,254 @@
 <!DOCTYPE html>
+
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1" />
-  <link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" />
-  <title>股票分析控制台 - 选股中心</title>
-  <link rel="stylesheet" href="/static/css/base.css" />
-  <link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3" />
-  <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260819marketalert1" />
-  <link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
+<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
+<title>股票分析台 - 选股中心</title>
+<link rel="stylesheet" href="/static/css/base.css"/>
+<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
+<link rel="stylesheet" href="/static/css/components.css"/>
+<link rel="stylesheet" href="/static/css/pages.css?v=20260819marketalert1"/>
+<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
+
+<meta name="theme-color" content="#0B1018"/>
+<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
 </head>
-<body data-page="selection">
-  <div class="app-shell dashboard-shell">
-    <aside class="sidebar">
-      <div class="brand">股票分析控制台</div>
-      <nav class="nav">
-        <a href="/" data-nav="home">首页</a>
-        <a href="/selection" data-nav="selection">选股中心</a>
-        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
-        <a href="/portfolio" data-nav="portfolio">持仓管理</a>
-        <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">选股策略</a>
-        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
-        <a href="/system" data-nav="system">数据状态</a>
-      </nav>
-    </aside>
+<body data-page="selection" data-ui="dark-v1">
+<div class="app-shell dashboard-shell">
+<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
+<nav class="nav" aria-label="工作台页面">
+<a href="/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a href="/selection" data-nav="selection" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a href="/tracking" data-nav="tracking"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
+<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a href="/backtest" data-nav="backtest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a href="/strategies" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a><a href="/etf-rotation" data-nav="etf-rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
+<a href="/system" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+</nav>
+</aside>
+<main class="main-content dashboard-main selection-dashboard"><div class="workspace-topbar">
+<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>选股中心</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
+<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+</div>
+<header class="page-header dashboard-hero compact-hero">
+<div>
+<p class="eyebrow">Selection</p>
+<h1>选股中心</h1>
+<p class="page-subtitle">从策略到候选，保留每一次研究证据。达标不足则少选，允许空结果。</p>
+</div>
+<div class="header-actions">
+<button id="refresh-selection-page" class="btn btn-secondary" type="button">刷新页面数据</button>
+</div>
+</header>
+<section id="selection-market-risk-alert" class="market-risk-alert" aria-live="assertive" hidden=""></section>
+<section class="selection-command-grid">
+<article class="card command-card selection-run-panel">
+<div class="selection-run-title">
+<span class="run-title-icon">▶</span>
+<h2>运行选股</h2>
+</div>
+<form id="selection-form" class="selection-terminal-form">
+<div class="terminal-form-row">
+<label for="strategy-id">策略选择</label>
+<select id="strategy-id"></select>
+</div>
 
-    <main class="main-content dashboard-main selection-dashboard">
-      <header class="page-header dashboard-hero compact-hero">
-        <div>
-          <p class="eyebrow">Selection</p>
-          <h1>选股中心</h1>
-          <p class="page-subtitle">这里主要回答“这次选了谁、属于哪套策略、结果后来怎么样”。当前规则：最大入选数量是上限，分数阈值是底线；达标不足 3 只就少出，0 只达标就明确显示无达标股。</p>
-        </div>
-        <div class="header-actions">
-          <button id="refresh-selection-page" class="btn btn-secondary" type="button">刷新页面数据</button>
-        </div>
-      </header>
 
-      <section id="selection-market-risk-alert" class="market-risk-alert" aria-live="assertive" hidden></section>
+<div class="terminal-form-row limit-row">
+<label for="limit">最大选股数量</label>
+<div class="input-with-unit">
+<input id="limit" type="number" value="3" min="1" max="100"/>
+<span>只</span>
+</div>
+</div>
+<div class="terminal-form-row score-row">
+<div class="score-row-head">
+<label for="selection-min-score">评分阈值</label>
+<input id="selection-min-score" type="number" value="60" min="0" max="100" step="1"/>
+</div>
+<input id="selection-min-score-range" class="score-range" type="range" min="0" max="100" value="60" step="1"/>
+<div class="score-scale"><span>0</span><span>50</span><span>100</span></div>
+</div>
+<div class="terminal-form-row time-row">
+<label for="selection-run-time-input">运行时间</label>
+<span class="date-input-shell selection-datetime-shell" id="selection-run-time-shell">
+<span id="selection-run-time-display" class="date-input-display">自动使用最新交易日</span>
+<input id="selection-run-time-input" type="datetime-local" aria-label="运行时间"/>
+</span>
+</div>
+<details class="selection-universe-options"><summary>股票池与市场板块 · 当前全市场</summary><div class="terminal-form-row instrument-row">
+<label for="instrument-type">股票池类型</label>
+<select id="instrument-type" class="visually-hidden-select">
+<option value="stock">股票</option>
+<option value="etf" disabled="">ETF（数据链建设中）</option>
+<option value="index" disabled="">指数（数据链建设中）</option>
+</select>
+<div class="instrument-segments" data-instrument-segments="">
+<button class="active" type="button" data-instrument-value="stock">全市场</button>
+<button type="button" data-instrument-value="etf" disabled="" aria-disabled="true" data-tooltip="ETF 选股数据与策略链建设中">ETF · 建设中</button>
+<button type="button" data-instrument-value="index" disabled="" aria-disabled="true" data-tooltip="指数选股数据与策略链建设中">指数 · 建设中</button>
+</div>
+<small class="instrument-support-note">当前仅开放股票选股；ETF 持仓行情不受影响。</small>
+</div><div class="terminal-form-row board-row">
+<label for="market-board">市场板块</label>
+<select id="market-board" class="visually-hidden-select">
+<option value="all">全市场</option>
+<option value="main">主板</option>
+<option value="chinext">创业板</option>
+<option value="star">科创板</option>
+<option value="bse">北交所</option>
+</select>
+<div class="instrument-segments board-segments" data-board-segments="">
+<button class="active" type="button" data-board-value="all">全市场</button>
+<button type="button" data-board-value="main">主板</button>
+<button type="button" data-board-value="chinext">创业板</button>
+<button type="button" data-board-value="star">科创板</button>
+<button type="button" data-board-value="bse">北交所</button>
+</div>
+</div></details><div class="terminal-actions">
+<button id="selection-run-submit" class="btn btn-primary run-main-btn" type="submit">
+<span class="run-btn-idle-icon">▶</span>
+<span class="run-btn-spinner" aria-hidden="true"></span>
+<span class="run-btn-label">开始运行选股</span>
+</button>
+<button id="refresh-strategies" class="btn btn-secondary" type="button">刷新策略</button>
+</div>
+</form>
+</article>
+<article class="card strategy-console-card selection-strategy-panel">
+<div class="card-header with-actions">
+<div>
+<p class="card-kicker">Strategy</p>
+<h2>策略详情 & 因子状态</h2>
+<p class="muted" id="selection-top-summary">选择策略后显示数据状态</p>
+</div>
+<div class="actions">
+<a class="btn btn-secondary" href="/strategies">因子分析</a>
+</div>
+</div>
+<div id="strategy-summary" class="list-stack empty-state">加载中...</div>
+<div id="selection-factor-bars" class="selection-factor-bars empty-state">因子分布加载中...</div>
+</article>
 
-      <section class="selection-command-grid">
-        <article class="card command-card selection-run-panel">
-          <div class="selection-run-title">
-            <span class="run-title-icon">▶</span>
-            <h2>运行选股</h2>
-          </div>
+</section><article class="card selection-run-status-card">
+<div class="card-header">
+<p class="card-kicker">Latest Run</p>
+<h2>最近运行状态</h2>
+</div>
+<div class="selection-run-status-grid">
+<div class="selection-success-ring">
+<strong id="selection-success-rate">-</strong>
+<span>达标率</span>
+</div>
+<div class="selection-run-metrics">
+<div><span>运行状态</span><b id="selection-run-state">待运行</b></div>
+<div><span>最新运行时间</span><b id="selection-run-time">-</b></div>
+<div><span>达标数量</span><b id="selection-qualified-count">-</b></div>
+<div><span>平均得分</span><b id="selection-avg-score">-</b></div>
+</div>
+</div>
+<div id="selection-live-run" class="selection-live-run" hidden="">
+<div class="selection-live-run-head">
+<span id="selection-live-run-phase">准备运行</span>
+<b id="selection-live-run-elapsed">00:00</b>
+</div>
+<div class="selection-live-progress" aria-hidden="true">
+<i id="selection-live-run-progress"></i>
+</div>
+<div class="selection-live-run-foot">
+<span id="selection-live-run-remaining">预计约 2 分钟</span>
+<button id="selection-cancel-run" class="btn btn-secondary btn-small selection-cancel-run" type="button" hidden="">取消任务</button>
+</div>
+</div>
+<div class="selection-history-mini">
+<div class="muted">本次结果评分分布</div>
+<svg id="selection-score-sparkline" viewBox="0 0 320 88" preserveAspectRatio="none"></svg>
+</div>
+</article>
+<section class="card selection-results-console">
+<div class="card-header with-actions">
+<div>
+<p class="card-kicker">Selection Pool</p>
+<h2>选股结果</h2>
+<p class="muted" id="selection-summary-line">加载中...</p>
+</div>
+<div class="actions">
+<button id="refresh-results" class="btn btn-secondary" type="button">刷新结果</button>
+</div>
+</div>
 
-          <form id="selection-form" class="selection-terminal-form">
-            <div class="terminal-form-row">
-              <label for="strategy-id">策略选择</label>
-              <select id="strategy-id"></select>
-            </div>
-
-            <div class="terminal-form-row instrument-row">
-              <label for="instrument-type">股票池类型</label>
-              <select id="instrument-type" class="visually-hidden-select">
-                <option value="stock">股票</option>
-                <option value="etf" disabled>ETF（数据链建设中）</option>
-                <option value="index" disabled>指数（数据链建设中）</option>
-              </select>
-              <div class="instrument-segments" data-instrument-segments>
-                <button class="active" type="button" data-instrument-value="stock">全市场</button>
-                <button type="button" data-instrument-value="etf" disabled aria-disabled="true" data-tooltip="ETF 选股数据与策略链建设中">ETF · 建设中</button>
-                <button type="button" data-instrument-value="index" disabled aria-disabled="true" data-tooltip="指数选股数据与策略链建设中">指数 · 建设中</button>
-              </div>
-              <small class="instrument-support-note">当前仅开放股票选股；ETF 持仓行情不受影响。</small>
-            </div>
-
-            <div class="terminal-form-row board-row">
-              <label for="market-board">市场板块</label>
-              <select id="market-board" class="visually-hidden-select">
-                <option value="all">全市场</option>
-                <option value="main">主板</option>
-                <option value="chinext">创业板</option>
-                <option value="star">科创板</option>
-                <option value="bse">北交所</option>
-              </select>
-              <div class="instrument-segments board-segments" data-board-segments>
-                <button class="active" type="button" data-board-value="all">全市场</button>
-                <button type="button" data-board-value="main">主板</button>
-                <button type="button" data-board-value="chinext">创业板</button>
-                <button type="button" data-board-value="star">科创板</button>
-                <button type="button" data-board-value="bse">北交所</button>
-              </div>
-            </div>
-
-            <div class="terminal-form-row limit-row">
-              <label for="limit">最大选股数量</label>
-              <div class="input-with-unit">
-                <input id="limit" type="number" value="3" min="1" max="100" />
-                <span>只</span>
-              </div>
-            </div>
-
-            <div class="terminal-form-row score-row">
-              <div class="score-row-head">
-                <label for="selection-min-score">评分阈值</label>
-                <input id="selection-min-score" type="number" value="60" min="0" max="100" step="1" />
-              </div>
-              <input id="selection-min-score-range" class="score-range" type="range" min="0" max="100" value="60" step="1" />
-              <div class="score-scale"><span>0</span><span>50</span><span>100</span></div>
-            </div>
-
-            <div class="terminal-form-row time-row">
-              <label for="selection-run-time-input">运行时间</label>
-              <span class="date-input-shell selection-datetime-shell" id="selection-run-time-shell">
-                <span id="selection-run-time-display" class="date-input-display">自动使用最新交易日</span>
-                <input id="selection-run-time-input" type="datetime-local" aria-label="运行时间" />
-              </span>
-            </div>
-
-            <div class="terminal-actions">
-              <button id="selection-run-submit" class="btn btn-primary run-main-btn" type="submit">
-                <span class="run-btn-idle-icon">▶</span>
-                <span class="run-btn-spinner" aria-hidden="true"></span>
-                <span class="run-btn-label">开始运行选股</span>
-              </button>
-              <button id="refresh-strategies" class="btn btn-secondary" type="button">刷新策略</button>
-            </div>
-          </form>
-        </article>
-
-        <article class="card strategy-console-card selection-strategy-panel">
-          <div class="card-header with-actions">
-            <div>
-              <p class="card-kicker">Strategy</p>
-              <h2>策略详情 & 因子状态</h2>
-              <p class="muted" id="selection-top-summary">加载中...</p>
-            </div>
-            <div class="actions">
-              <a class="btn btn-secondary" href="/strategies">因子分析</a>
-            </div>
-          </div>
-          <div id="strategy-summary" class="list-stack empty-state">加载中...</div>
-          <div id="selection-factor-bars" class="selection-factor-bars empty-state">因子分布加载中...</div>
-        </article>
-
-        <article class="card selection-run-status-card">
-          <div class="card-header">
-            <p class="card-kicker">Latest Run</p>
-            <h2>最近运行状态</h2>
-          </div>
-          <div class="selection-run-status-grid">
-            <div class="selection-success-ring">
-              <strong id="selection-success-rate">-</strong>
-              <span>达标率</span>
-            </div>
-            <div class="selection-run-metrics">
-              <div><span>运行状态</span><b id="selection-run-state">待运行</b></div>
-              <div><span>最新运行时间</span><b id="selection-run-time">-</b></div>
-              <div><span>达标数量</span><b id="selection-qualified-count">-</b></div>
-              <div><span>平均得分</span><b id="selection-avg-score">-</b></div>
-            </div>
-          </div>
-          <div id="selection-live-run" class="selection-live-run" hidden>
-            <div class="selection-live-run-head">
-              <span id="selection-live-run-phase">准备运行</span>
-              <b id="selection-live-run-elapsed">00:00</b>
-            </div>
-            <div class="selection-live-progress" aria-hidden="true">
-              <i id="selection-live-run-progress"></i>
-            </div>
-            <div class="selection-live-run-foot">
-              <span id="selection-live-run-remaining">预计约 2 分钟</span>
-              <button id="selection-cancel-run" class="btn btn-secondary btn-small selection-cancel-run" type="button" hidden>取消任务</button>
-            </div>
-          </div>
-          <div class="selection-history-mini">
-            <div class="muted">本次结果评分分布</div>
-            <svg id="selection-score-sparkline" viewBox="0 0 320 88" preserveAspectRatio="none"></svg>
-          </div>
-        </article>
-      </section>
-
-      <section class="card selection-results-console">
-        <div class="card-header with-actions">
-          <div>
-            <p class="card-kicker">Selection Pool</p>
-            <h2>选股结果</h2>
-            <p class="muted" id="selection-summary-line">加载中...</p>
-          </div>
-          <div class="actions">
-            <button id="refresh-results" class="btn btn-secondary" type="button">刷新结果</button>
-          </div>
-        </div>
-        <div id="selection-result-cards" class="selection-result-cards empty-state">运行选股后，这里会以卡片方式展示本次入选标的。</div>
-
-        <form id="selection-filter-form" class="inline-form selection-filter-form">
-          <div class="form-group">
-            <label for="selection-run-id">历史结果查询（排查用）</label>
-            <input id="selection-run-id" type="text" placeholder="一般不用填；仅排查历史结果时输入 run_id" />
-          </div>
-          <div class="form-group">
-            <label for="selection-search">搜索股票</label>
-            <input id="selection-search" type="text" placeholder="代码 / 名称 / 行业 / 策略" />
-          </div>
-          <div class="form-group">
-            <label for="selection-sort">排序方式</label>
-            <select id="selection-sort">
-              <option value="rank_asc">按排名升序</option>
-              <option value="score_desc">按总分降序</option>
-              <option value="change_desc">按涨跌幅降序</option>
-              <option value="change_asc">按涨跌幅升序</option>
-              <option value="name_asc">按名称升序</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="selection-industry">行业筛选</label>
-            <select id="selection-industry">
-              <option value="">全部行业</option>
-            </select>
-          </div>
-        </form>
-        <div class="table-wrap selection-detail-table">
-          <table>
-            <thead>
-              <tr>
-                <th>股票</th>
-                <th>选股策略</th>
-                <th>行业</th>
-                <th>选股日期</th>
-                <th>入选价</th>
-                <th>最新价</th>
-                <th>区间涨跌幅</th>
-                <th>总分</th>
-                <th>排名</th>
-                <th>状态</th>
-                <th>选股原因</th>
-                <th>风险提示</th>
-                <th>操作</th>
-                <th>详情</th>
-              </tr>
-            </thead>
-            <tbody id="selection-results-body">
-              <tr><td colspan="14" class="muted">加载中...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card-header with-actions">
-          <div>
-            <h2>当前页面说明</h2>
-          </div>
-        </div>
-        <div class="note-block">
-          <p>选股中心负责展示“这次选了谁、属于哪套策略、后续涨跌和风险如何”；完整因子构成、CI、覆盖率与策略解释链路，统一放到“选股策略”页查看。</p>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <script src="/static/js/common.js?v=20260819marketalert1"></script>
-  <script src="/static/js/selection.js?v=20260915sentimentv06"></script>
+<form id="selection-filter-form" class="inline-form selection-filter-form">
+<div class="form-group">
+<label for="selection-run-id">历史结果查询（排查用）</label>
+<input id="selection-run-id" type="text" placeholder="一般不用填；仅排查历史结果时输入 run_id"/>
+</div>
+<div class="form-group">
+<label for="selection-search">搜索股票</label>
+<input id="selection-search" type="text" placeholder="代码 / 名称 / 行业 / 策略"/>
+</div>
+<div class="form-group">
+<label for="selection-sort">排序方式</label>
+<select id="selection-sort">
+<option value="rank_asc">按排名升序</option>
+<option value="score_desc">按总分降序</option>
+<option value="change_desc">按涨跌幅降序</option>
+<option value="change_asc">按涨跌幅升序</option>
+<option value="name_asc">按名称升序</option>
+</select>
+</div>
+<div class="form-group">
+<label for="selection-industry">行业筛选</label>
+<select id="selection-industry">
+<option value="">全部行业</option>
+</select>
+</div>
+</form>
+<div class="table-wrap selection-detail-table">
+<table>
+<thead>
+<tr>
+<th>股票</th>
+<th>选股策略</th>
+<th>行业</th>
+<th>选股日期</th>
+<th>入选价</th>
+<th>最新价</th>
+<th>区间涨跌幅</th>
+<th>总分</th>
+<th>排名</th>
+<th>状态</th>
+<th>选股原因</th>
+<th>风险提示</th>
+<th>操作</th>
+<th>详情</th>
+</tr>
+</thead>
+<tbody id="selection-results-body">
+<tr><td colspan="14" class="muted">加载中...</td></tr>
+</tbody>
+</table>
+</div>
+<details class="research-details"><summary>展开候选研究明细与评分证据</summary><div id="selection-result-cards" class="selection-result-cards empty-state">运行选股后，这里会以卡片方式展示本次入选标的。</div></details></section>
+<section class="card">
+<div class="card-header with-actions">
+<div>
+<h2>当前页面说明</h2>
+</div>
+</div>
+<div class="note-block">
+<p>选股中心负责展示“这次选了谁、属于哪套策略、后续涨跌和风险如何”；完整因子构成、CI、覆盖率与策略解释链路，统一放到“选股策略”页查看。</p>
+</div>
+</section>
+<footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
+</div>
+<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
+<script src="/static/js/selection.js?v=20260915sentimentv06"></script>
 </body>
 </html>

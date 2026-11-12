@@ -1,271 +1,253 @@
 <!DOCTYPE html>
+
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1" />
-  <link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" />
-  <title>股票分析控制台 - 选股策略</title>
-  <link rel="stylesheet" href="/static/css/base.css" />
-  <link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3" />
-  <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260724factorv2" />
-  <link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
+<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
+<title>股票分析台 - 选股策略</title>
+<link rel="stylesheet" href="/static/css/base.css"/>
+<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
+<link rel="stylesheet" href="/static/css/components.css"/>
+<link rel="stylesheet" href="/static/css/pages.css?v=20260724factorv2"/>
+<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
+
+<meta name="theme-color" content="#0B1018"/>
+<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
 </head>
-<body data-page="strategies">
-  <div class="app-shell dashboard-shell">
-    <aside class="sidebar">
-      <div class="brand">股票分析控制台</div>
-      <nav class="nav">
-        <a href="/" data-nav="home">首页</a>
-        <a href="/selection" data-nav="selection">选股中心</a>
-        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
-        <a href="/portfolio" data-nav="portfolio">持仓管理</a>
-        <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">选股策略</a>
-        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
-        <a href="/system" data-nav="system">数据状态</a>
-      </nav>
-    </aside>
+<body data-page="strategies" data-ui="dark-v1">
+<div class="app-shell dashboard-shell">
+<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
+<nav class="nav" aria-label="工作台页面">
+<a href="/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a href="/selection" data-nav="selection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a href="/tracking" data-nav="tracking"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
+<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a href="/backtest" data-nav="backtest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a href="/strategies" data-nav="strategies" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a><a href="/etf-rotation" data-nav="etf-rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
+<a href="/system" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+</nav>
+</aside>
+<main class="main-content dashboard-main strategies-dashboard strategy-quant-main"><div class="workspace-topbar">
+<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>选股策略</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
+<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+</div>
+<section class="strategy-quant-frame">
+<header class="strategy-quant-titlebar">
+<h1>选股策略</h1>
+<span>规则透明，证据独立，版本可追溯</span>
+<button id="refresh-strategies-page" class="btn btn-secondary" type="button">刷新数据</button></header>
+<div class="strategy-quant-board">
 
-    <main class="main-content dashboard-main strategies-dashboard strategy-quant-main">
-      <section class="strategy-quant-frame">
-        <header class="strategy-quant-titlebar">
-          <h1>选股策略</h1>
-          <span>策略注册 / 状态 / 权重说明</span>
-        </header>
+<section class="stat-grid compact-stats strategy-summary-strip">
+<span id="strategies-default" hidden=""></span>
+<article class="stat-card">
+<div class="stat-label">策略数量</div>
+<div id="strategies-count" class="stat-value">加载中...</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">代码可加载</div>
+<div id="strategies-loadable-count" class="stat-value">加载中...</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">数据就绪</div>
+<div id="strategies-data-ready-count" class="stat-value">加载中...</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">实时可执行</div>
+<div id="strategies-current-count" class="stat-value">加载中...</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">研究回测可执行</div>
+<div id="strategies-backtest-count" class="stat-value">加载中...</div>
+</article>
+<article class="stat-card">
+<div class="stat-label">交易有效性已验证</div>
+<div id="strategies-validated-count" class="stat-value">加载中...</div>
+</article>
+</section>
+<section class="strategy-research-workspace"><section id="strategies-list" class="strategy-hero-card-grid empty-state">加载中...</section><section class="strategy-detail-matrix">
+<div class="strategy-detail-header">
+<strong>策略详情 / <span id="strategy-detail-name">请选择策略</span></strong>
+<span id="strategy-detail-status" class="badge status-muted">未选择</span>
+</div>
+<div class="strategy-detail-columns">
+<article class="strategy-matrix-card factor-weight-card">
+<div class="card-header compact-card-header">
+<p class="card-kicker">Factors</p>
+<h3>因子权重与兼容探针</h3>
+</div>
+<div id="strategy-factor-summary" class="muted">旧 CI 只作兼容数据探针；有效性结论以下方 V2 研究为准</div>
+<div id="strategy-factor-cards" class="strategy-factor-cards empty-state">请选择策略</div>
+</article>
+<article class="strategy-matrix-card">
+<div class="card-header compact-card-header">
+<p class="card-kicker">Params</p>
+<h3>策略参数</h3>
+</div>
+<div id="strategy-detail" class="strategy-detail empty-state">请选择策略</div>
+</article>
+<article class="strategy-matrix-card readiness-card">
+<div class="card-header compact-card-header">
+<p class="card-kicker">Readiness</p>
+<h3>数据就绪检查</h3>
+</div>
+<div id="strategy-readiness-list" class="strategy-readiness-list empty-state">请选择策略</div>
+</article>
+</div>
+</section></section>
 
-        <div class="strategy-quant-board">
-          <div class="strategy-quant-topnav">
-            <div>
-              <p class="eyebrow">Strategy Registry</p>
-              <h2>选股策略</h2>
-              <p>策略注册、版本与执行状态管理</p>
-            </div>
-            <button id="refresh-strategies-page" class="btn btn-secondary" type="button">刷新数据</button>
-          </div>
-
-          <section class="stat-grid compact-stats strategy-summary-strip">
-            <span id="strategies-default" hidden></span>
-            <article class="stat-card">
-              <div class="stat-label">策略数量</div>
-              <div id="strategies-count" class="stat-value">加载中...</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-label">代码可加载</div>
-              <div id="strategies-loadable-count" class="stat-value">加载中...</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-label">数据就绪</div>
-              <div id="strategies-data-ready-count" class="stat-value">加载中...</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-label">实时可执行</div>
-              <div id="strategies-current-count" class="stat-value">加载中...</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-label">研究回测可执行</div>
-              <div id="strategies-backtest-count" class="stat-value">加载中...</div>
-            </article>
-            <article class="stat-card">
-              <div class="stat-label">交易有效性已验证</div>
-              <div id="strategies-validated-count" class="stat-value">加载中...</div>
-            </article>
-          </section>
-
-          <section id="strategies-list" class="strategy-hero-card-grid empty-state">加载中...</section>
-
-          <section class="strategy-detail-matrix">
-            <div class="strategy-detail-header">
-              <strong>策略详情 / <span id="strategy-detail-name">请选择策略</span></strong>
-              <span id="strategy-detail-status" class="badge status-muted">未选择</span>
-            </div>
-            <div class="strategy-detail-columns">
-              <article class="strategy-matrix-card factor-weight-card">
-                <div class="card-header compact-card-header">
-                  <p class="card-kicker">Factors</p>
-                  <h3>因子权重与兼容探针</h3>
-                </div>
-                <div id="strategy-factor-summary" class="muted">旧 CI 只作兼容数据探针；有效性结论以下方 V2 研究为准</div>
-                <div id="strategy-factor-cards" class="strategy-factor-cards empty-state">请选择策略</div>
-              </article>
-
-              <article class="strategy-matrix-card">
-                <div class="card-header compact-card-header">
-                  <p class="card-kicker">Params</p>
-                  <h3>策略参数</h3>
-                </div>
-                <div id="strategy-detail" class="strategy-detail empty-state">请选择策略</div>
-              </article>
-
-              <article class="strategy-matrix-card readiness-card">
-                <div class="card-header compact-card-header">
-                  <p class="card-kicker">Readiness</p>
-                  <h3>数据就绪检查</h3>
-                </div>
-                <div id="strategy-readiness-list" class="strategy-readiness-list empty-state">请选择策略</div>
-              </article>
-            </div>
-          </section>
-
-          <section class="card strategy-factor-research-console">
-            <div class="card-header with-actions">
-              <div>
-                <p class="card-kicker">Factor Evidence V2</p>
-                <h2>因子有效性研究</h2>
-                <p id="strategy-factor-research-note" class="muted">
+<section class="card strategy-factor-research-console">
+<div class="card-header with-actions">
+<div>
+<p class="card-kicker">Factor Evidence V2</p>
+<h2>因子有效性研究</h2>
+<p id="strategy-factor-research-note" class="muted">
                   只使用不可变时点快照和成熟收益标签；不会自动修改策略权重。
                 </p>
-              </div>
-              <span id="strategy-factor-research-status" class="badge status-muted">未选择</span>
-            </div>
-
-            <div class="strategy-factor-research-toolbar">
-              <label>
+</div>
+<span id="strategy-factor-research-status" class="badge status-muted">未选择</span>
+</div>
+<div class="strategy-factor-research-toolbar">
+<label>
                 样本范围
                 <select id="strategy-factor-scope">
-                  <option value="eligible_pool">通过硬门槛的候选池</option>
-                  <option value="selected_top_k">最终入选 Top K</option>
-                </select>
-              </label>
-              <label>
+<option value="eligible_pool">通过硬门槛的候选池</option>
+<option value="selected_top_k">最终入选 Top K</option>
+</select>
+</label>
+<label>
                 收益周期
                 <select id="strategy-factor-horizon">
-                  <option value="1">T+1</option>
-                  <option value="3">T+3</option>
-                  <option value="5" selected>T+5</option>
-                  <option value="10">T+10</option>
-                  <option value="20">T+20</option>
-                </select>
-              </label>
-              <div id="strategy-factor-protocol" class="strategy-factor-protocol">
+<option value="1">T+1</option>
+<option value="3">T+3</option>
+<option value="5" selected="">T+5</option>
+<option value="10">T+10</option>
+<option value="20">T+20</option>
+</select>
+</label>
+<div id="strategy-factor-protocol" class="strategy-factor-protocol">
                 等待研究快照
               </div>
-            </div>
-
-            <section id="strategy-factor-trace-summary"
-              class="stat-grid compact-stats strategy-factor-trace-summary"></section>
-
-            <div class="strategy-factor-view-tabs" role="tablist" aria-label="因子研究视图">
-              <button type="button" class="active" data-factor-view="quality">覆盖与成熟度</button>
-              <button type="button" data-factor-view="ic">IC 与显著性</button>
-              <button type="button" data-factor-view="groups">分组单调性</button>
-              <button type="button" data-factor-view="ablation">消融与冗余</button>
-            </div>
-
-            <div id="strategy-factor-research-body" class="strategy-factor-research-body empty-state">
+</div>
+<section id="strategy-factor-trace-summary" class="stat-grid compact-stats strategy-factor-trace-summary"></section>
+<div class="strategy-factor-view-tabs" role="tablist" aria-label="因子研究视图">
+<button type="button" class="active" data-factor-view="quality">覆盖与成熟度</button>
+<button type="button" data-factor-view="ic">IC 与显著性</button>
+<button type="button" data-factor-view="groups">分组单调性</button>
+<button type="button" data-factor-view="ablation">消融与冗余</button>
+</div>
+<div id="strategy-factor-research-body" class="strategy-factor-research-body empty-state">
               请选择策略
             </div>
-          </section>
-
-          <section class="card strategy-forward-console">
-            <div class="card-header">
-              <div>
-                <p class="card-kicker">Prospective Evidence</p>
-                <h2>前瞻观察与执行复盘</h2>
-                <p id="strategy-forward-note" class="muted">请选择策略后查看固定协议下的真实前瞻样本。</p>
-              </div>
-              <span id="strategy-forward-status" class="badge status-muted">未选择</span>
-            </div>
-
-            <div id="strategy-forward-protocol" class="strategy-forward-protocol empty-state">请选择策略</div>
-            <section id="strategy-forward-summary" class="stat-grid compact-stats strategy-forward-summary"></section>
-
-            <div class="strategy-forward-columns">
-              <article class="strategy-forward-panel">
-                <div class="card-header compact-card-header">
-                  <p class="card-kicker">Advice Quality</p>
-                  <h3>建议质量（所有候选）</h3>
-                </div>
-                <div class="table-wrapper">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>持有期</th>
-                        <th>成熟样本</th>
-                        <th>平均收益</th>
-                        <th>胜率</th>
-                        <th>相对沪深300</th>
-                      </tr>
-                    </thead>
-                    <tbody id="strategy-forward-metrics">
-                      <tr><td colspan="5" class="empty-state">暂无前瞻样本</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-              </article>
-
-              <article class="strategy-forward-panel">
-                <div class="card-header compact-card-header">
-                  <p class="card-kicker">User Discipline</p>
-                  <h3>执行纪律（用户动作）</h3>
-                </div>
-                <div id="strategy-forward-discipline" class="strategy-forward-discipline empty-state">暂无操作记录</div>
-              </article>
-            </div>
-
-            <div class="card-header strategy-forward-picks-header">
-              <div>
-                <p class="card-kicker">Observation Log</p>
-                <h3>最近前瞻候选</h3>
-              </div>
-              <small>“初步样本达标”不等于“策略已验证”</small>
-            </div>
-            <div class="table-wrapper strategy-forward-picks-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>信号日</th>
-                    <th>候选</th>
-                    <th>分数/主题</th>
-                    <th>1日</th>
-                    <th>3日</th>
-                    <th>5日</th>
-                    <th>20日</th>
-                    <th>动作记录</th>
-                  </tr>
-                </thead>
-                <tbody id="strategy-forward-picks-body">
-                  <tr><td colspan="8" class="empty-state">暂无前瞻候选</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="card strategy-table-console">
-            <div class="card-header">
-              <div>
-                <p class="card-kicker">Registry Table</p>
-                <h2>策略列表</h2>
-              </div>
-              <div class="strategy-table-search">搜索策略ID/名称</div>
-            </div>
-            <div class="table-wrapper strategy-factor-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>策略ID</th>
-                    <th>名称</th>
-                    <th>状态</th>
-                    <th>版本</th>
-                    <th>模式</th>
-                    <th>因子数</th>
-                    <th>阈值</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody id="strategy-factors-body">
-                  <tr><td colspan="8" class="empty-state">请选择策略</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <script src="/static/js/common.js?v=20260819marketalert1"></script>
-  <script src="/static/js/strategies.js?v=20261112research2"></script>
+</section>
+<section class="card strategy-forward-console">
+<div class="card-header">
+<div>
+<p class="card-kicker">Prospective Evidence</p>
+<h2>前瞻观察与执行复盘</h2>
+<p id="strategy-forward-note" class="muted">请选择策略后查看固定协议下的真实前瞻样本。</p>
+</div>
+<span id="strategy-forward-status" class="badge status-muted">未选择</span>
+</div>
+<div id="strategy-forward-protocol" class="strategy-forward-protocol empty-state">请选择策略</div>
+<section id="strategy-forward-summary" class="stat-grid compact-stats strategy-forward-summary"></section>
+<div class="strategy-forward-columns">
+<article class="strategy-forward-panel">
+<div class="card-header compact-card-header">
+<p class="card-kicker">Advice Quality</p>
+<h3>建议质量（所有候选）</h3>
+</div>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr>
+<th>持有期</th>
+<th>成熟样本</th>
+<th>平均收益</th>
+<th>胜率</th>
+<th>相对沪深300</th>
+</tr>
+</thead>
+<tbody id="strategy-forward-metrics">
+<tr><td colspan="5" class="empty-state">暂无前瞻样本</td></tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="strategy-forward-panel">
+<div class="card-header compact-card-header">
+<p class="card-kicker">User Discipline</p>
+<h3>执行纪律（用户动作）</h3>
+</div>
+<div id="strategy-forward-discipline" class="strategy-forward-discipline empty-state">暂无操作记录</div>
+</article>
+</div>
+<div class="card-header strategy-forward-picks-header">
+<div>
+<p class="card-kicker">Observation Log</p>
+<h3>最近前瞻候选</h3>
+</div>
+<small>“初步样本达标”不等于“策略已验证”</small>
+</div>
+<div class="table-wrapper strategy-forward-picks-table">
+<table>
+<thead>
+<tr>
+<th>信号日</th>
+<th>候选</th>
+<th>分数/主题</th>
+<th>1日</th>
+<th>3日</th>
+<th>5日</th>
+<th>20日</th>
+<th>动作记录</th>
+</tr>
+</thead>
+<tbody id="strategy-forward-picks-body">
+<tr><td colspan="8" class="empty-state">暂无前瞻候选</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section class="card strategy-table-console">
+<div class="card-header">
+<div>
+<p class="card-kicker">Registry Table</p>
+<h2>策略列表</h2>
+</div>
+<div class="strategy-table-search">搜索策略ID/名称</div>
+</div>
+<div class="table-wrapper strategy-factor-table">
+<table>
+<thead>
+<tr>
+<th>策略ID</th>
+<th>名称</th>
+<th>状态</th>
+<th>版本</th>
+<th>模式</th>
+<th>因子数</th>
+<th>阈值</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody id="strategy-factors-body">
+<tr><td colspan="8" class="empty-state">请选择策略</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</section>
+<footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
+</div>
+<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
+<script src="/static/js/strategies.js?v=20261112research2"></script>
 </body>
 </html>

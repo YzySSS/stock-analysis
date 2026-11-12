@@ -68,9 +68,10 @@ function qsa(selector) {
 function setActiveNav() {
   const page = document.body.dataset.page;
   qsa('[data-nav]').forEach((link) => {
-    if (link.dataset.nav === page) {
-      link.classList.add('active');
-    }
+    const active = link.dataset.nav === (page === 'stock-detail' ? 'selection' : page);
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
   });
 }
 
@@ -175,18 +176,36 @@ function getPctClass(value) {
   return Number(value) >= 0 ? 'up' : 'down';
 }
 
+function normalizeStockSearchCode(value) {
+  const input = String(value || '').trim();
+  const prefixed = input.match(/^(sh|sz|bj)[.:-]?(\d{6})$/i);
+  if (prefixed) return `${prefixed[1].toLowerCase()}.${prefixed[2]}`;
+  const suffixed = input.match(/^(\d{6})[.:-](sh|sz|bj)$/i);
+  if (suffixed) return `${suffixed[2].toLowerCase()}.${suffixed[1]}`;
+  if (/^\d{6}$/.test(input)) {
+    const exchange = /^[48]/.test(input) || /^92/.test(input)
+      ? 'bj'
+      : /^[569]/.test(input) ? 'sh' : 'sz';
+    return `${exchange}.${input}`;
+  }
+  return input;
+}
+
 function bindStockQuickSearch(inputSelector, buttonSelector) {
   const input = qs(inputSelector);
   const button = qs(buttonSelector);
   if (!input || !button) return;
 
   const go = () => {
-    const code = (input.value || '').trim();
+    const code = normalizeStockSearchCode(input.value);
     if (!code) return;
     window.location.href = `/stocks/${encodeURIComponent(code)}`;
   };
 
-  button.addEventListener('click', go);
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    go();
+  });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -197,6 +216,28 @@ function bindStockQuickSearch(inputSelector, buttonSelector) {
 
 function bindGlobalStockSearch() {
   bindStockQuickSearch('[data-global-stock-search-input]', '[data-global-stock-search-btn]');
+  qs('.workspace-search')?.addEventListener('submit', (event) => event.preventDefault());
+}
+
+function bindWorkspaceNavigation() {
+  const toggle = qs('.workspace-menu');
+  if (!toggle) return;
+  const close = () => {
+    document.body.classList.remove('workspace-nav-open');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-label', '展开导航');
+  };
+  toggle.addEventListener('click', () => {
+    const open = document.body.classList.toggle('workspace-nav-open');
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? '收起导航' : '展开导航');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.sidebar, .workspace-menu')) close();
+  });
 }
 
 async function bindLogoutControl() {
@@ -217,7 +258,8 @@ async function bindLogoutControl() {
       </svg>
     </button>
   `;
-  document.body.appendChild(wrapper);
+  const dockHost = document.body.dataset.ui === 'dark-v1' ? qs('.sidebar') : null;
+  (dockHost || document.body).appendChild(wrapper);
 
   wrapper.querySelector('.session-logout').addEventListener('click', async (event) => {
     const button = event.currentTarget;
@@ -311,6 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ensureEtfRotationNav();
   setActiveNav();
   bindGlobalStockSearch();
+  bindWorkspaceNavigation();
   bindLogoutControl();
   bindTooltips();
 });

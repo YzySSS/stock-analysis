@@ -1,283 +1,280 @@
 <!DOCTYPE html>
+
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1" />
-  <link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1" />
-  <title>股票分析控制台 - 回测中心</title>
-  <link rel="stylesheet" href="/static/css/base.css" />
-  <link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3" />
-  <link rel="stylesheet" href="/static/css/components.css" />
-  <link rel="stylesheet" href="/static/css/pages.css?v=20260715p0a" />
-  <link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link rel="icon" type="image/png" href="/favicon.ico?v=20260729brand1"/>
+<link rel="apple-touch-icon" href="/static/assets/stock-research-apple-touch.png?v=20260729brand1"/>
+<title>股票分析台 - 回测中心</title>
+<link rel="stylesheet" href="/static/css/base.css"/>
+<link rel="stylesheet" href="/static/css/layout.css?v=20260723auth3"/>
+<link rel="stylesheet" href="/static/css/components.css"/>
+<link rel="stylesheet" href="/static/css/pages.css?v=20260715p0a"/>
+<link rel="stylesheet" href="/static/css/brand.css?v=20260729brand1"/>
+
+<meta name="theme-color" content="#0B1018"/>
+<link rel="stylesheet" href="/static/css/dark-design.css?v=20261113dark3"/>
 </head>
-<body data-page="backtest">
-  <div class="app-shell dashboard-shell">
-    <aside class="sidebar">
-      <div class="brand">股票分析控制台</div>
-      <nav class="nav">
-        <a href="/" data-nav="home">首页</a>
-        <a href="/selection" data-nav="selection">选股中心</a>
-        <a href="/tracking" data-nav="tracking">跟踪复盘</a>
-        <a href="/portfolio" data-nav="portfolio">持仓管理</a>
-        <a href="/backtest" data-nav="backtest">回测中心</a>
-        <a href="/strategies" data-nav="strategies">选股策略</a>
-        <a href="/trade-strategies" data-nav="trade-strategies">交易策略</a>
-        <a href="/system" data-nav="system">数据状态</a>
-      </nav>
-    </aside>
-
-    <main class="main-content dashboard-main backtest-dashboard">
-      <header class="backtest-title-bar">
-        <div>
-          <p class="eyebrow">Backtest</p>
-          <h1>回测中心</h1>
-        </div>
-        <div class="header-actions">
-          <button id="refresh-backtest-page" class="btn btn-secondary" type="button">刷新最近结果</button>
-        </div>
-      </header>
-
-      <section class="backtest-research-notice" role="status" aria-label="回测研究口径提示">
-        <span class="badge status-warn">RESEARCH ONLY</span>
-        <div>
-          <strong>回测结果仅用于研究和排错，不代表可交易结论</strong>
-          <p>当前已使用 T+1 成交、历史状态、公告日基本面和可选指数月度成分；完成样本外验证前，请勿据此直接决策。</p>
-        </div>
-      </section>
-
-      <section class="card backtest-terminal-control">
-        <form id="backtest-form" class="backtest-terminal-form">
-          <div class="terminal-form-field strategy-field">
-            <label for="backtest-strategy-id">选股策略</label>
-            <select id="backtest-strategy-id" disabled>
-              <option value="">正在读取研究回测能力...</option>
-            </select>
-          </div>
-          <div class="terminal-form-field return-field">
-            <label for="backtest-trade-strategy-id">交易策略</label>
-            <select id="backtest-trade-strategy-id">
-              <option value="next_open_1d">次日开盘卖出</option>
-              <option value="hold_3d_close">持有 3 日收盘卖出</option>
-              <option value="triple_barrier_5d">五日止盈止损</option>
-              <option value="observe_t3_daily">选股专属回测</option>
-            </select>
-          </div>
-          <div class="terminal-form-field">
-            <label for="backtest-start-date">开始日期</label>
-            <input id="backtest-start-date" type="date" value="2026-04-24" />
-          </div>
-          <div class="terminal-form-field">
-            <label for="backtest-end-date">结束日期</label>
-            <input id="backtest-end-date" type="date" value="2026-04-27" />
-          </div>
-          <div class="terminal-form-field small-field">
-            <label for="backtest-max-picks">每日入选</label>
-            <div class="input-with-unit">
-              <input id="backtest-max-picks" type="number" value="3" min="1" max="50" />
-              <span>只/日</span>
-            </div>
-          </div>
-          <div class="terminal-form-field small-field">
-            <label for="backtest-score-threshold">分数底线</label>
-            <input id="backtest-score-threshold" type="number" value="60" min="0" max="100" step="1" />
-          </div>
-          <input id="backtest-return-mode" type="hidden" value="1d" />
-          <button class="btn btn-primary backtest-run-button" type="submit">▶ 运行回测</button>
-          <details class="backtest-advanced-settings">
-            <summary>高级设置</summary>
-            <div class="backtest-advanced-grid">
-              <button id="backtest-ashare-realistic-preset" class="btn btn-secondary backtest-preset-button wide" type="button">
+<body data-page="backtest" data-ui="dark-v1">
+<div class="app-shell dashboard-shell">
+<aside class="sidebar" id="stock-sidebar" aria-label="主导航">
+<div class="brand"><span class="brand-name">股票分析台<small>研究工作台</small></span></div>
+<nav class="nav" aria-label="工作台页面">
+<a href="/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v10h-6v-7H9v7H3Z"></path></svg><span>首页</span></a>
+<a href="/selection" data-nav="selection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><span>选股中心</span></a>
+<a href="/tracking" data-nav="tracking"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16m-12 4h3m2 0h3"></path></svg><span>跟踪复盘</span></a>
+<a href="/portfolio" data-nav="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18v13H3ZM8 8V4h8v4M3 13h18m-11-2v4h4v-4"></path></svg><span>持仓管理</span></a>
+<a href="/backtest" data-nav="backtest" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h19M6 17v-6m5 6V6m5 11V9m5 8V3"></path></svg><span>回测中心</span></a>
+<a href="/strategies" data-nav="strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 6-10 6L2 9Zm-8 10 8 5 8-5m-16 5 8 5 8-5"></path></svg><span>选股策略</span></a>
+<a href="/trade-strategies" data-nav="trade-strategies"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8m6 0h4M3 12h3m6 0h9M3 18h11m6 0h1M11 3v6m-5 0v6m8 0v6"></path></svg><span>交易策略</span></a><a href="/etf-rotation" data-nav="etf-rotation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9A9 9 0 0 0 12 3Zm-4 1A9 9 0 1 0 12 21a9 9 0 0 0 8-5H8Z"></path></svg><span>ETF 轮动</span></a>
+<a href="/system" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg><span>数据状态</span></a>
+</nav>
+</aside>
+<main class="main-content dashboard-main backtest-dashboard"><div class="workspace-topbar">
+<button class="workspace-menu" type="button" aria-label="展开导航" aria-controls="stock-sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+<nav class="workspace-breadcrumb" aria-label="面包屑"><a href="/">研究工作台</a><span aria-hidden="true">/</span><span>回测中心</span></nav>
+<form class="workspace-search" role="search"><label class="sr-only" for="workspace-stock-search">搜索股票代码</label><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15M16 16l5 5"></path></svg><input id="workspace-stock-search" data-global-stock-search-input="" type="search" placeholder="搜索股票代码" autocomplete="off" maxlength="24"/><button type="submit" data-global-stock-search-btn="" aria-label="查看股票">↵</button></form>
+<a class="workspace-status-link" href="/system" aria-label="查看数据状态"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6c0-5 18-5 18 0s-18 5-18 0Zm0 0v12c0 5 18 5 18 0V6M3 12c0 5 18 5 18 0"></path></svg></a>
+</div>
+<header class="backtest-title-bar">
+<div>
+<p class="eyebrow">Backtest</p>
+<h1>回测中心</h1>
+<p class="page-desc">固定规则，检验历史表现。</p></div>
+<div class="header-actions">
+<button id="refresh-backtest-page" class="btn btn-secondary" type="button">刷新最近结果</button>
+</div>
+</header>
+<section class="backtest-research-notice" role="status" aria-label="回测研究口径提示">
+<span class="badge status-warn">RESEARCH ONLY</span>
+<div>
+<strong>回测结果仅用于研究和排错，不代表可交易结论</strong>
+<p>当前已使用 T+1 成交、历史状态、公告日基本面和可选指数月度成分；完成样本外验证前，请勿据此直接决策。</p>
+</div>
+</section>
+<section class="backtest-research-workspace"><section class="card backtest-terminal-control"><div class="card-header"><h2>回测配置</h2><p class="muted">选择固定规则与研究区间</p></div>
+<form id="backtest-form" class="backtest-terminal-form">
+<div class="terminal-form-field strategy-field">
+<label for="backtest-strategy-id">选股策略</label>
+<select id="backtest-strategy-id" disabled="">
+<option value="">正在读取研究回测能力...</option>
+</select>
+</div>
+<div class="terminal-form-field return-field">
+<label for="backtest-trade-strategy-id">交易策略</label>
+<select id="backtest-trade-strategy-id">
+<option value="next_open_1d">次日开盘卖出</option>
+<option value="hold_3d_close">持有 3 日收盘卖出</option>
+<option value="triple_barrier_5d">五日止盈止损</option>
+<option value="observe_t3_daily">选股专属回测</option>
+</select>
+</div>
+<div class="terminal-form-field">
+<label for="backtest-start-date">开始日期</label>
+<input id="backtest-start-date" type="date" value="2026-04-24"/>
+</div>
+<div class="terminal-form-field">
+<label for="backtest-end-date">结束日期</label>
+<input id="backtest-end-date" type="date" value="2026-04-27"/>
+</div>
+<div class="terminal-form-field small-field">
+<label for="backtest-max-picks">每日入选</label>
+<div class="input-with-unit">
+<input id="backtest-max-picks" type="number" value="3" min="1" max="50"/>
+<span>只/日</span>
+</div>
+</div>
+<div class="terminal-form-field small-field">
+<label for="backtest-score-threshold">分数底线</label>
+<input id="backtest-score-threshold" type="number" value="60" min="0" max="100" step="1"/>
+</div>
+<input id="backtest-return-mode" type="hidden" value="1d"/>
+<button class="btn btn-primary backtest-run-button" type="submit">▶ 运行回测</button>
+<details class="backtest-advanced-settings">
+<summary>高级设置</summary>
+<div class="backtest-advanced-grid">
+<button id="backtest-ashare-realistic-preset" class="btn btn-secondary backtest-preset-button wide" type="button">
                 应用 A 股真实化预设
               </button>
-              <div class="terminal-form-field wide">
-                <label for="backtest-universe-code">历史股票池</label>
-                <select id="backtest-universe-code">
-                  <option value="ALL_A">历史全A（默认）</option>
-                  <option value="000016.SH">上证50（月度历史成分）</option>
-                  <option value="000300.SH">沪深300（月度历史成分）</option>
-                  <option value="000905.SH">中证500（月度历史成分）</option>
-                  <option value="000852.SH">中证1000（月度历史成分）</option>
-                </select>
-                <small>指定指数时按信号日前最近一份 Tushare 月度权重快照筛选，不读取当前成分。</small>
-              </div>
-              <label class="inline-checkbox backtest-adjusted-toggle wide" for="backtest-use-adjusted-price">
-                <input id="backtest-use-adjusted-price" type="checkbox" />
-                <span>
-                  <b>使用复权收益</b>
-                  <small>默认关闭。长区间研究可开启；真实交易模拟仍以不复权成交价为主。</small>
-                </span>
-              </label>
-              <label class="inline-checkbox backtest-adjusted-toggle wide" for="backtest-execution-constraints">
-                <input id="backtest-execution-constraints" type="checkbox" />
-                <span>
-                  <b>启用成交约束</b>
-                  <small>默认关闭。开启后涨停开盘不买入、跌停开盘不卖出，停牌/无开盘价不成交。</small>
-                </span>
-              </label>
-              <div class="terminal-form-field small-field cost-field">
-                <label for="backtest-commission-bps">手续费</label>
-                <div class="input-with-unit">
-                  <input id="backtest-commission-bps" type="number" value="1.5" min="0" max="100" step="0.1" />
-                  <span>bps/边</span>
-                </div>
-              </div>
-              <div class="terminal-form-field small-field cost-field">
-                <label for="backtest-stamp-tax-bps">印花税</label>
-                <div class="input-with-unit">
-                  <input id="backtest-stamp-tax-bps" type="number" value="5" min="0" max="100" step="0.1" />
-                  <span>bps/卖出</span>
-                </div>
-              </div>
-              <div class="terminal-form-field small-field cost-field">
-                <label for="backtest-slippage-bps">滑点</label>
-                <div class="input-with-unit">
-                  <input id="backtest-slippage-bps" type="number" value="5" min="0" max="100" step="0.1" />
-                  <span>bps/边</span>
-                </div>
-              </div>
-            </div>
-          </details>
-        </form>
-        <div class="backtest-terminal-foot" hidden>
-          <span id="backtest-form-message" class="muted"></span>
-        </div>
-      </section>
+<div class="terminal-form-field wide">
+<label for="backtest-universe-code">历史股票池</label>
+<select id="backtest-universe-code">
+<option value="ALL_A">历史全A（默认）</option>
+<option value="000016.SH">上证50（月度历史成分）</option>
+<option value="000300.SH">沪深300（月度历史成分）</option>
+<option value="000905.SH">中证500（月度历史成分）</option>
+<option value="000852.SH">中证1000（月度历史成分）</option>
+</select>
+<small>指定指数时按信号日前最近一份 Tushare 月度权重快照筛选，不读取当前成分。</small>
+</div>
+<label class="inline-checkbox backtest-adjusted-toggle wide" for="backtest-use-adjusted-price">
+<input id="backtest-use-adjusted-price" type="checkbox"/>
+<span>
+<b>使用复权收益</b>
+<small>默认关闭。长区间研究可开启；真实交易模拟仍以不复权成交价为主。</small>
+</span>
+</label>
+<label class="inline-checkbox backtest-adjusted-toggle wide" for="backtest-execution-constraints">
+<input id="backtest-execution-constraints" type="checkbox"/>
+<span>
+<b>启用成交约束</b>
+<small>默认关闭。开启后涨停开盘不买入、跌停开盘不卖出，停牌/无开盘价不成交。</small>
+</span>
+</label>
+<div class="terminal-form-field small-field cost-field">
+<label for="backtest-commission-bps">手续费</label>
+<div class="input-with-unit">
+<input id="backtest-commission-bps" type="number" value="1.5" min="0" max="100" step="0.1"/>
+<span>bps/边</span>
+</div>
+</div>
+<div class="terminal-form-field small-field cost-field">
+<label for="backtest-stamp-tax-bps">印花税</label>
+<div class="input-with-unit">
+<input id="backtest-stamp-tax-bps" type="number" value="5" min="0" max="100" step="0.1"/>
+<span>bps/卖出</span>
+</div>
+</div>
+<div class="terminal-form-field small-field cost-field">
+<label for="backtest-slippage-bps">滑点</label>
+<div class="input-with-unit">
+<input id="backtest-slippage-bps" type="number" value="5" min="0" max="100" step="0.1"/>
+<span>bps/边</span>
+</div>
+</div>
+</div>
+</details>
+</form>
+<div class="backtest-terminal-foot" hidden="">
+<span id="backtest-form-message" class="muted"></span>
+</div>
+</section><div class="backtest-results-column"><section id="backtest-detail-section" class="backtest-detail-console split-detail-console">
+<span id="backtest-run-id" class="muted backtest-run-id-inline" hidden=""></span>
+<section class="stat-grid compact-stats backtest-metric-strip">
 
-      <section class="backtest-workbench-grid backtest-task-grid">
-        <div id="backtest-runs-list" class="backtest-task-cards empty-state">加载中...</div>
-      </section>
 
-      <section id="backtest-detail-section" class="backtest-detail-console split-detail-console">
-        <span id="backtest-run-id" class="muted backtest-run-id-inline" hidden></span>
 
-        <section class="stat-grid compact-stats backtest-metric-strip">
-          <article class="stat-card">
-            <div class="stat-label">交易日</div>
-            <div id="backtest-stat-days" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">入选次数</div>
-            <div id="backtest-stat-picks" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">总收益率</div>
-            <div id="backtest-stat-total-return" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">平均收益</div>
-            <div id="backtest-stat-avg-return" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">最大回撤</div>
-            <div id="backtest-stat-max-drawdown" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">胜率</div>
-            <div id="backtest-stat-win-rate" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">Sharpe</div>
-            <div id="backtest-stat-sharpe" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">Sortino</div>
-            <div id="backtest-stat-sortino" class="stat-value">-</div>
-          </article>
-          <article class="stat-card">
-            <div class="stat-label">Calmar</div>
-            <div id="backtest-stat-calmar" class="stat-value">-</div>
-          </article>
-        </section>
 
-        <section id="backtest-execution-summary" class="card backtest-execution-summary" hidden></section>
 
-        <div class="backtest-analysis-grid">
-          <article class="card backtest-equity-card">
-            <div class="card-header with-actions">
-              <div>
-                <p class="card-kicker">Equity</p>
-                <h3>每日净值曲线</h3>
-              </div>
-              <div class="chart-tabs" id="backtest-chart-tabs">
-                <button class="active" type="button" data-backtest-chart-mode="equity">净值</button>
-                <button type="button" data-backtest-chart-mode="return">收益率</button>
-              </div>
-            </div>
-            <div class="backtest-equity-chart-wrap">
-              <svg id="backtest-equity-chart" viewBox="0 0 720 336" preserveAspectRatio="none"></svg>
-            </div>
-          </article>
 
-          <article class="card backtest-recent-card">
-            <div class="card-header with-actions">
-              <div>
-                <p class="card-kicker">Recent</p>
-                <h3>最近回测</h3>
-              </div>
 
-            </div>
-            <div id="backtest-recent-runs-panel" class="backtest-recent-runs-panel empty-state">加载中...</div>
-            <div class="card-header compact-sub-header">
-              <p class="card-kicker">Daily</p>
-              <h3>日级结果</h3>
-            </div>
-            <div class="table-wrapper compact-table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>交易日</th>
-                    <th>入选</th>
-                    <th>1日收益</th>
-                    <th>3日收益</th>
-                  </tr>
-                </thead>
-                <tbody id="backtest-curve-body">
-                  <tr><td colspan="4" class="empty-state">点击已完成任务查看日级结果</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </div>
 
-        <article class="card backtest-trades-console">
-          <div class="card-header with-actions">
-            <div>
-              <p class="card-kicker">Trades</p>
-              <h3>交易明细</h3>
-            </div>
-            <div class="actions">
-              <button class="btn btn-secondary" type="button" disabled>导出</button>
-            </div>
-          </div>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>交易日</th>
-                  <th>代码</th>
-                  <th>股票名称</th>
-                  <th>入选得分</th>
-                  <th>买入价</th>
-                  <th>卖出价</th>
-                  <th id="backtest-trade-return-header">1 日卖出/收益</th>
-                  <th>最大涨幅</th>
-                  <th>最大回撤</th>
-                </tr>
-              </thead>
-              <tbody id="backtest-trades-body">
-                <tr><td colspan="9" class="empty-state">点击已完成任务查看个股明细</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div id="backtest-trades-pagination" class="backtest-trades-pagination"></div>
-        </article>
-      </section>
-    </main>
-  </div>
 
-  <script src="/static/js/common.js?v=20260819marketalert1"></script>
-  <script src="/static/js/backtest.js?v=20260915sentimentv06"></script>
+<article class="stat-card">
+<div class="stat-label">总收益率</div>
+<div id="backtest-stat-total-return" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">最大回撤</div>
+<div id="backtest-stat-max-drawdown" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">胜率</div>
+<div id="backtest-stat-win-rate" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">入选次数</div>
+<div id="backtest-stat-picks" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">平均收益</div>
+<div id="backtest-stat-avg-return" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">交易日</div>
+<div id="backtest-stat-days" class="stat-value">-</div>
+</article></section>
+<section id="backtest-execution-summary" class="card backtest-execution-summary" hidden=""></section>
+<div class="backtest-analysis-grid">
+<article class="card backtest-equity-card">
+<div class="card-header with-actions">
+<div>
+<p class="card-kicker">Equity</p>
+<h3>每日净值曲线</h3>
+</div>
+<div class="chart-tabs" id="backtest-chart-tabs">
+<button class="active" type="button" data-backtest-chart-mode="equity">净值</button>
+<button type="button" data-backtest-chart-mode="return">收益率</button>
+</div>
+</div>
+<div class="backtest-equity-chart-wrap">
+<svg id="backtest-equity-chart" viewBox="0 0 720 336" preserveAspectRatio="none"></svg>
+</div>
+</article>
+<article class="card backtest-recent-card">
+<div class="card-header with-actions">
+<div>
+<p class="card-kicker">Recent</p>
+<h3>最近回测</h3>
+</div>
+</div>
+<div id="backtest-recent-runs-panel" class="backtest-recent-runs-panel empty-state">加载中...</div>
+<div class="card-header compact-sub-header">
+<p class="card-kicker">Daily</p>
+<h3>日级结果</h3>
+</div>
+<div class="table-wrapper compact-table-wrapper">
+<table>
+<thead>
+<tr>
+<th>交易日</th>
+<th>入选</th>
+<th>1日收益</th>
+<th>3日收益</th>
+</tr>
+</thead>
+<tbody id="backtest-curve-body">
+<tr><td colspan="4" class="empty-state">点击已完成任务查看日级结果</td></tr>
+</tbody>
+</table>
+</div>
+</article>
+</div>
+<article class="card backtest-trades-console">
+<div class="card-header with-actions">
+<div>
+<p class="card-kicker">Trades</p>
+<h3>交易明细</h3>
+</div>
+<div class="actions">
+<button class="btn btn-secondary" type="button" disabled="">导出</button>
+</div>
+</div>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr>
+<th>交易日</th>
+<th>代码</th>
+<th>股票名称</th>
+<th>入选得分</th>
+<th>买入价</th>
+<th>卖出价</th>
+<th id="backtest-trade-return-header">1 日卖出/收益</th>
+<th>最大涨幅</th>
+<th>最大回撤</th>
+</tr>
+</thead>
+<tbody id="backtest-trades-body">
+<tr><td colspan="9" class="empty-state">点击已完成任务查看个股明细</td></tr>
+</tbody>
+</table>
+</div>
+<div id="backtest-trades-pagination" class="backtest-trades-pagination"></div>
+</article><details class="research-details backtest-extra-metrics"><summary>风险调整指标（Sharpe / Sortino / Calmar）</summary><div class="stat-grid compact-stats"><article class="stat-card">
+<div class="stat-label">Sharpe</div>
+<div id="backtest-stat-sharpe" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">Sortino</div>
+<div id="backtest-stat-sortino" class="stat-value">-</div>
+</article><article class="stat-card">
+<div class="stat-label">Calmar</div>
+<div id="backtest-stat-calmar" class="stat-value">-</div>
+</article></div></details>
+</section><section class="backtest-workbench-grid backtest-task-grid">
+<div id="backtest-runs-list" class="backtest-task-cards empty-state">加载中...</div>
+</section></div></section>
+
+
+<footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
+</div>
+<script src="/static/js/common.js?v=20260819marketalert1&ui=20261113dark3"></script>
+<script src="/static/js/backtest.js?v=20260915sentimentv06"></script>
 </body>
 </html>
