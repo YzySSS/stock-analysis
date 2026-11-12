@@ -11,6 +11,17 @@ function strategyDisplayNameById(strategyId) {
   return item?.display_name || strategyId || '-';
 }
 
+const strategyDatasetNames = {daily_kline:'日线行情',factor_input_daily:'因子输入',stock_moneyflow_daily:'个股资金',stock_chip_daily:'筹码分布',sector_opinion_daily:'板块舆情'};
+function strategyEvidenceText(text) {
+  let result=String(text||'');
+  for(const [key,name] of Object.entries(strategyDatasetNames)) result=result.replaceAll(key,name);
+  return result;
+}
+
+function strategyTitle(name) {
+  return String(name || '').replace(/\s+v\d+(?:\.\d+){1,2}/, '');
+}
+
 function strategyStatusClass(item = {}) {
   if (item.evidence_status === 'historical_diagnostic_fail') return 'status-error';
   if (item.availability === 'experimental') return 'status-warn';
@@ -27,6 +38,9 @@ function renderStrategyCards(data) {
   const list = qs('#strategies-list');
   const items = data.strategies || [];
   strategiesCache = items;
+  qs('#strategy-version-count').textContent = String(items.length);
+  const versions=items.map(item=>({version:item.version,description:item.description,tag:item.immutable_tag,supersedes:item.supersedes})).sort((a,b)=>String(b.version).localeCompare(String(a.version),undefined,{numeric:true}));
+  qs('#strategy-version-records').innerHTML=versions.map(item=>`<li><strong>v${escapeHtml(item.version||'—')}</strong><p title="${escapeHtml(item.description||'')}">${escapeHtml(item.description||'已注册版本')}</p><small>${escapeHtml(item.tag||'注册表记录')}</small>${item.supersedes?`<details class="strategy-superseded-version"><summary>v${escapeHtml(item.supersedes.version)} · 污染历史，仅追溯</summary><p>${escapeHtml(item.supersedes.evidence_note||'')}</p></details>`:''}</li>`).join('') || '<li>暂无版本记录</li>';
 
   qs('#strategies-default').textContent = data.default_strategy
     ? strategyDisplayNameById(data.default_strategy)
@@ -53,9 +67,9 @@ function renderStrategyCards(data) {
           ${item.is_default ? '<span class="badge status-ok">默认</span>' : `<span class="badge ${availabilityClass}">${escapeHtml(item.availability_label || '-')}</span>`}
           ${item.evidence_status === 'historical_diagnostic_fail' ? '<span class="badge status-error">历史诊断未通过</span>' : ''}
         </div>
-        <h3>${escapeHtml(item.display_name || item.id)}</h3>
+        <h3>${escapeHtml(strategyTitle(item.display_name || item.id).replace(/（[^）]*）/,''))}<span class="badge strategy-version-badge">v${escapeHtml(item.version || '—')}</span></h3>
         <div class="strategy-hero-state"><i class="strategy-status-dot ${escapeHtml(item.availability || 'unknown')}"></i>${escapeHtml(item.availability_label || '-')}</div>
-        <div class="strategy-hero-status-row">
+        <div class="strategy-hero-status-row strategy-capability-chips">
           ${capabilityBadge(item.loadable, '可加载', '不可加载')}
           ${capabilityBadge(item.data_ready, '数据就绪', '数据未就绪')}
           ${capabilityBadge(item.backtest_ready, '研究回测', '回测关闭')}
@@ -66,7 +80,7 @@ function renderStrategyCards(data) {
           <div><dt>模式</dt><dd>${escapeHtml(item.mode || 'current')}</dd></div>
           <div><dt>状态</dt><dd>${escapeHtml(item.status || '-')}</dd></div>
         </dl>
-        <div class="strategy-card-note">${escapeHtml(item.availability_note || item.description || '策略已注册')}</div>
+        <div class="strategy-card-note" title="${escapeHtml(item.description || item.availability_note || '策略已注册')}">${escapeHtml(item.description || item.availability_note || '策略已注册')}</div>
       </article>
     `;
   }).join('');
@@ -78,6 +92,7 @@ function renderStrategyDetail(strategy = null) {
   const status = qs('#strategy-detail-status');
   const readiness = qs('#strategy-readiness-list');
 
+  qs('#strategy-detail-version').textContent = strategy?.version ? `v${strategy.version}` : '—';
   if (!strategy) {
     if (name) name.textContent = '请选择策略';
     if (status) {
@@ -97,18 +112,20 @@ function renderStrategyDetail(strategy = null) {
     ? '当前仅纳入页面展示，尚未接入现有执行链路。'
     : '当前已接入现有策略执行 / 因子统计链路。');
 
-  if (name) name.textContent = strategy.display_name || strategy.id || '-';
+  if (name) name.textContent = strategyTitle(strategy.display_name || strategy.id || '-');
   if (status) {
     status.className = `badge ${strategy.evidence_status === 'historical_diagnostic_fail' ? 'status-error' : strategy.availability === 'experimental' ? 'status-warn' : strategy.runtime_ready ? 'status-ok' : 'status-warn'}`;
     status.textContent = strategy.availability_label || '-';
   }
 
+  container.classList.remove('empty-state');
   container.innerHTML = `
     <div class="strategy-param-list">
       <div><span>得分阈值</span><b>${strategy.score_threshold ?? '-'}</b></div>
       <div><span>最大持仓数</span><b>${strategy.max_picks ?? '-'}</b></div>
-      <div><span>调仓频率</span><b>每日</b></div>
-      <div><span>实时状态</span><b>${escapeHtml(strategy.runtime_status || '-')}</b></div>
+      <div><span>研究模式</span><b>${escapeHtml(({frozen_baseline:'冻结基线',shadow_only:'影子研究'})[strategy.mode]||strategy.mode||'—')}</b></div>
+      <div><span>执行条件</span><b>${strategy.runtime_ready?'当前可研究运行':'待数据就绪'}</b></div>
+    </div><details class="strategy-parameter-evidence"><summary>完整参数与研究说明</summary><div class="strategy-param-list">
       <div><span>回测状态</span><b>${escapeHtml(strategy.backtest_status || '-')}</b></div>
       <div><span>验证状态</span><b>${escapeHtml(strategy.validation_status || '-')}</b></div>
       <div><span>证据状态</span><b>${escapeHtml(strategy.evidence_status || '-')}</b></div>
@@ -126,6 +143,7 @@ function renderStrategyDetail(strategy = null) {
       <span>样本 <b>${strategy.factor_sample_size ?? '-'}</b></span>
       <span>统计日 <b>${escapeHtml(strategy.factor_ci_date || '-')}</b></span>
     </div>
+    </details>
   `;
 
   renderStrategyReadiness(strategy);
@@ -138,6 +156,7 @@ function renderStrategyReadiness(strategy = null) {
     readiness.innerHTML = '<div class="empty-state">请选择策略</div>';
     return;
   }
+  readiness.classList.remove('empty-state');
   const datasetChecks = (strategy.dataset_statuses || []).map((item) => ({
     label: item.name,
     status: Boolean(item.ready),
@@ -165,6 +184,10 @@ function renderStrategyReadiness(strategy = null) {
   ];
   const reasons = strategy.readiness_reasons || strategy.runtime_reasons || [];
   readiness.innerHTML = `
+    <div class="strategy-readiness-highlights">
+      <article><strong>快照与数据覆盖</strong><span class="badge ${strategy.data_ready?'status-ok':'status-warn'}">${strategy.data_ready?'数据就绪':'数据待补'}</span><p>${escapeHtml(strategyEvidenceText((strategy.dataset_statuses||[]).map(item=>item.name).join(' / '))||'暂无数据覆盖记录')}</p></article>
+      <article><strong>时点与执行条件</strong><span class="badge ${strategy.runtime_ready?'status-ok':'status-warn'}">${strategy.runtime_ready?'满足执行条件':'当前未就绪'}</span><p>${escapeHtml(strategyEvidenceText((strategy.runtime_reasons||[])[0]||strategy.evidence_note||'按冻结口径检查，不代表策略有效'))}</p></article>
+    </div><details class="strategy-readiness-evidence"><summary>展开全部就绪检查与证据</summary>
     ${checks.map((item) => `
       <div class="strategy-readiness-item ${item.status ? '' : 'warn'}">
         <span>${escapeHtml(item.label)}</span>
@@ -172,7 +195,7 @@ function renderStrategyReadiness(strategy = null) {
         <em>${escapeHtml(item.time || item.detail || '-')}</em>
       </div>
     `).join('')}
-    <div class="strategy-warning-note">${escapeHtml(historicalDiagnosticFailed ? strategy.evidence_note : reasons[0] || strategy.evidence_note || '各能力状态均来自注册表声明与当前数据快照。')}</div>
+    <div class="strategy-warning-note">${escapeHtml(historicalDiagnosticFailed ? strategy.evidence_note : reasons[0] || strategy.evidence_note || '各能力状态均来自注册表声明与当前数据快照。')}</div></details>
   `;
 }
 
@@ -713,7 +736,8 @@ async function loadStrategiesPage() {
   const data = await fetchJson('/api/strategies');
   renderStrategyCards(data);
   renderStrategyTable(data.strategies || []);
-  const defaultStrategy = currentStrategyId || data.default_strategy || data.strategies?.[0]?.id;
+  const latest = [...(data.strategies || [])].sort((a,b)=>String(b.version).localeCompare(String(a.version),undefined,{numeric:true}))[0];
+  const defaultStrategy = currentStrategyId || data.default_strategy || latest?.id;
   if (defaultStrategy) {
     await loadStrategyDetail(defaultStrategy);
   } else {

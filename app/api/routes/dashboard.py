@@ -19,6 +19,21 @@ router = APIRouter(tags=["dashboard"])
 _DASHBOARD_REPOSITORY = DashboardRepository()
 
 
+@router.get("/dashboard/indices")
+def get_index_overview() -> dict:
+    from app.dashboard.index_market import index_overview
+    return index_overview()
+
+
+@router.get("/dashboard/index-series")
+def get_index_series(
+    symbol: str = Query(default="sh000001", pattern="^(sh000001|sz399001|sz399006)$"),
+    period: str = Query(default="minute", pattern="^(minute|daily)$"),
+) -> dict:
+    from app.dashboard.index_market import index_series
+    return index_series(symbol, period)
+
+
 _DASHBOARD_CACHE_FRESH_SECONDS = 30.0
 _DASHBOARD_CACHE_STORAGE_SECONDS = 900.0
 _DASHBOARD_CACHE_LOCKS = {limit: threading.Lock() for limit in range(1, 21)}

@@ -13,7 +13,7 @@
 <link href="/static/css/pages.css?v=20260819marketalert1" rel="stylesheet"/>
 <link href="/static/css/brand.css?v=20260729brand1" rel="stylesheet"/>
 <meta content="#0B1018" name="theme-color"/>
-<link href="/static/css/dark-design.css?v=20261113fidelity3" rel="stylesheet"/>
+<link href="/static/css/dark-design.css?v=20261113indices2" rel="stylesheet"/>
 </head>
 <body data-page="home" data-ui="dark-v1">
 <div class="app-shell dashboard-shell">
@@ -44,18 +44,7 @@
 <a class="btn btn-primary" href="/selection"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"></path></svg>运行选股</a>
 <a class="btn btn-secondary" href="/tracking"><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M4 5h16v16H4ZM8 3v4m8-4v4M4 11h16"></path></svg>查看复盘</a>
 </div></header>
-<section aria-live="assertive" class="market-risk-alert" hidden="" id="home-market-risk-alert"></section><section class="home-card-market-grid">
-<article class="home-card-market-item market-strength-item">
-<span>市场强度</span>
-<strong id="home-market-strength">-</strong>
-<div class="market-strength-thermo">
-<div class="thermo-track"><i id="home-strength-pointer" style="left:0%"></i></div>
-<div class="thermo-scale"><span>0</span><span>50</span><span>100</span></div>
-</div>
-<b id="home-market-state">加载中...</b>
-<small id="home-market-strength-change">较昨日 -</small>
-</article>
-<article class="home-card-market-item market-breadth-item">
+<section aria-live="assertive" class="market-risk-alert" hidden="" id="home-market-risk-alert"></section><section class="home-card-market-grid home-index-grid"><article class="home-card-market-item home-index-card" data-index-symbol="sh000001"><span>上证指数</span><div class="home-index-quote"><strong data-index-price>—</strong><b class="badge status-muted" data-index-change>待加载</b></div><div class="home-index-sparkline" data-index-sparkline></div><small data-index-clock>行情加载中…</small></article><article class="home-card-market-item home-index-card" data-index-symbol="sz399001"><span>深证成指</span><div class="home-index-quote"><strong data-index-price>—</strong><b class="badge status-muted" data-index-change>待加载</b></div><div class="home-index-sparkline" data-index-sparkline></div><small data-index-clock>行情加载中…</small></article><article class="home-card-market-item home-index-card" data-index-symbol="sz399006"><span>创业板指</span><div class="home-index-quote"><strong data-index-price>—</strong><b class="badge status-muted" data-index-change>待加载</b></div><div class="home-index-sparkline" data-index-sparkline></div><small data-index-clock>行情加载中…</small></article><article class="home-card-market-item market-breadth-item">
 <span>涨 / 跌 / 平</span>
 <strong id="home-market-breadth">-</strong>
 <div aria-hidden="true" class="market-breadth-bar">
@@ -64,29 +53,7 @@
 <i class="down" id="home-breadth-down" style="width:0%"></i>
 </div>
 <small id="home-market-active">-</small>
-</article>
-<article class="home-card-market-item">
-<span>沪深涨停 / 跌停</span>
-<strong id="home-market-limit">-</strong>
-<small id="home-market-big-move">-</small>
-</article>
-<article class="home-card-market-item home-market-time-card">
-<div class="market-time-title">行情时间 <em>ⓘ</em></div>
-<div class="market-time-body">
-<div aria-hidden="true" class="market-time-clock">
-<i class="clock-hand hour" id="home-clock-hour"></i>
-<i class="clock-hand minute" id="home-clock-minute"></i>
-</div>
-<div class="market-time-info">
-<b id="home-market-session">交易状态</b>
-<strong id="home-market-clock">--:--:--</strong>
-<small id="home-market-date">----</small>
-<small id="home-market-weekday">星期-</small>
-</div>
-</div>
-<small class="market-time-countdown" id="home-market-countdown">距离早盘 --:--:--</small>
-</article>
-</section><section class="home-overview-grid"><section class="card home-market-visual"><div class="card-header with-actions"><h2>市场走势</h2><span class="badge status-muted">行业涨跌截面</span></div><p class="muted" id="home-visual-evidence">真实行业快照 · 非指数分时</p><div class="home-market-visual-chart" id="home-market-visual-chart"></div></section><section class="home-leadership-panel card">
+</article></section><section class="home-overview-grid"><section class="card home-market-visual"><div class="card-header with-actions"><h2>市场走势</h2><span class="home-index-legend" id="home-index-legend">上证指数</span></div><div class="home-index-chart-toolbar"><div aria-label="指数曲线周期" class="home-index-periods"><button aria-pressed="true" class="active" data-index-period="minute" type="button">分时</button><button aria-pressed="false" data-index-period="daily" type="button">日线</button></div><label class="sr-only" for="home-index-symbol">选择指数</label><select id="home-index-symbol"><option value="sh000001">上证指数</option><option value="sz399001">深证成指</option><option value="sz399006">创业板指</option></select></div><div class="home-market-visual-chart" id="home-market-visual-chart"><div class="empty-state">指数曲线加载中…</div></div><p class="muted" id="home-visual-evidence">分时行情保留原始交易日期，不将历史收盘当作今日实盘。</p></section><section class="home-leadership-panel card">
 <div class="home-research-panel-head">
 <div>
 <span>Market Mainline &amp; Sector Cycle</span>
@@ -127,7 +94,40 @@
 <div class="empty-state">加载中...</div>
 </div>
 </article>
-<h2 class="sector-unified-title">热点与板块资金</h2></section></section><details class="home-research-disclosure"><summary><strong>市场择时与研究情景</strong><span>仅研究观察 · 展开证据</span></summary><section class="home-market-timing-section card">
+<h2 class="sector-unified-title">热点与板块资金</h2></section></section><details class="home-research-disclosure home-market-details"><summary><strong>市场强度、涨跌停与行情时钟</strong><span>展开市场概览</span></summary><section class="home-card-market-grid home-legacy-market-grid">
+<article class="home-card-market-item market-strength-item">
+<span>市场强度</span>
+<strong id="home-market-strength">-</strong>
+<div class="market-strength-thermo">
+<div class="thermo-track"><i id="home-strength-pointer" style="left:0%"></i></div>
+<div class="thermo-scale"><span>0</span><span>50</span><span>100</span></div>
+</div>
+<b id="home-market-state">加载中...</b>
+<small id="home-market-strength-change">较昨日 -</small>
+</article>
+
+<article class="home-card-market-item">
+<span>沪深涨停 / 跌停</span>
+<strong id="home-market-limit">-</strong>
+<small id="home-market-big-move">-</small>
+</article>
+<article class="home-card-market-item home-market-time-card">
+<div class="market-time-title">行情时间 <em>ⓘ</em></div>
+<div class="market-time-body">
+<div aria-hidden="true" class="market-time-clock">
+<i class="clock-hand hour" id="home-clock-hour"></i>
+<i class="clock-hand minute" id="home-clock-minute"></i>
+</div>
+<div class="market-time-info">
+<b id="home-market-session">交易状态</b>
+<strong id="home-market-clock">--:--:--</strong>
+<small id="home-market-date">----</small>
+<small id="home-market-weekday">星期-</small>
+</div>
+</div>
+<small class="market-time-countdown" id="home-market-countdown">距离早盘 --:--:--</small>
+</article>
+</section></details><details class="home-research-disclosure"><summary><strong>市场择时与研究情景</strong><span>仅研究观察 · 展开证据</span></summary><section class="home-market-timing-section card">
 <div class="card-header with-actions">
 <div>
 <p class="card-kicker">Market Timing</p>
@@ -215,7 +215,7 @@
 </section></details></section>
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
-<script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
-<script src="/static/js/home.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113indices2"></script>
+<script src="/static/js/home.js?v=20260819marketalert1&amp;ui=20261113indices2"></script>
 </body>
 </html>

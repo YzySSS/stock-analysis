@@ -53,6 +53,8 @@ class StrategyService:
             "id": strategy_id,
             "display_name": item.get("display_name"),
             "version": item.get("version"),
+            "immutable_tag": item.get("immutable_tag"),
+            "supersedes": item.get("supersedes"),
             "status": status,
             "mode": mode,
             "description": item.get("description"),

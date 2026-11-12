@@ -242,7 +242,6 @@ function renderMarketOverview(overview) {
   const bjLimitText = bjLimit ? ` · 北证 ${bjLimit.up ?? 0}/${bjLimit.down ?? 0}` : '';
   setText('#home-market-big-move', `大涨 ${overview.strong_up_count ?? '-'} · 大跌 ${overview.strong_down_count ?? '-'}${bjLimitText}`);
   updateMarketTimeCard();
-  renderMarketVisual(overview);
   renderSectorList('#home-strong-sectors', overview.strong_sectors, '暂无强势板块统计');
   renderSectorList('#home-weak-sectors', overview.weak_sectors, '暂无弱势板块统计');
 }
@@ -797,23 +796,71 @@ document.addEventListener('DOMContentLoaded', () => {
   updateMarketTimeCard();
   setInterval(updateMarketTimeCard, 1000);
   loadHomePage();
+  loadHomeIndices();
 });
 
-// A real industry cross-section occupies the concept's market chart slot. No
-// fabricated index time series: the data scope and quote clock are explicit.
-function renderMarketVisual(overview) {
-  const el = qs('#home-market-visual-chart');
-  if (!el) return;
-  const byName = new Map([...(overview.strong_sectors || []), ...(overview.weak_sectors || [])].map(s => [s.name, s]));
-  const items = [...byName.values()].filter(s => s.amount_weighted_pct_chg != null || s.avg_pct_chg != null).slice(0,10);
-  setText('#home-visual-evidence', `真实行业涨跌截面 · ${overview.latest_quote_time || '行情时间待补'} · 非指数分时`);
-  if (!items.length) { el.innerHTML = '<div class="empty-state">当前接口尚无可用行业快照，不填充示例走势。</div>'; return; }
-  const values = items.map(s => Number(s.amount_weighted_pct_chg ?? s.avg_pct_chg));
-  const max = Math.max(1,...values.map(Math.abs));
-  const width=700,base=92,step=620/items.length;
-  el.innerHTML = `<svg viewBox="0 0 700 185" role="img" aria-label="行业涨跌幅截面，非时间序列">
-    ${[20,56,92,128,164].map(y=>`<line x1="40" y1="${y}" x2="690" y2="${y}" stroke="#2b3b50" stroke-dasharray="3 3"/>`).join('')}
-    <text x="2" y="23" fill="#93a4b8" font-size="11">${max.toFixed(1)}%</text><text x="12" y="96" fill="#93a4b8" font-size="11">0</text><text x="0" y="162" fill="#93a4b8" font-size="11">-${max.toFixed(1)}%</text>
-    ${items.map((item,i)=>{ const v=values[i],h=Math.abs(v)/max*66,x=48+i*step; return `<rect x="${x}" y="${v>=0?base-h:base}" width="${Math.min(36,step-14)}" height="${Math.max(1,h)}" rx="2" fill="${v>=0?'#ef7279':'#3abb9e'}"/><text x="${x}" y="${v>=0?base-h-6:base+h+13}" fill="#c9d4e4" font-size="10">${v.toFixed(1)}%</text><text x="${x}" y="181" fill="#93a4b8" font-size="10">${escapeHtml(String(item.name).slice(0,4))}</text>`;}).join('')}
-  </svg>`;
+// Index charts use provider series, never cross-sectional industry values.
+let homeIndexItems = [];
+let homeIndexPeriod = 'minute';
+let homeIndexRequest = 0;
+
+function indexLineSvg(series, {mini = false, color = '#568bfa'} = {}) {
+  const points = (series?.points || []).filter(p => Number.isFinite(p.price));
+  if (points.length < 2) return '<div class="empty-state">暂无可绘制序列</div>';
+  const w=mini?280:800, h=mini?36:215, l=mini?1:48, r=w-8, top=mini?2:10, bottom=mini?h-2:150;
+  const values=points.map(p=>p.price), min=Math.min(...values), max=Math.max(...values), pad=(max-min)*.12 || max*.001;
+  const low=min-pad, high=max+pad, x=i=>l+(r-l)*i/(points.length-1), y=v=>top+(high-v)/(high-low)*(bottom-top);
+  const line=points.map((p,i)=>`${x(i).toFixed(2)},${y(p.price).toFixed(2)}`).join(' ');
+  const fill=`${l},${bottom} ${line} ${r},${bottom}`;
+  const grids=mini?'':[0,1,2,3].map(i=>{const yy=top+(bottom-top)*i/3;return `<line x1="${l}" y1="${yy}" x2="${r}" y2="${yy}" stroke="#304256" stroke-dasharray="3 3"/><text x="0" y="${yy+4}" fill="#93a4b8" font-size="11">${(high-(high-low)*i/3).toFixed(0)}</text>`;}).join('');
+  const ticks=mini?'':[0,.25,.5,.75,1].map(f=>{const i=Math.round((points.length-1)*f), label=series.period==='daily'?points[i].time.slice(5):points[i].time;return `<text x="${x(i)}" y="167" text-anchor="${f===0?'start':f===1?'end':'middle'}" fill="#93a4b8" font-size="11">${escapeHtml(label)}</text>`;}).join('');
+  const maxVolume=Math.max(1,...points.map(p=>p.volume||0));
+  const bars=mini?'':points.map((p,i)=>p.volume==null?'':`<rect x="${x(i)}" y="${211-(p.volume/maxVolume*32)}" width="${Math.max(.8,(r-l)/points.length*.65)}" height="${p.volume/maxVolume*32}" fill="#456fae"/>`).join('');
+  const hover=mini?'':points.map((p,i)=>`<rect x="${x(i)-Math.max(2,(r-l)/points.length/2)}" y="${top}" width="${Math.max(4,(r-l)/points.length)}" height="${bottom-top}" fill="transparent"><title>${escapeHtml(series.trade_date||'')} ${escapeHtml(p.time)} · ${p.price.toFixed(2)}</title></rect>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(series.name||'指数')} · ${escapeHtml(series.trade_date||'')} · ${series.period==='daily'?'日收盘折线':'分时折线'} · ${points.length}个真实数据点"><defs><linearGradient id="index-fill-${mini?'mini-'+series.symbol:'main'}" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".3"/><stop offset="100%" stop-color="${color}" stop-opacity=".02"/></linearGradient></defs>${grids}<polygon points="${fill}" fill="url(#index-fill-${mini?'mini-'+series.symbol:'main'})"/><polyline points="${line}" fill="none" stroke="${color}" stroke-width="${mini?1.7:2}" stroke-linejoin="round"/>${ticks}${bars}${hover}</svg>`;
 }
+
+async function showHomeIndexSeries() {
+  const token=++homeIndexRequest;
+  const symbol=qs('#home-index-symbol').value;
+  const item=homeIndexItems.find(i=>i.symbol===symbol);
+  const name=item?.name || qs('#home-index-symbol').selectedOptions[0].textContent;
+  const chart=qs('#home-market-visual-chart');
+  setText('#home-index-legend',name);
+  chart.innerHTML='<div class="empty-state">指数曲线加载中…</div>';
+  try {
+    const series=homeIndexPeriod==='minute' && item ? item.series : await fetchJson(`/api/dashboard/index-series?symbol=${encodeURIComponent(symbol)}&period=${homeIndexPeriod}`);
+    if(token!==homeIndexRequest)return;
+    if(!series || series.status!=='available') throw Error('当前指数序列暂不可用');
+    chart.innerHTML=indexLineSvg({...series,name});
+    setText('#home-visual-evidence',`${series.trade_date} · 腾讯行情 · ${homeIndexPeriod==='daily'?'近60个交易日日收盘 / 成交量':'当日分时 / 分钟成交量'}${series.cache_stale?' · 缓存（上游暂不可用）':''}`);
+  }catch(error){if(token===homeIndexRequest){chart.innerHTML=`<div class="empty-state">${escapeHtml(error.message)}，不填充示例走势。</div>`;setText('#home-visual-evidence','数据源暂不可用，请稍后刷新。');}}
+}
+
+async function loadHomeIndices() {
+  try {
+    const data=await fetchJson('/api/dashboard/indices');
+    homeIndexItems=data.indices||[];
+    for(const item of homeIndexItems){
+      const card=qs(`[data-index-symbol="${item.symbol}"]`); if(!card)continue;
+      const quote=item.quote;
+      card.querySelector('[data-index-price]').textContent=quote?formatNumber(quote.price,2):'—';
+      const change=card.querySelector('[data-index-change]');
+      change.className=`badge ${quote?.change_pct==null?'status-muted':quote.change_pct>=0?'index-rise':'index-fall'}`;
+      change.textContent=quote?.change_pct==null?'暂无报价':`${quote.change_pct>=0?'+':''}${quote.change_pct.toFixed(2)}%`;
+      card.querySelector('[data-index-clock]').textContent=quote?`${quote.quote_time}${item.quote_cache_stale?' · 缓存':''}`:'行情源暂不可用';
+      const series=item.series;
+      card.querySelector('[data-index-sparkline]').innerHTML=series?.status==='available' && quote && series.trade_date===quote.trade_date ? indexLineSvg({...series,name:item.name},{mini:true,color:quote.change_pct>=0?'#ef7279':'#3abb9e'}) : '<small class="muted">分时序列暂不可用</small>';
+    }
+    await showHomeIndexSeries();
+  }catch(error){qsa('[data-index-clock]').forEach(el=>el.textContent='行情加载失败，请稍后刷新');qs('#home-market-visual-chart').innerHTML='<div class="empty-state">指数行情暂不可用，不填充示例走势。</div>';}
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  qs('#home-index-symbol')?.addEventListener('change',showHomeIndexSeries);
+  qsa('[data-index-period]').forEach(button=>button.addEventListener('click',()=>{
+    homeIndexPeriod=button.dataset.indexPeriod;
+    qsa('[data-index-period]').forEach(b=>{const active=b===button;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
+    showHomeIndexSeries();
+  }));
+});
