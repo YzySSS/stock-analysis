@@ -38,7 +38,7 @@ from app.data_ingestion.market_opinion_task_log import (  # noqa: E402
 )
 from app.shared.db import mysql_conn  # noqa: E402
 from app.shared.market_opinion_taxonomy import THEME_INDUSTRY_HINTS, THEME_KEYWORDS  # noqa: E402
-from app.shared.task_log import TaskRunLogger  # noqa: E402
+from app.display_cache.events import TaskRunLogger  # noqa: E402
 
 TASK_NAME = "market_opinion_update"
 LOCK_NAME = "market_opinion_update_lock"

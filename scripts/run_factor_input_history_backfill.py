@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.data_ingestion.factor_input_history_sync import FactorInputHistorySync
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 
 def build_run_id() -> str:

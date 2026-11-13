@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.stock_selection.technical_feature_daily import TechnicalFeatureDailyRefreshService
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 
 TASK_NAME = "stock_technical_feature_daily_refresh"

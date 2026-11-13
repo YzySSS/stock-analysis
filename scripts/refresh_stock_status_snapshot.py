@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.shared.db import mysql_conn
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 LOOKBACK_DAYS = 30
 TASK_NAME = "stock_status_snapshot_refresh"

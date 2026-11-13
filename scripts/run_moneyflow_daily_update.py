@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.data_ingestion.moneyflow_sync import MoneyflowSync
 from app.shared.db import mysql_conn
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 
 def fetch_recent_trade_dates(days: int) -> list[str]:

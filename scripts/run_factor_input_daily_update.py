@@ -17,7 +17,7 @@ from app.shared.instrument_policy import (
     STOCK_DAILY_COMPLETENESS_RATIO,
     STOCK_INSTRUMENT_TYPE,
 )
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 
 DAILY_BASIC_MIN_COVERAGE_RATIO = 0.80

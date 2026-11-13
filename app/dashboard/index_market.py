@@ -26,6 +26,7 @@ _REFRESH_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-
 _HTTP_LOCAL = threading.local()
 _FRESH_SECONDS = 30
 _STALE_SECONDS = 900
+_WARM_CURSOR = 0
 
 
 def _http_session() -> requests.Session:
@@ -125,16 +126,25 @@ def parse_series(payload: dict, symbol: str, period: str) -> dict[str, Any]:
 
 
 def _load_cached(cache, key: str, load: Callable[[], dict]) -> dict:
-    with _LOCK:
+    from app.display_cache.service import lease
+    with _LOCK, lease('index:' + key, backend=cache) as owns:
+        # Double-check after waiting for the local/provider lane.
+
         cached = cache.get(key)
         now = time.time()
         if isinstance(cached, dict) and now < cached.get("refresh_after", cached.get("cached_at", 0) + _FRESH_SECONDS):
             return cached
+        if not owns():
+            # Another process is publishing. Never extend old evidence here.
+            if isinstance(cached, dict) and now - cached.get('cached_at', 0) < _STALE_SECONDS:
+                return cached
+            # Redis is optional; cold requests can still fetch live evidence.
         try:
             payload = load()
             now = time.time()
             result = {"payload": payload, "cached_at": now, "refresh_after": now + _FRESH_SECONDS}
-            cache.set(key, result, ttl_seconds=_STALE_SECONDS)
+            if owns():
+                cache.set(key, result, ttl_seconds=_STALE_SECONDS)
             return result
         except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
             now = time.time()
@@ -142,11 +152,13 @@ def _load_cached(cache, key: str, load: Callable[[], dict]) -> dict:
                 # Back off after a failed refresh, without extending the life of
                 # old provider evidence beyond its original 15-minute bound.
                 result = dict(cached, refresh_after=now + _FRESH_SECONDS, refresh_failed=True)
-                cache.set(key, result, ttl_seconds=_STALE_SECONDS - (now - cached["cached_at"]))
+                if owns():
+                    cache.set(key, result, ttl_seconds=_STALE_SECONDS - (now - cached["cached_at"]))
                 return result
             result = {"payload": {"status": "unavailable"}, "cached_at": now,
                       "refresh_after": now + _FRESH_SECONDS, "refresh_failed": True}
-            cache.set(key, result, ttl_seconds=_FRESH_SECONDS)
+            if owns():
+                cache.set(key, result, ttl_seconds=_FRESH_SECONDS)
             return result
 
 
@@ -182,33 +194,62 @@ def _cached(key: str, load: Callable[[], dict]) -> dict:
     return dict(result["payload"], cache_stale=False, cache_refreshing=False)
 
 
+def _load_series(symbol: str, period: str) -> dict:
+    url = ('https://web.ifzq.gtimg.cn/appstock/app/minute/query' if period == 'minute'
+           else 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get')
+    params = {'code': symbol} if period == 'minute' else {'param': f'{symbol},day,,,60,qfq'}
+    response = _http_session().get(url, params=params, timeout=(2, 4))
+    response.raise_for_status()
+    return parse_series(response.json(), symbol, period)
+
+
+def _load_quotes() -> dict:
+    response = _http_session().get('https://qt.gtimg.cn/q=' + ','.join(INDICES), timeout=(2, 4))
+    response.raise_for_status()
+    quotes = parse_quotes(response.text)
+    if not quotes:
+        raise ValueError('empty index quotes')
+    return {'quotes': quotes, 'status': 'available'}
+
+
+def warm_index_cache() -> dict:
+    """Prewarm exactly seven keys synchronously in the one warmer lane."""
+    global _WARM_CURSOR
+    cache = get_cache_backend()
+    result = {}
+    keys = [('quotes', _load_quotes)] + [
+        (f'{symbol}:{period}', lambda s=symbol, p=period: _load_series(s, p))
+        for period in ('minute', 'daily') for symbol in INDICES
+    ]
+    started = time.monotonic()
+    # Rotating, <=8s soft budget (one HTTP timeout may run past it). A provider
+    # outage cannot monopolize the SQL warmer for all seven timeout windows.
+    for i in range(len(keys)):
+        n = _WARM_CURSOR % len(keys)
+        _WARM_CURSOR += 1
+        key, load = keys[n]
+        value = _load_cached(cache, 'dashboard:index-display:v1:' + key, load)
+        result[key] = 'failed' if value.get('refresh_failed') else 'available'
+        if time.monotonic() - started >= 8:
+            result['remaining'] = 'deferred_to_next_cycle'
+            break
+    return result
+
+
 def index_series(symbol: str, period: str) -> dict:
-    if symbol not in INDICES or period not in ("minute", "daily"):
-        raise ValueError("unsupported index or period")
-    def load():
-        url = ("https://web.ifzq.gtimg.cn/appstock/app/minute/query" if period == "minute"
-               else "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get")
-        params = {"code": symbol} if period == "minute" else {"param": f"{symbol},day,,,60,qfq"}
-        response = _http_session().get(url, params=params, timeout=(2, 4))
-        response.raise_for_status()
-        return parse_series(response.json(), symbol, period)
-    return dict(_cached(f"{symbol}:{period}", load), symbol=symbol, name=INDICES[symbol], period=period)
+    if symbol not in INDICES or period not in ('minute', 'daily'):
+        raise ValueError('unsupported index or period')
+    return dict(_cached(f'{symbol}:{period}', lambda: _load_series(symbol, period)),
+                symbol=symbol, name=INDICES[symbol], period=period)
 
 
 def index_overview() -> dict:
-    def load():
-        response = _http_session().get("https://qt.gtimg.cn/q=" + ",".join(INDICES), timeout=(2, 4))
-        response.raise_for_status()
-        quotes = parse_quotes(response.text)
-        if not quotes:
-            raise ValueError("empty index quotes")
-        return {"quotes": quotes, "status": "available"}
-    quotes = _cached("quotes", load)
+    quotes = _cached('quotes', _load_quotes)
     items = []
     for symbol, name in INDICES.items():
-        quote = (quotes.get("quotes") or {}).get(symbol)
-        items.append({"symbol": symbol, "name": name, "quote": quote,
-                      "quote_cache_stale": quotes.get("cache_stale", False),
-                      "quote_cache_refreshing": quotes.get("cache_refreshing", False),
-                      "series": index_series(symbol, "minute")})
-    return {"indices": items, "display_only": True}
+        quote = (quotes.get('quotes') or {}).get(symbol)
+        items.append({'symbol': symbol, 'name': name, 'quote': quote,
+                      'quote_cache_stale': quotes.get('cache_stale', False),
+                      'quote_cache_refreshing': quotes.get('cache_refreshing', False),
+                      'series': index_series(symbol, 'minute')})
+    return {'indices': items, 'display_only': True}

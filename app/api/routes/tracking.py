@@ -42,6 +42,7 @@ def _tracking_summary_cache_key(
             "selection_date": selection_date,
             "instrument_type": instrument_type,
             "latest_only": latest_only,
+            "market_revision": backend.get("display:v1:revision:market"),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -61,6 +62,8 @@ def _cache_tracking_summary(key: str, payload: dict[str, Any]) -> None:
 
 
 def _invalidate_tracking_summary_cache() -> None:
+    from app.display_cache.service import invalidate
+    invalidate('tracking')
     # Generation invalidation is O(1), works for memory and Redis backends, and
     # avoids a broad cache clear that could evict unrelated API data.
     get_cache_backend().set(
@@ -575,6 +578,11 @@ def get_tracking_by_run(
     compact: bool = Query(default=False),
     include_runs: bool = Query(default=True),
 ) -> dict:
+    if (run_id is None and strategy_id is None and selection_date is None
+            and limit == 10 and offset == 0 and instrument_type == 'stock'
+            and compact and not include_runs):
+        from app.display_cache.service import get
+        return get('tracking')
     return _tracking_payload(
         run_id=run_id,
         strategy_id=strategy_id,
@@ -730,6 +738,13 @@ def get_tracking_filters(
     instrument_type: str = Query(default="stock"),
     strategy_id: Optional[str] = Query(default=None),
 ) -> dict:
+    if instrument_type == 'stock' and strategy_id is None:
+        from app.display_cache.service import get
+        return get('tracking-filters')
+    return _build_tracking_filters(instrument_type, strategy_id)
+
+
+def _build_tracking_filters(instrument_type: str, strategy_id: Optional[str]) -> dict:
     runs = _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id, limit=200)
     seen_dates = []
     seen = set()

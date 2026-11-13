@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.shared.db import mysql_conn
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 TASK_NAME = "market_fund_flow_update"
 LOCK_NAME = "market_fund_flow_update_lock"

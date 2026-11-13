@@ -6,6 +6,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from app.api import strategy_display as display
+from app.display_cache import service as display_cache
+from app.shared.cache import InMemoryCacheBackend
 from app.strategies.capability import StrategyCapabilityService
 
 
@@ -23,7 +25,7 @@ class StrategyDisplayTests(unittest.TestCase):
                 results.append(display.get_display_dataset_snapshot())
             except BaseException as exc:
                 errors.append(exc)
-        with patch.object(display, "_DATASET_CACHE", None), patch.object(display, "_query_display_dataset_snapshot", side_effect=query) as live_query:
+        with patch.object(display_cache, "get_cache_backend", return_value=InMemoryCacheBackend()), patch.object(display, "_query_display_dataset_snapshot", side_effect=query) as live_query:
             first, second = threading.Thread(target=read), threading.Thread(target=read)
             first.start()
             self.assertTrue(entered.wait(2))
@@ -37,10 +39,15 @@ class StrategyDisplayTests(unittest.TestCase):
             live_query.assert_called_once()
 
     def test_failed_live_read_never_reuses_expired_page_readiness(self):
-        with patch.object(display, "_DATASET_CACHE", (0, {"stock_count": 1})), patch.object(display.time, "monotonic", return_value=1000), patch.object(display, "_query_display_dataset_snapshot", side_effect=RuntimeError("unavailable")):
-            with self.assertRaises(RuntimeError):
-                display.get_display_dataset_snapshot()
-            self.assertEqual(display._DATASET_CACHE[0], 0)
+        cache = InMemoryCacheBackend()
+        clock = [1000.0]
+        with patch.object(display_cache, 'get_cache_backend', return_value=cache), patch.object(display_cache.time, 'time', side_effect=lambda: clock[0]):
+            display_cache.refresh('dataset', lambda: {'stock_count': 1})
+            clock[0] = 1061
+            with patch.object(display, '_query_display_dataset_snapshot', side_effect=RuntimeError('unavailable')):
+                with self.assertRaises(RuntimeError):
+                    display.get_display_dataset_snapshot()
+            self.assertIsNone(display_cache.entry('dataset'))
 
     def test_display_query_matches_runtime_inputs_with_only_access_path_hints(self):
         def fixture():

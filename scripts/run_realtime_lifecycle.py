@@ -18,7 +18,7 @@ from app.data_ingestion.realtime_lifecycle import (
     build_lifecycle_plan,
     run_lifecycle,
 )
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 TASK_NAME = "stock_realtime_lifecycle"
 

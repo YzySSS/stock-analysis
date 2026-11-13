@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.data_ingestion.stock_status_pit_sync import StockStatusPitSync  # noqa: E402
 from app.shared.db import mysql_conn  # noqa: E402
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock  # noqa: E402
-from app.shared.task_log import TaskRunLogger  # noqa: E402
+from app.display_cache.events import TaskRunLogger  # noqa: E402
 
 
 TASK_NAME = "stock_status_pit_backfill"

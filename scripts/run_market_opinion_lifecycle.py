@@ -15,7 +15,7 @@ from app.data_ingestion.market_opinion_lifecycle import (
     build_market_opinion_lifecycle_plan,
     run_market_opinion_lifecycle,
 )
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 TASK_NAME = "market_opinion_lifecycle"
 

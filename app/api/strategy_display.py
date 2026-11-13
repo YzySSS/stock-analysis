@@ -6,8 +6,6 @@ access paths differ; coverage, dates and readiness inputs must remain equal.
 """
 from __future__ import annotations
 
-import threading
-import time
 from typing import Any, Dict
 
 from app.shared.db import mysql_read_conn
@@ -19,24 +17,10 @@ from app.shared.instrument_policy import (
 from app.stock_selection.dataset_scope import required_dataset_code_prefixes, sql_code_prefix_filter
 from app.strategies.capability import StrategyCapabilityService
 
-_DATASET_REFRESH_LOCK = threading.Lock()
-_DATASET_CACHE: tuple[float, Dict[str, Any]] | None = None
-
-
 def get_display_dataset_snapshot() -> Dict[str, Any]:
-    global _DATASET_CACHE
-    now = time.monotonic()
-    cached = _DATASET_CACHE
-    if cached and now - cached[0] < StrategyCapabilityService.DATASET_CACHE_SECONDS:
-        return cached[1]
-    # Page switches can request the same snapshot from multiple GET endpoints.
-    with _DATASET_REFRESH_LOCK:
-        cached = _DATASET_CACHE
-        if cached and time.monotonic() - cached[0] < StrategyCapabilityService.DATASET_CACHE_SECONDS:
-            return cached[1]
-        snapshot = _query_display_dataset_snapshot()
-        _DATASET_CACHE = (time.monotonic(), snapshot)
-        return snapshot
+    from app.display_cache.service import get
+    # Same query contract and <=60s bound; Redis survives API restarts.
+    return get('dataset', _query_display_dataset_snapshot)
 
 
 def _query_display_dataset_snapshot() -> Dict[str, Any]:

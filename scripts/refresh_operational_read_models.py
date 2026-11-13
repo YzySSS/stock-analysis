@@ -17,7 +17,7 @@ from app.read_models.materialization import (
     LocalReadModelMaterializer,
 )
 from app.api.routes.dashboard import warm_dashboard_compact_cache
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 
 TASK_NAME = "operational_read_models_refresh"

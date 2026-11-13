@@ -1239,18 +1239,18 @@ def _market_opinion_storage_summary() -> dict:
 
 @router.get("/system/status")
 def system_status() -> dict:
-    now = time.time()
-    cached_entry = get_cache_backend().get(SYSTEM_STATUS_CACHE_KEY)
-    if isinstance(cached_entry, dict) and isinstance(cached_entry.get("payload"), dict):
-        cached = dict(cached_entry["payload"])
-        cached_at = float(cached_entry.get("cached_at") or now)
-        cached["cache"] = {
-            "hit": True,
-            "ttl_seconds": SYSTEM_STATUS_CACHE_TTL_SECONDS,
-            "age_seconds": round(max(0.0, now - cached_at), 2),
-        }
-        return cached
+    from app.display_cache.service import get, entry, TTLS
+    payload = dict(get('system'))
+    cached = entry('system')
+    payload['cache'] = {
+        'hit': cached is not None,
+        'ttl_seconds': TTLS['system'],
+        'age_seconds': round(time.time() - cached['built_at'], 2) if cached else 0,
+    }
+    return payload
 
+
+def _build_system_status() -> dict:
     mysql_info = ping_mysql()
     task_runs = _latest_task_runs()
     readiness = build_operational_readiness()
@@ -1291,15 +1291,5 @@ def system_status() -> dict:
             "tracking_stats_days": 14,
         },
         "market_opinion_update": _market_opinion_update_status(task_runs),
-    }
-    get_cache_backend().set(
-        SYSTEM_STATUS_CACHE_KEY,
-        {"payload": payload, "cached_at": now},
-        ttl_seconds=SYSTEM_STATUS_CACHE_TTL_SECONDS,
-    )
-    payload["cache"] = {
-        "hit": False,
-        "ttl_seconds": SYSTEM_STATUS_CACHE_TTL_SECONDS,
-        "age_seconds": 0,
     }
     return payload

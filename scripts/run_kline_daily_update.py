@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from datetime import date, datetime, time, timedelta
 
 from app.data_ingestion.daily_kline_sync import DailyKlineSync
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 
 TUSHARE_DAILY_READY_TIME = time(18, 0)

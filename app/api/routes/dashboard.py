@@ -449,6 +449,11 @@ def warm_dashboard_compact_cache(limit: int = 8) -> dict[str, Any]:
     normalized_limit = int(limit)
     if normalized_limit < 1 or normalized_limit > 20:
         raise ValueError("dashboard cache limit must be between 1 and 20")
+    if normalized_limit == 8:
+        from app.display_cache.service import refresh, PREFIX
+        result = refresh('dashboard')
+        return {'status': 'success' if result else 'busy_or_superseded',
+                'limit': normalized_limit, 'cache_key': f'{PREFIX}:dashboard'}
     payload = _build_dashboard_summary(normalized_limit, compact=True)
     _cache_dashboard(normalized_limit, payload)
     return {
@@ -1378,6 +1383,10 @@ def dashboard_summary(
 ) -> dict:
     if not compact:
         return _build_dashboard_summary(limit, compact=False)
+
+    if limit == 8:
+        from app.display_cache.service import get
+        return get('dashboard')
 
     cached = _get_cached_dashboard(limit)
     if cached is not None:

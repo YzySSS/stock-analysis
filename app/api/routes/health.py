@@ -44,7 +44,9 @@ def health() -> dict:
 
 @router.get("/health/performance")
 def health_performance() -> dict:
+    from app.display_cache.service import diagnostics
     return {
+        "display_cache": diagnostics(),
         "requests": request_metrics.snapshot(),
         "database": database_metrics.snapshot(),
         "connection_pool": mysql_pool_diagnostics(),

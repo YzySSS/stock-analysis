@@ -11,7 +11,7 @@ from datetime import datetime
 
 from app.data_ingestion.daily_kline_sync import DailyKlineSync
 from app.shared.db import mysql_conn
-from app.shared.task_log import TaskRunLogger
+from app.display_cache.events import TaskRunLogger
 
 BATCH_SIZE = 50
 START_DATE = '2025-01-01'

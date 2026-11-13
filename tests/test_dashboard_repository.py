@@ -204,17 +204,11 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(mainline["branches"][0]["sector_name"], "医药")
 
     def test_dashboard_cache_warmer_builds_compact_shared_payload(self):
-        with patch.object(
-            dashboard,
-            "_build_dashboard_summary",
-            return_value={"latest_trade_date": "2026-07-21"},
-        ) as build, patch.object(dashboard, "_cache_dashboard") as cache:
+        with patch('app.display_cache.service.refresh', return_value={'payload': {'latest_trade_date': '2026-07-21'}}) as refresh:
             result = dashboard.warm_dashboard_compact_cache(8)
-
-        build.assert_called_once_with(8, compact=True)
-        cache.assert_called_once_with(8, {"latest_trade_date": "2026-07-21"})
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["cache_key"], "dashboard:summary:v5:compact:8")
+        refresh.assert_called_once_with('dashboard')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['cache_key'], 'display:v1:dashboard')
 
     def test_dashboard_cache_warmer_rejects_invalid_limit(self):
         with self.assertRaises(ValueError):

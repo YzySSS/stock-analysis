@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from contextlib import asynccontextmanager
 import time
 import uuid
 
@@ -26,7 +28,20 @@ from app.api.routes.web import router as web_router
 from app.shared.observability import request_metrics
 
 
+@asynccontextmanager
+async def lifespan(app):
+    from app.display_cache.service import DisplayWarmer
+    warmer = DisplayWarmer()
+    if os.getenv('DISPLAY_CACHE_WARMER_ENABLED', 'true').lower() in {'true', '1', 'yes'}:
+        warmer.start()
+    try:
+        yield
+    finally:
+        warmer.stop()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Stock Analysis API",
     version="0.1.0",
     description="股票分析项目第一版 Web API",
