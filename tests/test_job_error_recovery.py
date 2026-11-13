@@ -138,6 +138,35 @@ class JobErrorRecoveryTests(unittest.TestCase):
         self.assertEqual(items[1]["recovery_status"], "historical")
         self.assertEqual(cursor.execute.call_count, 2)
 
+    def test_recovery_lookup_deduplicates_task_names_without_losing_error_categories(self):
+        context = MagicMock()
+        cursor = context.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchall.side_effect = [
+            [
+                {"source_kind": "scheduled_task", "job_type": task, "error_code": code,
+                 "last_seen_at": "2026-07-26 03:47:03"}
+                for task, code in [("task_b", "one"), ("task_a", "one"), ("task_b", "two")]
+            ],
+            [
+                {"task_name": task, "status": "running", "latest_success_at": "2026-07-26 05:00:00"}
+                for task in ["task_a", "task_b"]
+            ],
+        ]
+        with patch("app.jobs.readiness.mysql_read_conn", return_value=context):
+            items = recent_error_summaries()
+        self.assertEqual(len(items), 3)
+        self.assertTrue(all(item["recovery_status"] == "recovered" for item in items))
+        self.assertEqual(cursor.execute.call_args.args[1], ["task_a", "task_b"])
+
+    def test_non_scheduled_errors_do_not_query_task_history(self):
+        context = MagicMock()
+        cursor = context.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [{"source_kind": "durable_task", "job_type": "task", "error_code": "one"}]
+        with patch("app.jobs.readiness.mysql_read_conn", return_value=context):
+            items = recent_error_summaries()
+        self.assertEqual(items[0]["recovery_status"], "historical")
+        self.assertEqual(cursor.execute.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

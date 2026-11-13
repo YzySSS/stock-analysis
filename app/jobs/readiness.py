@@ -574,28 +574,34 @@ def recent_error_summaries(days: int = 7, limit: int = 12) -> list[dict[str, Any
             )
             latest_runs: dict[str, dict[str, Any]] = {}
             if task_names:
-                placeholders = ", ".join(["%s"] * len(task_names))
+                # A grouped IN query can scan the entire non-covering task
+                # index (and fetch every log row). Exact-name branches retain
+                # all historical success timestamps while using indexed refs.
+                task_aggregate = """
+                    SELECT task_name,
+                           MAX(id) AS max_id,
+                           MAX(
+                               CASE WHEN status='success'
+                               THEN COALESCE(finished_at, started_at)
+                               ELSE NULL END
+                           ) AS latest_success_at,
+                           MAX(
+                               CASE WHEN status='partial_success'
+                               THEN COALESCE(finished_at, started_at)
+                               ELSE NULL END
+                           ) AS latest_partial_success_at
+                    FROM task_run_log
+                    WHERE task_name=%s
+                    GROUP BY task_name
+                """
+                task_aggregates = " UNION ALL ".join(task_aggregate for _ in task_names)
                 cursor.execute(
                     f"""
                     SELECT latest.task_name, latest.status, latest.started_at, latest.finished_at,
                            task_ids.latest_success_at, task_ids.latest_partial_success_at
                     FROM task_run_log latest
                     INNER JOIN (
-                        SELECT task_name,
-                               MAX(id) AS max_id,
-                               MAX(
-                                   CASE WHEN status='success'
-                                   THEN COALESCE(finished_at, started_at)
-                                   ELSE NULL END
-                               ) AS latest_success_at,
-                               MAX(
-                                   CASE WHEN status='partial_success'
-                                   THEN COALESCE(finished_at, started_at)
-                                   ELSE NULL END
-                               ) AS latest_partial_success_at
-                        FROM task_run_log
-                        WHERE task_name IN ({placeholders})
-                        GROUP BY task_name
+                        {task_aggregates}
                     ) task_ids ON latest.id = task_ids.max_id
                     """,
                     task_names,

@@ -314,7 +314,7 @@ class DashboardRepositoryTests(unittest.TestCase):
 
         overview = overview_repository.load_market_overview_inputs()
 
-        self.assertEqual(len(overview_factory.executions), 7)
+        self.assertEqual(len(overview_factory.executions), 6)
         self.assertEqual(overview["previous_strength"]["market_strength"], 50.0)
         breadth_sql = overview_factory.executions[0][0]
         self.assertIn("INNER JOIN stock_instrument_lifecycle l", breadth_sql)
@@ -324,6 +324,20 @@ class DashboardRepositoryTests(unittest.TestCase):
             breadth_sql,
         )
         self.assertIn("COUNT(DISTINCT r.batch_id) AS snapshot_batch_count", breadth_sql)
+
+        class RankedCursor(ScriptedCursor):
+            def execute(self, sql, params=None):
+                super().execute(sql, params)
+                if "WITH industry_strength" in sql:
+                    self._rows = [
+                        {"ranking_side": "strong", "industry": "银行", "amount": 20},
+                        {"ranking_side": "weak", "industry": "煤炭", "amount": 10},
+                    ]
+
+        with patch.object(ScriptedConnection, "cursor", lambda connection: RankedCursor(connection.executions)):
+            split = overview_repository.load_market_overview_inputs()
+        self.assertEqual(split["strong_rows"], [{"industry": "银行", "amount": 20}])
+        self.assertEqual(split["weak_rows"], [{"industry": "煤炭", "amount": 10}])
 
         themes_factory = ScriptedConnectionFactory()
         themes_repository = DashboardRepository(connection_factory=themes_factory)

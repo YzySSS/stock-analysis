@@ -494,14 +494,34 @@ class DashboardRepository:
                     GROUP BY sb.industry
                     HAVING stock_count >= 5
                 """
+                # The two rankings share the same market aggregation. MySQL
+                # materializes this grouped CTE once, rather than rescanning
+                # every stock separately for the strongest and weakest list.
                 cursor.execute(
-                    f"SELECT {industry_columns} {industry_from} ORDER BY amount_weighted_pct_chg DESC, avg_pct_chg DESC LIMIT 8"
+                    f"""
+                    WITH industry_strength AS (
+                        SELECT {industry_columns} {industry_from}
+                    ), ranked_industries AS (
+                        (SELECT 'strong' AS ranking_side, industry_strength.*
+                         FROM industry_strength
+                         ORDER BY amount_weighted_pct_chg DESC, avg_pct_chg DESC LIMIT 8)
+                        UNION ALL
+                        (SELECT 'weak' AS ranking_side, industry_strength.*
+                         FROM industry_strength
+                         ORDER BY amount_weighted_pct_chg ASC, avg_pct_chg ASC LIMIT 8)
+                    )
+                    SELECT * FROM ranked_industries
+                    ORDER BY ranking_side,
+                        CASE WHEN ranking_side='strong' THEN amount_weighted_pct_chg END DESC,
+                        CASE WHEN ranking_side='strong' THEN avg_pct_chg END DESC,
+                        CASE WHEN ranking_side='weak' THEN amount_weighted_pct_chg END ASC,
+                        CASE WHEN ranking_side='weak' THEN avg_pct_chg END ASC
+                    """
                 )
-                strong_rows = cursor.fetchall() or []
-                cursor.execute(
-                    f"SELECT {industry_columns} {industry_from} ORDER BY amount_weighted_pct_chg ASC, avg_pct_chg ASC LIMIT 8"
-                )
-                weak_rows = cursor.fetchall() or []
+                strong_rows, weak_rows = [], []
+                for row in cursor.fetchall() or []:
+                    ranking_side = row.pop("ranking_side")
+                    (strong_rows if ranking_side == "strong" else weak_rows).append(row)
 
                 current_trade_date = breadth.get("trade_date")
                 if current_trade_date:
