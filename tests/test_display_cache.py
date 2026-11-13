@@ -77,6 +77,10 @@ class DisplayCacheTests(unittest.TestCase):
             client.fail = True
             self.assertIsNone(cache.entry('dataset'))
             self.assertEqual(cache.get('dataset', lambda: {'ready': False}), {'ready': False})
+            client.fail = False
+            backend._retry_at = 0
+            cache.refresh('dataset', lambda: {'ready': False})
+            self.assertEqual(cache.get('dataset'), {'ready': False})
 
     def test_lease_is_single_owner_and_old_owner_cannot_delete_new_owner(self):
         client = AtomicRedis()
