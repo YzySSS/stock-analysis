@@ -103,6 +103,46 @@ function selectionRunStatusLabel(status) {
   }[status] || status || '运行中';
 }
 
+async function loadRecentSelectionRuns() {
+  const select = qs('#selection-recent-run');
+  if (!select) return;
+  const previous = select.value;
+  try {
+    const data = await fetchJson('/api/selection/runs?limit=20');
+    select.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = data.items?.length ? '查看最近任务（含自动选股）' : '暂无选股任务';
+    select.appendChild(placeholder);
+    (data.items || []).forEach((run) => {
+      const option = document.createElement('option');
+      option.value = run.run_id;
+      const strategy = run.strategy_id === 'a_share_sentiment' ? 'A股舆情' : run.strategy_id;
+      option.textContent = `${run.created_at || '-'} · ${strategy || '-'} v${run.strategy_version || '?'} · ${selectionRunStatusLabel(run.status)} · ${run.result_count ?? 0}只`;
+      select.appendChild(option);
+    });
+    if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  } catch (error) {
+    select.replaceChildren();
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '任务列表暂不可用，请刷新重试';
+    select.appendChild(option);
+  }
+}
+
+async function showRecentSelectionRun() {
+  const runId = qs('#selection-recent-run')?.value || '';
+  if (!runId) return;
+  qs('#selection-run-id').value = runId;
+  hasExecutedSelection = true;
+  try {
+    await loadSelectionResults(runId);
+  } catch (error) {
+    renderSelectionRunError(error);
+  }
+}
+
 function renderSelectionTaskStatus(status) {
   if (!status) return;
   selectionRunBackendStatus = status;
@@ -1404,6 +1444,7 @@ async function runSelection(event) {
 async function refreshSelectionPage() {
   await loadSelectionMarketRiskAlert();
   await loadStrategies();
+  await loadRecentSelectionRuns();
   if (hasExecutedSelection || (qs('#selection-run-id')?.value || '').trim()) {
     await loadSelectionResults();
   } else {
@@ -1414,6 +1455,8 @@ async function refreshSelectionPage() {
 document.addEventListener('DOMContentLoaded', async () => {
   qs('#selection-form').addEventListener('submit', runSelection);
   qs('#selection-cancel-run')?.addEventListener('click', cancelSelectionRun);
+  qs('#selection-recent-run')?.addEventListener('change', showRecentSelectionRun);
+  qs('#selection-refresh-runs')?.addEventListener('click', loadRecentSelectionRuns);
   qs('#refresh-strategies').addEventListener('click', async () => {
     await loadStrategies();
   });
@@ -1477,6 +1520,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncMarketBoardSegments();
     await loadSelectionMarketRiskAlert();
     await loadStrategies();
+    await loadRecentSelectionRuns();
     renderSelectionPlaceholder();
     bindTooltips();
   } catch (error) {

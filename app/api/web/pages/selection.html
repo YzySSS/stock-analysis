@@ -13,7 +13,7 @@
 <link href="/static/css/pages.css?v=20260819marketalert1" rel="stylesheet"/>
 <link href="/static/css/brand.css?v=20260729brand1" rel="stylesheet"/>
 <meta content="#0B1018" name="theme-color"/>
-<link href="/static/css/dark-design.css?v=20261113fidelity3" rel="stylesheet"/>
+<link href="/static/css/dark-design.css?v=20261113fidelity3&amp;selection=20261113daily1" rel="stylesheet"/>
 </head>
 <body data-page="selection" data-ui="dark-v1">
 <div class="app-shell dashboard-shell">
@@ -132,9 +132,17 @@
 <div class="selection-factor-bars empty-state" id="selection-factor-bars">因子分布加载中...</div>
 </article>
 </section><article class="card selection-run-status-card">
-<div class="card-header">
+<div class="card-header with-actions">
+<div>
 <p class="card-kicker">Latest Run</p>
 <h2><svg aria-hidden="true" class="ui-icon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 7v6h4"></path></svg>最近运行状态</h2>
+<p class="muted">每日自动选股：交易日 09:35（北京时间） · A股舆情 v0.4.4 · 最多 3 只 · 不自动保存或交易</p>
+</div>
+<div class="actions selection-recent-run-actions">
+<label class="sr-only" for="selection-recent-run">查看最近选股任务</label>
+<select aria-label="查看最近选股任务" id="selection-recent-run"><option value="">查看最近任务（含自动选股）</option></select>
+<button class="btn btn-secondary btn-small" id="selection-refresh-runs" type="button">刷新任务</button>
+</div>
 </div><div aria-live="polite" class="selection-state-timeline"><div><b>1</b><strong>数据检查</strong><small>等待检查</small></div><i></i><div><b>2</b><strong>策略计算</strong><small>等待运行</small></div><i></i><div><b>3</b><strong>结果生成</strong><small>暂无本次结果</small></div></div><details class="selection-run-evidence"><summary>运行证据与评分分布</summary><div class="selection-run-status-grid">
 <div class="selection-success-ring">
 <strong id="selection-success-rate">-</strong>
@@ -240,6 +248,6 @@
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
 <script src="/static/js/common.js?v=20260819marketalert1&amp;ui=20261113fidelity2"></script>
-<script src="/static/js/selection.js?v=20260915sentimentv06&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/selection.js?v=20260915sentimentv06&amp;ui=20261113fidelity2&amp;daily=20261113daily1"></script>
 </body>
 </html>

@@ -1075,3 +1075,15 @@ body[data-ui="dark-v1"][data-page] #strategy-detail { background: transparent; b
 body[data-ui="dark-v1"][data-page] .strategy-factor-cards .factor-metric-row { padding: 2px 0 !important; }
 body[data-ui="dark-v1"][data-page] .readiness-card .card-header { margin-bottom: 8px; }
 body[data-ui="dark-v1"][data-page] .strategy-readiness-highlights > article { padding: 8px 12px; }
+
+/* Existing status card: discover scheduled previews without copying run IDs. */
+body[data-page="selection"] .selection-recent-run-actions { max-width: 100%; min-width: 0; flex-wrap: wrap; }
+body[data-page="selection"] #selection-recent-run {
+  width: 24rem; max-width: 100%; min-width: 0; min-height: 36px;
+  padding: 7px 10px; border: 1px solid var(--panel-border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+@media (max-width: 700px) {
+  body[data-page="selection"] .selection-recent-run-actions { width: 100%; }
+  body[data-page="selection"] #selection-recent-run { width: 100%; }
+}

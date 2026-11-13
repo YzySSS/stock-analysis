@@ -17,6 +17,23 @@
 
 自动观察从 2026-11-13 开新持续 cohort，不继续填旧 30 日实验。决策、计算和发布必须处于上海时间 `[09:25,09:29)`，迟到任务只留缺口。连续观察并不代表策略有效；实现或依赖变化必须更换 epoch（`automatic_observation_defaults.continuous`），不能把新实现放进旧 cohort。
 
+### 每日自动选股（2026-11-13 用户配置）
+
+- 独立于上述研究配对，交易日北京时间 **09:35** 运行 `scripts/run_daily_stock_selection.py`，固定 `a_share_sentiment / 0.4.4`、最多 **3** 只。达标不足则少选，允许零候选；不改人工选股的空默认策略。
+- Cron 为 `35 9 * * 1-5`，安装主机时区必须是 `Asia/Shanghai`。执行时仍检查现有 readiness 中独立 `tushare.trade_cal / SSE` 日历，休市跳过，日历缺失/陈旧、数据或 Worker 未 ready 均不提交。只在 `[09:35,09:40)` 新建任务，错过时窗不在下午补造早盘结果。
+- 先为 0.4.4 物化一份当前 ready/passed 本地候选快照，再固定该快照经原 `SelectionRunService` 入队，由原 selection Worker 执行。不使用正常调度的 09:22 旧快照来冒充 09:35。失败不回退旧数据，不改既有 09:25、09:37 或 v0.6 调度。
+- 全流程 MySQL advisory lock；独立的“日程/信号日/策略/版本/数量”幂等键保存在已有 `selection_run.idempotency_key`。终态（含零候选、失败、取消）仍去重；崩溃在提交后发生也能从数据库恢复原 run_id。Worker 原有失联恢复不变。无 schema migration。
+- 结果是普通选股**预览**，不自动写 `selection_result`、跟踪复盘、持仓或交易。选股中心“最近运行状态 → 查看最近任务（含自动选股）”读取既有任务 API，可查看结果后按条人工保存。提交日志在 `logs/daily_stock_selection.log`，系统任务日志名为 `daily_stock_selection`，提交成功不等于 Worker 计算成功。
+- 调度逻辑放在 `scripts/`，不修改冻结的 `app/shared`、`app/strategies`、`app/stock_selection` 或依赖，避免使现有 09:25 研究 cohort 的双指纹漂移。09:35 普通任务不混入 09:25 前瞻实验。
+
+只读检查（不写任务日志、不物化、不入队）：
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_daily_stock_selection.py --dry-run
+```
+
+`next_scheduled_at` 只从已预载的真实交易日历推导；无覆盖则返回空值，不猜节假日。安装时先备份完整旧 Cron，仅追加/替换该脚本的一行；不要为了这个任务覆盖其他手工任务。模板 `setup_kline_cron.sh --print-only` 也包含唯一一行，以便后续重装不丢失配置。
+
 `requirements.lock.txt` 是本次实际测试环境的版本锁，不要用不受控 `pip install -U` 改研究环境。它不是多平台 wheel hash 锁；本轮未升级生产依赖。
 
 ### 周/月诊断报告
