@@ -6,6 +6,7 @@ the UI must not synthesize paths from a quote or reuse another index's series.
 from __future__ import annotations
 
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 import math
 import re
 import threading
@@ -18,8 +19,21 @@ from app.shared.cache import get_cache_backend
 
 INDICES = {"sh000001": "上证指数", "sz399001": "深证成指", "sz399006": "创业板指"}
 _LOCK = threading.Lock()
+_REFRESH_LOCK = threading.Lock()
+_REFRESHING: set[str] = set()
+# At most seven allowlisted display keys; one worker refreshes them serially.
+_REFRESH_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-display")
+_HTTP_LOCAL = threading.local()
 _FRESH_SECONDS = 30
 _STALE_SECONDS = 900
+
+
+def _http_session() -> requests.Session:
+    # A single overview reads three series from the same provider. Reuse TLS
+    # connections without sharing a non-thread-safe Session across API threads.
+    if not hasattr(_HTTP_LOCAL, "session"):
+        _HTTP_LOCAL.session = requests.Session()
+    return _HTTP_LOCAL.session
 
 
 def _number(value: Any) -> float | None:
@@ -110,25 +124,62 @@ def parse_series(payload: dict, symbol: str, period: str) -> dict[str, Any]:
             "volume_unit": "provider_native", "status": "available"}
 
 
+def _load_cached(cache, key: str, load: Callable[[], dict]) -> dict:
+    with _LOCK:
+        cached = cache.get(key)
+        now = time.time()
+        if isinstance(cached, dict) and now < cached.get("refresh_after", cached.get("cached_at", 0) + _FRESH_SECONDS):
+            return cached
+        try:
+            payload = load()
+            now = time.time()
+            result = {"payload": payload, "cached_at": now, "refresh_after": now + _FRESH_SECONDS}
+            cache.set(key, result, ttl_seconds=_STALE_SECONDS)
+            return result
+        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
+            now = time.time()
+            if isinstance(cached, dict) and now - cached.get("cached_at", 0) < _STALE_SECONDS:
+                # Back off after a failed refresh, without extending the life of
+                # old provider evidence beyond its original 15-minute bound.
+                result = dict(cached, refresh_after=now + _FRESH_SECONDS, refresh_failed=True)
+                cache.set(key, result, ttl_seconds=_STALE_SECONDS - (now - cached["cached_at"]))
+                return result
+            result = {"payload": {"status": "unavailable"}, "cached_at": now,
+                      "refresh_after": now + _FRESH_SECONDS, "refresh_failed": True}
+            cache.set(key, result, ttl_seconds=_FRESH_SECONDS)
+            return result
+
+
+def _refresh_cached(cache, key: str, load: Callable[[], dict]) -> None:
+    try:
+        _load_cached(cache, key, load)
+    finally:
+        with _REFRESH_LOCK:
+            _REFRESHING.discard(key)
+
+
 def _cached(key: str, load: Callable[[], dict]) -> dict:
     cache = get_cache_backend()
     key = "dashboard:index-display:v1:" + key
     cached = cache.get(key)
     now = time.time()
-    if isinstance(cached, dict) and now - cached.get("cached_at", 0) < _FRESH_SECONDS:
-        return dict(cached["payload"], cache_stale=False)
-    with _LOCK:
-        cached = cache.get(key)
-        if isinstance(cached, dict) and now - cached.get("cached_at", 0) < _FRESH_SECONDS:
-            return dict(cached["payload"], cache_stale=False)
-        try:
-            payload = load()
-            cache.set(key, {"payload": payload, "cached_at": now}, ttl_seconds=_STALE_SECONDS)
-            return dict(payload, cache_stale=False)
-        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
-            if isinstance(cached, dict) and now - cached.get("cached_at", 0) < _STALE_SECONDS:
-                return dict(cached["payload"], cache_stale=True)
-            return {"status": "unavailable", "cache_stale": False}
+    if isinstance(cached, dict) and now - cached.get("cached_at", 0) < _STALE_SECONDS:
+        stale = now - cached["cached_at"] >= _FRESH_SECONDS
+        refreshing = False
+        if now >= cached.get("refresh_after", cached["cached_at"] + _FRESH_SECONDS):
+            with _REFRESH_LOCK:
+                if key not in _REFRESHING:
+                    _REFRESHING.add(key)
+                    try:
+                        _REFRESH_EXECUTOR.submit(_refresh_cached, cache, key, load)
+                    except RuntimeError:
+                        _REFRESHING.discard(key)
+                refreshing = key in _REFRESHING
+        return dict(cached["payload"], cache_stale=stale, cache_refreshing=refreshing)
+    # Only a genuinely cold key waits for the provider. Expired-but-retained
+    # display data returns immediately, with its original provider date intact.
+    result = _load_cached(cache, key, load)
+    return dict(result["payload"], cache_stale=False, cache_refreshing=False)
 
 
 def index_series(symbol: str, period: str) -> dict:
@@ -138,7 +189,7 @@ def index_series(symbol: str, period: str) -> dict:
         url = ("https://web.ifzq.gtimg.cn/appstock/app/minute/query" if period == "minute"
                else "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get")
         params = {"code": symbol} if period == "minute" else {"param": f"{symbol},day,,,60,qfq"}
-        response = requests.get(url, params=params, timeout=(2, 4))
+        response = _http_session().get(url, params=params, timeout=(2, 4))
         response.raise_for_status()
         return parse_series(response.json(), symbol, period)
     return dict(_cached(f"{symbol}:{period}", load), symbol=symbol, name=INDICES[symbol], period=period)
@@ -146,7 +197,7 @@ def index_series(symbol: str, period: str) -> dict:
 
 def index_overview() -> dict:
     def load():
-        response = requests.get("https://qt.gtimg.cn/q=" + ",".join(INDICES), timeout=(2, 4))
+        response = _http_session().get("https://qt.gtimg.cn/q=" + ",".join(INDICES), timeout=(2, 4))
         response.raise_for_status()
         quotes = parse_quotes(response.text)
         if not quotes:
@@ -158,5 +209,6 @@ def index_overview() -> dict:
         quote = (quotes.get("quotes") or {}).get(symbol)
         items.append({"symbol": symbol, "name": name, "quote": quote,
                       "quote_cache_stale": quotes.get("cache_stale", False),
+                      "quote_cache_refreshing": quotes.get("cache_refreshing", False),
                       "series": index_series(symbol, "minute")})
     return {"indices": items, "display_only": True}

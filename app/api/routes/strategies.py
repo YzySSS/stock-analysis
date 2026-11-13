@@ -8,6 +8,7 @@ from app.stock_selection.factor_evaluation_v2 import (
     StrategyFactorEvaluationRepository,
 )
 from app.strategies.service import StrategyService
+from app.api.strategy_display import get_display_dataset_snapshot
 
 router = APIRouter(tags=["strategies"])
 
@@ -22,7 +23,7 @@ class ForwardActionRequest(BaseModel):
 
 @router.get("/strategies")
 def list_strategies(instrument_type: str = Query(default="stock")) -> dict:
-    service = StrategyService()
+    service = StrategyService(dataset_snapshot=get_display_dataset_snapshot())
     strategies = service.list_strategies(instrument_type=instrument_type)
     return {
         "default_strategy": service.get_default_strategy_id(),
@@ -50,7 +51,7 @@ def get_strategy_detail(
     instrument_type: str = Query(default="stock"),
     sample_limit: int = Query(default=200, ge=20, le=1000),
 ) -> dict:
-    service = StrategyService()
+    service = StrategyService(dataset_snapshot=get_display_dataset_snapshot())
     return {
         "strategy": service.get_strategy_detail(
             strategy_id=strategy_id,

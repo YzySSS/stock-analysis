@@ -803,6 +803,12 @@ document.addEventListener('DOMContentLoaded', () => {
 let homeIndexItems = [];
 let homeIndexPeriod = 'minute';
 let homeIndexRequest = 0;
+let homeIndexRefreshTimer = null;
+
+function scheduleHomeIndexRefresh() {
+  clearTimeout(homeIndexRefreshTimer);
+  homeIndexRefreshTimer=setTimeout(loadHomeIndices,2000);
+}
 
 function indexLineSvg(series, {mini = false, color = '#568bfa'} = {}) {
   const points = (series?.points || []).filter(p => Number.isFinite(p.price));
@@ -833,11 +839,14 @@ async function showHomeIndexSeries() {
     if(token!==homeIndexRequest)return;
     if(!series || series.status!=='available') throw Error('当前指数序列暂不可用');
     chart.innerHTML=indexLineSvg({...series,name});
-    setText('#home-visual-evidence',`${series.trade_date} · 腾讯行情 · ${homeIndexPeriod==='daily'?'近60个交易日日收盘 / 成交量':'当日分时 / 分钟成交量'}${series.cache_stale?' · 缓存（上游暂不可用）':''}`);
+    setText('#home-visual-evidence',`${series.trade_date} · 腾讯行情 · ${homeIndexPeriod==='daily'?'近60个交易日日收盘 / 成交量':'当日分时 / 分钟成交量'}${series.cache_refreshing?' · 缓存（后台更新中）':series.cache_stale?' · 缓存（上游暂不可用）':''}`);
+    if(series.cache_refreshing) scheduleHomeIndexRefresh();
   }catch(error){if(token===homeIndexRequest){chart.innerHTML=`<div class="empty-state">${escapeHtml(error.message)}，不填充示例走势。</div>`;setText('#home-visual-evidence','数据源暂不可用，请稍后刷新。');}}
 }
 
 async function loadHomeIndices() {
+  clearTimeout(homeIndexRefreshTimer);
+  homeIndexRefreshTimer=null;
   try {
     const data=await fetchJson('/api/dashboard/indices');
     homeIndexItems=data.indices||[];
@@ -848,11 +857,14 @@ async function loadHomeIndices() {
       const change=card.querySelector('[data-index-change]');
       change.className=`badge ${quote?.change_pct==null?'status-muted':quote.change_pct>=0?'index-rise':'index-fall'}`;
       change.textContent=quote?.change_pct==null?'暂无报价':`${quote.change_pct>=0?'+':''}${quote.change_pct.toFixed(2)}%`;
-      card.querySelector('[data-index-clock]').textContent=quote?`${quote.quote_time}${item.quote_cache_stale?' · 缓存':''}`:'行情源暂不可用';
+      card.querySelector('[data-index-clock]').textContent=quote?`${quote.quote_time}${item.quote_cache_refreshing?' · 更新中':item.quote_cache_stale?' · 缓存':''}`:'行情源暂不可用';
       const series=item.series;
       card.querySelector('[data-index-sparkline]').innerHTML=series?.status==='available' && quote && series.trade_date===quote.trade_date ? indexLineSvg({...series,name:item.name},{mini:true,color:quote.change_pct>=0?'#ef7279':'#3abb9e'}) : '<small class="muted">分时序列暂不可用</small>';
     }
     await showHomeIndexSeries();
+    if(homeIndexItems.some(item=>item.quote_cache_refreshing || item.series?.cache_refreshing)) {
+      scheduleHomeIndexRefresh();
+    }
   }catch(error){qsa('[data-index-clock]').forEach(el=>el.textContent='行情加载失败，请稍后刷新');qs('#home-market-visual-chart').innerHTML='<div class="empty-state">指数行情暂不可用，不填充示例走势。</div>';}
 }
 

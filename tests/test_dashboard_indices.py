@@ -56,28 +56,70 @@ class DashboardIndexTests(unittest.TestCase):
                 market.parse_series(payload, "sh000001", "minute")
 
     def test_allowlist_rejects_arbitrary_symbol_and_period(self):
-        with patch.object(market.requests, "get") as get:
+        with patch.object(market, "_http_session") as session:
             for symbol, period in [("http://evil", "minute"), ("sh000001", "week")]:
                 with self.assertRaises(ValueError):
                     market.index_series(symbol, period)
-            get.assert_not_called()
+            session.assert_not_called()
 
-    def test_cache_reuses_success_and_identifies_stale_fallback(self):
+    def test_expired_cache_returns_immediately_and_schedules_only_one_refresh(self):
         cache = InMemoryCacheBackend()
-        with patch.object(market, "get_cache_backend", return_value=cache), patch.object(market.time, "time", return_value=1000):
-            data = market._cached("test", lambda: {"status": "available", "trade_date": "2026-11-12"})
-            self.assertFalse(data["cache_stale"])
+        key = "dashboard:index-display:v1:test"
+        try:
+            with patch.object(market, "get_cache_backend", return_value=cache), patch.object(market.time, "time", return_value=1000):
+                data = market._cached("test", lambda: {"status": "available", "trade_date": "2026-11-12"})
+                self.assertFalse(data["cache_stale"])
+            with patch.object(market, "get_cache_backend", return_value=cache), patch.object(market.time, "time", return_value=1040), patch.object(market._REFRESH_EXECUTOR, "submit") as submit:
+                def blocked_provider():
+                    self.fail("expired display cache must not wait for provider")
+                for _ in range(3):
+                    data = market._cached("test", blocked_provider)
+                    self.assertTrue(data["cache_stale"])
+                    self.assertTrue(data["cache_refreshing"])
+                    self.assertEqual(data["trade_date"], "2026-11-12")
+                submit.assert_called_once()
+        finally:
+            market._REFRESHING.discard(key)
+
+    def test_failed_background_refresh_backs_off_without_extending_evidence_age(self):
+        clock = [1000]
+        cache = InMemoryCacheBackend(clock=lambda: clock[0])
+        key = "dashboard:index-display:v1:test"
+        with patch.object(market, "get_cache_backend", return_value=cache), patch.object(market.time, "time", side_effect=lambda: clock[0]):
+            market._cached("test", lambda: {"status": "available", "trade_date": "2026-11-12"})
+            clock[0] = 1040
             def unavailable():
                 raise requests.Timeout()
-            self.assertFalse(market._cached("test", unavailable)["cache_stale"])
+            market._refresh_cached(cache, key, unavailable)
+            with patch.object(market._REFRESH_EXECUTOR, "submit") as submit:
+                result = market._cached("test", unavailable)
+                self.assertTrue(result["cache_stale"])
+                self.assertFalse(result["cache_refreshing"])
+                self.assertEqual(result["trade_date"], "2026-11-12")
+                submit.assert_not_called()
+            self.assertEqual(cache.get(key)["cached_at"], 1000)
+            clock[0] = 1901
+            self.assertIsNone(cache.get(key))
+
+    def test_successful_background_refresh_keeps_provider_clock_and_replaces_points(self):
+        cache = InMemoryCacheBackend()
+        key = "dashboard:index-display:v1:test"
+        with patch.object(market, "get_cache_backend", return_value=cache), patch.object(market.time, "time", return_value=1000):
+            market._cached("test", lambda: {"status": "available", "trade_date": "2026-11-12", "points": [1]})
         with patch.object(market, "get_cache_backend", return_value=cache), patch.object(market.time, "time", return_value=1040):
-            data = market._cached("test", unavailable)
-            self.assertTrue(data["cache_stale"])
-            self.assertEqual(data["trade_date"], "2026-11-12")
+            market._refresh_cached(cache, key, lambda: {"status": "available", "trade_date": "2026-11-13", "points": [2]})
+            result = market._cached("test", lambda: self.fail("fresh result must be reused"))
+            self.assertEqual(result["trade_date"], "2026-11-13")
+            self.assertEqual(result["points"], [2])
+            self.assertFalse(result["cache_stale"])
 
     def test_cold_provider_failure_is_explicit(self):
-        with patch.object(market, "get_cache_backend", return_value=InMemoryCacheBackend()), patch.object(market.requests, "get", side_effect=requests.Timeout()):
+        with patch.object(market, "get_cache_backend", return_value=InMemoryCacheBackend()), patch.object(market, "_http_session") as session:
+            session.return_value.get.side_effect = requests.Timeout()
             result = market.index_overview()
+            second = market.index_overview()
+            self.assertEqual(session.return_value.get.call_count, 4)
+            self.assertEqual(result, second)
         self.assertEqual(len(result["indices"]), 3)
         self.assertTrue(all(row["quote"] is None and row["series"]["status"] == "unavailable" for row in result["indices"]))
 
