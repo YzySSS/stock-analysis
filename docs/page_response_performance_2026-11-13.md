@@ -41,3 +41,38 @@
 - 五服务active，API/四Worker `NRestarts=0`。主机可用内存约1.2GiB，既有swap约1.3GiB，未发现本轮CPU或持续swap抖动瓶颈。
 - 只读证据及复验脚本在workspace `output/page-latency-20261113/`：before.json、after-http.json、final-strategy-query-comparison.json、index-cache-comparison.json、browser-public.json、browser-home-refresh.json、research-identity.json、unittest.log。
 - 复验必须先加载 `app.shared.settings`，使用 `.venv/bin/python` 在内存签发会话，禁止打印/落盘令牌，不把匿名401当性能样本；先采一轮同请求首/热，再查对应SQL计划，避免先重启清除证据。
+
+## 多页面补充复核
+
+用户随后明确“多个页面都慢”，因此本轮不只等主要元素出现：逐页等待全部初始GET响应/二级详情并区分HTML、首次内容绘制与数据完成。服务器侧单Chromium串行测试10页，另做80ms/5Mbps网络模拟；这些仍不是请求者电脑/真实运营商网络实测。
+
+### 追加发现与最小修复
+
+- 公共静态资源已走HTTP/2、gzip及1小时浏览器缓存，跨页相同URL的资源传输大小为0；不存在公共外部CDN依赖阻塞证据。
+- 真实无人访问后的首页summary首次网络请求4653ms（包含行情库冷读波动），指数约2205ms；该summary也是选股初始化的第一步，故影响不止首页。上轮缓存命中/主要元素验收未覆盖这一情形。
+- cProfile及SQL计时定位到情绪板“最近完整日线交易日”：按股票连接全部历史日线，再过滤日期。旧计划该查询1090ms；仅使用已存在的`idx_trade_date`并以`STRAIGHT_JOIN`固定日期优先，新计划42ms。95%完整性、45天回看、股票/退市过滤及返回字段完全不变，无DDL。
+- 同一暖DB条件、不使用summary缓存，完整构建1399ms→431/432ms；108,581字节完整payload三次SHA-256均为`f3bde42a22f8d78a7d9f7c652db52e8e93e1f1b2279d4f9a84a72b6dec89db4a`。不能将最早冷读4653ms和新暖DB431ms宣传为完全同条件收益。
+
+### 上线后完整初始读取
+
+仅API受控重启；首次只失效首页自身展示缓存，不清空Redis或业务数据。公网浏览器首次summary网络638ms，全部初始GET完成752ms（从导航起计）；静态资源浏览器缓存也为空。
+
+| 页面 | HTML响应完成 | 首次内容绘制 | 全部初始GET完成 |
+| --- | ---: | ---: | ---: |
+| 首页 | 24ms | 260ms | 752ms |
+| 选股中心 | 8ms | 152ms | 380ms |
+| 跟踪复盘 | 10ms | 124ms | 379ms |
+| 持仓管理 | 14ms | 132ms | 146ms |
+| 回测中心（含结果/交易） | 8ms | 152ms | 195ms |
+| 选股策略（含因子/前瞻证据） | 8ms | 136ms | 223ms |
+| 交易策略 | 24ms | 124ms | 119ms |
+| ETF轮动 | 10ms | 124ms | 144ms |
+| 数据状态 | 22ms | 192ms | 1384ms |
+
+初始GET完成不等于首次绘制，两者可以先后颠倒；表格未将QA额外400ms网络安静等待加入数据耗时。9页无JS异常、无整页溢出、无写请求。系统状态仍约1.38秒，指数真正无缓存仍依赖外部提供方，不宣称所有页面/冷请求均小于800ms。网络模拟六页全部初始GET完成约428～730ms，使用服务端已保留缓存，只作为受控回归。
+
+修前10页中个股页原有自动分时刷新会发POST；QA在网络层拦截为409，未执行生产写入。因此修前脚本的“无任何写请求尝试”断言未通过，读取计时仍保留为观察证据，不伪报十页全部通过；上线验收只重测受影响及公共链路9页、未重跑该POST。
+
+27项针对性检查和完整705项执行（704通过、1既有skip）、Python编译/diff检查通过。研究源码/依赖双指纹不变，本地/公网health与认证readiness HTTP200，匿名summary401；readiness实际为`degraded / accepting_jobs=true`（历史输入层日期落后），不是全部数据就绪。migration38/38、四队列0、四Worker健康，五服务active/NRestarts0；无UI、调度、策略或系统配置变更。
+
+证据位于workspace `output/multi-page-latency-20261113/`：`all-pages-before.json`、`all-pages-after.json`、`summary-profile-before.txt`、`summary-queries-before.json`、`date-query-comparison.json`、`full-summary-comparison.json`、`deployment-checks.json`及复验脚本。所有签名会话仅在进程内传递，未写入证据或日志。

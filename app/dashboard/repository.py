@@ -203,11 +203,12 @@ class DashboardRepository:
                 )
                 hot_limit_rows = cursor.fetchall() or []
 
+                # Scan newest dates first; a stock-first join scans every code's history.
                 cursor.execute(
                     f"""
                     SELECT k.trade_date AS latest_trade_date
-                    FROM daily_kline k
-                    INNER JOIN stock_basic complete_sb ON complete_sb.code = k.code
+                    FROM daily_kline k FORCE INDEX (idx_trade_date)
+                    STRAIGHT_JOIN stock_basic complete_sb ON complete_sb.code = k.code
                     WHERE complete_sb.instrument_type = '{STOCK_INSTRUMENT_TYPE}'
                       AND COALESCE(complete_sb.is_delisted, 0) = 0
                       AND k.trade_date >= DATE_SUB(

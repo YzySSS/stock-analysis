@@ -238,6 +238,14 @@ class DashboardRepositoryTests(unittest.TestCase):
         self.assertEqual(len(factory.executions), 7)
         self.assertEqual(len(result["limit_rows"]), 2)
         self.assertEqual(len(result["reversal_rows"]), 1)
+        complete_date_sql = factory.executions[3][0]
+        # Keep the completeness contract while preventing a per-stock historical scan.
+        self.assertIn("FROM daily_kline k FORCE INDEX (idx_trade_date)", complete_date_sql)
+        self.assertIn("STRAIGHT_JOIN stock_basic complete_sb", complete_date_sql)
+        self.assertIn("COALESCE(complete_sb.is_delisted, 0) = 0", complete_date_sql)
+        self.assertIn("INTERVAL 45 DAY", complete_date_sql)
+        self.assertIn("HAVING COUNT(DISTINCT k.code)", complete_date_sql)
+        self.assertIn("SELECT COUNT(*) * 0.95", complete_date_sql)
         self.assertEqual(len(result["history_by_code"]["sh.600000"]), 2)
         self.assertEqual(result["open_board_rows"][0]["open_board_count"], 1)
         self.assertNotIn("LAG(is_sealed)", factory.executions[-2][0])
