@@ -22,6 +22,7 @@ const source = fs.readFileSync({json.dumps(str(SCRIPT_PATH))}, 'utf8')
 const context = {{
   console,
   Date,
+  URLSearchParams,
   fetchJson: async () => {{ throw new Error('fetchJson stub missing'); }},
   window: {{
     setTimeout: (callback) => callback(),
