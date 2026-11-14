@@ -50,6 +50,8 @@ REQUIRED_TABLES = {
     "market_leadership_state_daily",
     "stock_realtime_snapshot",
     "stock_realtime_intraday",
+    "tracking_minute_daily",
+    "tracking_minute_daily_manifest",
     "stock_realtime_bar_rollup",
     "stock_realtime_rollup_manifest",
     "lowvol_reversal_feature_daily",

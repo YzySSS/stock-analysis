@@ -52,7 +52,7 @@
 ## 尚未完成的后续批次
 
 1. 第一批第五项已实施，见本文后附章节；静态ETF spec按hash缓存，小目录runtime能力不盲目长缓存。
-2. 第二批：带源 revision、完整性与迟到修订合同的 tracked 分钟日极值读模型；复盘分页与全范围统计解耦、影子等价及限速回填。
+2. 第二批已实施，见本文后附章节：逐日源revision/完整性合同、tracked分钟日极值、列表与全范围统计解耦、影子等价与限速回填。
 3. 第三批：回测 N+1 批量化/轻状态轮询/投影、研究证据数据库分页与全协议累计指标分离、热点快照复用；持仓规模触发优化。
 4. 真正请求者设备首屏/返回/翻页分段验收。
 
@@ -99,3 +99,54 @@
 第一批五项均已完成（小目录可执行状态不做盲目缓存）；**第二批复盘日极值读模型/全范围统计解耦、第三批回测/研究分页/热点复用，及请求者端验收仍未完成**。
 
 本批无新表或研究写入。`rollback-files.tar`保留基线文件；如需撤销，按依赖反向撤销本批应用提交、发布新静态版本并仅重启API，保留之后无关修改，不直接reset生产工作树。新完整默认接口仍可用；不要恢复首次主线缺失的中间版本。
+
+
+## 第二批：复盘精确日极值与全范围统计解耦（已上线）
+
+基线 `3d90743`，主实现 `4b81a91`，失败源保留保护 `b852257`，空筛选跳过价格读取 `ea81424`。migration **0040 / 40/40** 新增两张固定表，不按日新建物理表，不删除或改写任何原始分钟、日线、选股或研究历史。只重启 API；实际 tracked writer 是每天15:20既有 lifecycle Cron，每次从磁盘载入新代码，无需重启四 Worker。
+
+### 读取及发布合同
+
+- `tracking_minute_daily` 粒度 **code×trade_date**，保存原tracked正价分钟的精确min/max、有效数、首末分钟；`tracking_minute_daily_manifest` 保存整日source_revision、scope `tracked_positive_price_v1`、源/有效行数、异常日期数、生成时间与发布状态。
+- **不是用MAX时间/COUNT猜修订**：先锁manifest日行，copy/upsert tracked源、删除重建该日极值和发布新的UUID写代token全部在同一事务。旧分钟同时间、同COUNT改价，删除掉原最高/最低价，均可收缩极值；发布错误整笔回滚，不留下新源配旧聚合。重复重建值/行数幂等，发布token会更新（不是内容hash、不声称源没变会跳过）。
+- 唯一已发现业务writer为`copy_tracked_trade_date`；新日期/迟到/原分钟修订由同一原writer自动维护。显式历史修复用 `PYTHONPATH=. .venv/bin/python scripts/rebuild_tracking_minute_daily.py --start YYYY-MM-DD --end YYYY-MM-DD --apply`，默认仅dry-run，每次最多181自然日、日间150ms限速。任何未来新增writer/手工直接SQL必须遵守同一manifest锁和发布合同；不宣称能自动侦测绕过合同的任意外部SQL。
+- 分区DROP无法与InnoDB写事务原子提交，故retention**先提交retiring墓碑并移除日聚合**，再执行原删除。DDL失败仍回原源读取；retiring禁止并发重建“复活”旧聚合。日模型发布失败导致tracked copy回滚时，本轮retention额外保护该日期的全市场原始分钟以供重试，不因5m/15m已成功而先清掉源。
+- 原数据库实际是 **READ-COMMITTED**。manifest日期列表与后续日表/raw混合读取使用**单次事务REPEATABLE READ**，不污染连接的后续事务，避免在两条SQL之间源提交产生缺失/混批。相同SQL快照中manifest与日行source_revision必须一致。
+- ready日期改读日极值；未建/不支持/retiring日期保持原raw SQL，缺migration/table也回原查询。若quote_minute日期与trade_date不一致，该日不标ready、整体走原SQL以保留原时间下界语义。当前模型只声明`observed_only`，不冒充完整交易时段；generated_at仅生成时间，不冒充报价时钟。
+- 日线high/low仍按原有效价规则读取，日线和分钟按**同日**合并、跨持有期取极值、COUNT DISTINCT日期。入选日之后、当前实时报价合并、14自然日统计及同股/同日/同策略去重、排除/删除语义完全保留。ETF/合法空结果不造行情。
+
+### 列表、全范围统计及缓存
+
+- 页面列表使用`include_summary=false`，只读本页及总条数；原接口默认完整行为不变。新`/api/tracking/summary`单独返回原筛选范围的filtered_summary与策略分组，**不是本页统计**。统计未到时卡片明确“统计计算中”，失败显式提示且表格继续保留，可刷新重试；迟到的旧filter响应和身份变化不能覆盖新状态。
+- summary仍按窗口内**全部有效样本**计算；缓存miss时仍组装这些完整样本，不声称已经建立全维度持久化统计表。收益是由日模型减少分钟输入、专用API不阻塞列表、翻页不重算/重拉不变全范围统计。后续若样本增长，仍需按证据评估薄投影/累计物化。
+- 服务端summary短缓存60秒，以filters、market/tracking revision、上海自然日和写generation隔离。构建期间revision变更不发布到当前key。客户端仅当前页内存、身份+同scope+server revision、固定60秒到期不因翻页无限续命；BFCache恢复清理，写操作后server generation失效。无localStorage/sessionStorage私有缓存。
+- 空筛选总数为0时直接返回真实空态，不为0条结果额外规划77个日期的价格聚合。
+
+### 生产构建与可核对收益
+
+证据目录：`/root/.openclaw/workspace/output/page-read-batch2-20261114/`。
+
+- 今晨全备重新完整解压/哈希验证：1,393,579,539压缩B、8,740,956,751解压B、115建表/8,460数据语句、一个完成标记；SHA-256 `67d0da942de4901b479c5cbefb96e6c438018a6bf4ee96f811a2c60c38f14ee9`，与已保存manifest一致。随后smoke与生产0040幂等通过，生产两表建表16ms，无大表ALTER。
+- 从现存tracked分区/源日期枚举77日（7月16日～11月13日），串行限速构建：原源 **1,851,385** 行，其中有效正价 **1,767,162** 行，得到 **11,569** 个日行；77日均ready。两张小表逻辑DATA+INDEX约 **2.81MiB**（information_schema估算，不含共享可复用空间）。没有清生产Redis/buffer pool。
+- 第二页10条入选记录所需的正价聚合输入 **89,521分钟记录→612日记录**。这不是rows examined或物理IO测量：SQL仍保留未覆盖日期的raw fallback；EXPLAIN显示raw日期索引range，估算78行，但**未裁掉全部历史分区**，不能声称“整个SQL只碰612物理行”或fallback零开销。
+
+| 完整公网列表请求（数据库自然暖、服务器测） | 原重复样本 | 新重复样本 |
+| --- | ---: | ---: |
+| offset10、10条 | 126.38～126.39ms | **67.48～73.01ms** |
+| offset50、10条 | 148.97～149.00ms | **65.57～69.65ms** |
+
+原样本默认含全范围统计；新列表显式拆出统计，初始另有summary请求，不能把此表当作整页总耗时。首次原171.88/337.15ms、新98.10/65.57ms单独留在原始记录，不称冷库/P95收益；正负缓存状态与样本数量均有限。首屏/翻页改善还须请求者同设备验证。
+
+### 验证
+
+- `comparison.json`：固定旧SHA加载旧repository，同库六组SQL结果逐字段相等（两页、指定日/策略、ETF空、统计窗口空）；`full-json-comparison.json`四组原默认完整API的字节长度/排序SHA相等，未把新实现与自身比较。
+- `smoke.json`：仅预置`stock_migration_smoke`，已验证同分钟同COUNT改价、删除后极值收缩、NULL/0排除、发布异常源与聚合一起rollback、两连接前后提交快照、发布者行锁超时、异常日期不ready、retention墓碑阻止重新发布。精确隔离测试行已清理，无新数据库、无FK、无生产源写探针。
+- **751项执行、750通过、1既有skip**，JS语法通过；新增独立异步前端合同证明summary挂起/失败不挡表格、空scope不触发价格聚合。冻结源码/依赖双研究指纹与第一批/原基线完全一致。
+- 单Chromium经真实公网、1672×941：旧前端在新兼容full后端上作**视觉**对照，非完整旧服务器性能基线。最终首屏旧/新PNG SHA均为 `f759fe1ad83766cf3f5b0ea786038865b38995b381056d57f610edcfb9080db6`，即同视口整张像素一致，无JS异常/整页溢出。首次列表完成约269ms、统计约289ms仅一个服务器浏览器样本，不是请求者设备；翻页只一个列表GET，不重复filters/summary。注入summary503后10行列表保留、错误明确，重试恢复。全部非GET/HEAD在发送前拦截，未实际删除/切统计/提交AI任务。
+- `deployment.json`：本地/公网health与认证readiness200、真实ready/accepting_jobs，**40/40**、四队列queued/running0、五服务active/NRestarts0，tracking HTML/JS/common JS磁盘/本地/公网SHA一致，匿名新接口401、非法limit422。无供应商重拉、研究重算或自动交易改动。
+
+### 回滚与余项
+
+优先恢复原tracking前端（发布新资源版本）及将repository构造的`use_daily_model`默认关闭，API默认full仍兼容；**保留0040迁移登记、表和已部署writer合同**，无需删表/改原源/删除研究。不要把生产整体reset回旧SHA，或撤掉迁移登记造成后续0040复用冲突；重新启用前对可能未遵守新合同的源日期重新构建。
+
+**本批完成后第三批回测批量化/轻轮询、研究证据数据库分页/全协议累计摘要及热点现有快照复用仍未做；请求者端验收仍未做。**
