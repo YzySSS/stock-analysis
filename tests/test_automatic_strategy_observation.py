@@ -426,7 +426,7 @@ class AutomaticObservationFrontendTests(unittest.TestCase):
         self.assertIn("历史证据已污染 · 禁止比较", source)
         self.assertIn("当日开盘（09:25 信号）", source)
         self.assertIn("与用户手动选股及其 14 天统计完全分开", source)
-        self.assertIn("strategies.js?v=20261112research2", page)
+        self.assertIn("strategies.js?v=20261114read3", page)
 
 
 def _policy(

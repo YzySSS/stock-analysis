@@ -328,17 +328,20 @@ def get_backtest_runs(
     limit: int = Query(default=20, ge=1, le=100),
     include_system_tests: bool = Query(default=False),
     compact: bool = Query(default=False),
+    display: bool = False,
 ) -> dict:
-    rows = backtest_repository.list_runs(
-        limit=limit,
-        include_system_tests=include_system_tests,
-    )
-    return {
-        "items": [
-            normalize_run_row(row, include_details=not compact)
-            for row in rows
-        ]
-    }
+    kwargs = dict(limit=limit, include_system_tests=include_system_tests)
+    if compact or display:
+        kwargs.update(compact=True, display=display)
+    rows = backtest_repository.list_runs(**kwargs)
+    items = [normalize_run_row(row, include_details=not (compact or display)) for row in rows]
+    if display:
+        keys = ('run_id','strategy_id','trade_strategy_id','strategy_version','strategy_display_name',
+            'start_date','end_date','return_mode','universe_code','universe_label','status','attempt_count',
+            'progress_done_days','progress_total_days','progress_pct','sample_days','total_picks','total_trades',
+            'estimated_seconds_left','total_return_pct','request','started_at','finished_at')
+        items = [{key: row.get(key) for key in keys} for row in items]
+    return {"items": items}
 
 
 @router.get("/factor-input/status")

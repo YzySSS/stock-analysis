@@ -108,13 +108,30 @@ class BacktestRepository:
         *,
         limit: int,
         include_system_tests: bool,
+        compact: bool = False,
+        display: bool = False,
     ) -> list[dict[str, Any]]:
+        # Exclude large summary/methodology before transfer, not after SELECT {columns}.
+        columns = "*"
+        if compact or display:
+            columns = ", ".join(('run_id', 'strategy_id', 'trade_strategy_id', 'strategy_version', 'instrument_type',
+                'start_date', 'end_date', 'return_mode', 'evaluation_mode', 'methodology_version', 'data_cutoff_date',
+                'strategy_config_hash', 'status', 'phase', 'worker_id', 'locked_at', 'worker_heartbeat_at',
+                'cancel_requested', 'attempt_count', 'max_attempts', 'is_system_test', 'validation_baseline_id',
+                'sample_days', 'total_picks', 'total_trades', 'progress_total_days', 'progress_done_days',
+                'progress_pct', 'current_trade_date', 'estimated_seconds_left', 'total_return_pct', 'avg_return_pct',
+                'max_drawdown_pct', 'win_rate_pct', 'request_json', 'started_at', 'finished_at', 'error_code', 'error_message'))
+        if display:
+            keys = ('universe_code', 'instrument_type', 'return_mode', 'trade_strategy_id', 'max_picks',
+                    'use_adjusted_price', 'commission_bps', 'stamp_tax_bps', 'slippage_bps', 'apply_execution_constraints')
+            projection = ",".join(f"'{key}',JSON_EXTRACT(request_json,'$.{key}')" for key in keys)
+            columns = columns.replace('request_json', f"JSON_OBJECT({projection}) AS request_json")
         where_sql = "" if include_system_tests else "WHERE COALESCE(is_system_test, 0) = 0"
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     f"""
-                    SELECT *
+                    SELECT {columns}
                     FROM backtest_run
                     {where_sql}
                     ORDER BY id DESC
@@ -177,22 +194,31 @@ class BacktestRepository:
                 cursor.execute(sql, [*base_params, limit, offset])
                 rows = cursor.fetchall() or []
                 horizon_bars: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
-                horizon_sql = """
-                SELECT dk.trade_date, dk.close, dk.high, dk.low, af.adj_factor
-                FROM daily_kline dk
-                LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
-                WHERE dk.code=%s AND dk.trade_date >= %s
-                ORDER BY dk.trade_date
-                LIMIT 5
-                """
+                requests: dict[tuple[Any, Any], list[tuple[Any, Any]]] = {}
                 for trade in rows:
-                    trade_code = trade.get("code")
-                    signal_date = trade.get("trade_date")
+                    trade_code, signal_date = trade.get("code"), trade.get("trade_date")
                     entry_date = trade.get("entry_date") or signal_date
-                    if not trade_code or not signal_date or not entry_date:
-                        continue
-                    cursor.execute(horizon_sql, (trade_code, entry_date))
-                    horizon_bars[(signal_date, trade_code)] = cursor.fetchall() or []
+                    if trade_code and signal_date and entry_date:
+                        requests.setdefault((trade_code, entry_date), []).append((signal_date, trade_code))
+                if requests:
+                    # Each bounded branch seeks one page-local (code, entry).
+                    # Do not use one broad code/date window that scans history.
+                    branches, bar_params = [], []
+                    for index, (trade_code, entry_date) in enumerate(requests):
+                        branches.append("""(SELECT %s AS horizon_key, dk.trade_date, dk.close, dk.high, dk.low, af.adj_factor
+                            FROM daily_kline dk
+                            LEFT JOIN adj_factor_daily af ON af.code=dk.code AND af.trade_date=dk.trade_date
+                            WHERE dk.code=%s AND dk.trade_date >= %s ORDER BY dk.trade_date LIMIT 5)""")
+                        bar_params.extend((index, trade_code, entry_date))
+                    cursor.execute(" UNION ALL ".join(branches), bar_params)
+                    grouped = {index: [] for index in range(len(requests))}
+                    for bar in cursor.fetchall() or []:
+                        item = dict(bar)
+                        grouped[int(item.pop('horizon_key'))].append(item)
+                    for index, keys in enumerate(requests.values()):
+                        bars = sorted(grouped[index], key=lambda row: row['trade_date'])
+                        for key in keys:
+                            horizon_bars[key] = bars
         return {
             "use_adjusted_price": bool(run_row.get("use_adjusted_price")),
             "total": total,

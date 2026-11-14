@@ -64,10 +64,12 @@ def get_strategy_detail(
 @router.get("/strategies/forward-evidence")
 def get_forward_evidence(
     strategy_id: str = Query(min_length=1, max_length=64),
+    bounded: bool = False,
 ) -> dict:
-    return {
-        "forward_evidence": ForwardObservationService().evidence_summary(strategy_id),
-    }
+    if bounded:
+        from app.display_reads.forward_evidence import evidence_summary
+        return {"forward_evidence": evidence_summary(strategy_id)}
+    return {"forward_evidence": ForwardObservationService().evidence_summary(strategy_id)}
 
 
 @router.get("/strategies/factor-evaluation")

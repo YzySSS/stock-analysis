@@ -664,7 +664,7 @@ function renderForwardEvidenceError(message) {
 }
 
 async function loadForwardEvidence(strategyId, token) {
-  const data = await fetchJson(`/api/strategies/forward-evidence?strategy_id=${encodeURIComponent(strategyId)}`);
+  const data = await fetchJson(`/api/strategies/forward-evidence?bounded=true&strategy_id=${encodeURIComponent(strategyId)}`);
   if (token !== strategyLoadToken) return;
   renderForwardEvidence(data.forward_evidence || null);
 }
@@ -720,16 +720,14 @@ async function loadStrategyDetail(strategyId) {
   });
   renderStrategyDetail(data.strategy || null);
   renderStrategyFactors(data.strategy || null);
-  try {
-    await loadFactorEvaluation(strategyId, currentStrategyVersion, token);
-  } catch (error) {
-    if (token === strategyLoadToken) renderFactorResearchError(error.message);
-  }
-  try {
-    await loadForwardEvidence(strategyId, token);
-  } catch (error) {
-    if (token === strategyLoadToken) renderForwardEvidenceError(error.message);
-  }
+  await Promise.allSettled([
+    loadFactorEvaluation(strategyId, currentStrategyVersion, token).catch((error) => {
+      if (token === strategyLoadToken) renderFactorResearchError(error.message);
+    }),
+    loadForwardEvidence(strategyId, token).catch((error) => {
+      if (token === strategyLoadToken) renderForwardEvidenceError(error.message);
+    }),
+  ]);
 }
 
 async function loadStrategiesPage() {
