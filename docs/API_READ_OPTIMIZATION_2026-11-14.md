@@ -37,3 +37,18 @@
 - 本阶段未部署上述复盘候选。若继续压低**首次无缓存**分页耗时，最小结构方案是给 tracked 表添加 `(code, quote_minute, latest_price)` 覆盖索引（分区主键会隐含 `trade_date`）；需 smoke 验证、在线 `INPLACE/LOCK=NONE` 与生产 I/O 观察。另一条路线是带来源/覆盖/迟到修订合同的股票×日分钟极值读模型，而非任意延长缓存时间。
 
 以上候选、原始计划、schema 与 HTTP 基线在 `static-candidates.json`、`tracking-before-analyze.txt`、`schema.json`、`http-before.json`。复盘覆盖索引/日级读模型尚未实施，不记作已完成。
+
+## 个股概览生产验收
+
+实现 `147288b`、说明 `6c533d5` 已推送远端 main，当前生产工作树仍在历史部署分支 `codex/sentiment-v06-implementation`（`main` 本地引用较旧，因此推送明确使用 `HEAD:main`，未强推/重写历史）。仅重启 API，四 Worker 未重启；五服务 active/NRestarts=0，实时认证 readiness 为 `ready/accepting_jobs=true`，migration 38/38。本地/公网 health、认证/匿名边界与 home.js 文件哈希均通过。研究源码/依赖双指纹逐键不变。
+
+同服务器经公网、复用 HTTP 连接、每路径 3 次完整认证 GET：
+
+| 接口 | 上线前 | 上线后 |
+| --- | --- | --- |
+| sh.600519 overview | 130～145ms | 44～45ms |
+| sz.000001 overview | 111～112ms | 44～45ms |
+| bj.920001 overview | 109～119ms | 45～46ms |
+| sh.512480 overview | 36～38ms | 13～14ms |
+
+4 组公网/本地 overview 完整 JSON SHA 上线前后相同；这不是用户电脑端或 P95 的证据。测试未做浏览器整页重测：本轮没有改页面/静态资源，测量对象是完整概览 API，而非整个股票详情页。复盘 HTTP 自然缓存/数据状态有变化；本轮未修改复盘实现，不能将其上线前后波动宣称为复盘改进。证据 `http-before.json`、`http-after.json`、`deployment-checks.json`。
