@@ -368,7 +368,7 @@ def _full_tracking_summary(*, tracker, total, run_id, strategy_id, selection_dat
     if cached is not None and cached.get('_total') == total:
         return cached
     records = tracker.build_latest_selection_snapshot(
-        limit=max(total, 1), offset=0, include_in_stats_only=True, **scope)
+        limit=max(total, 1), offset=0, include_in_stats_only=True, **scope) if total else []
     items = tracker.to_dict_list(records)
     result = {'_total': total, '_revision': cache_key,
         'filtered_summary': {**_build_tracking_summary(items), 'total_count': total,
@@ -433,7 +433,7 @@ def _tracking_payload(
         selection_date=selection_date,
         offset=offset,
         latest_only=latest_only,
-    )
+    ) if total else []
     items = tracker.to_dict_list(page_records)
 
     cached_summary = _full_tracking_summary(

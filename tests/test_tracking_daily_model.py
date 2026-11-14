@@ -83,6 +83,18 @@ class DailyModelTests(unittest.TestCase):
         self.assertIsNone(result['filtered_summary'])
         self.assertEqual(result['pagination']['total'], 23)
 
+    def test_empty_scope_does_not_plan_or_aggregate_any_price_sources(self):
+        fake = FakeTracker()
+        with patch.object(tracking, 'SelectionResultTracker', return_value=fake), \
+             patch.object(tracking, '_count_tracking_items', return_value=0), \
+             patch.object(tracking, '_get_cached_tracking_summary', return_value=None), \
+             patch.object(tracking, '_cache_tracking_summary'):
+            result = tracking._tracking_payload(instrument_type='etf', include_runs=False)
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(result['items'], [])
+        self.assertEqual(result['filtered_summary']['count'], 0)
+        self.assertEqual(result['pagination']['total'], 0)
+
     def test_independent_summary_still_uses_entire_scope_and_exclusions(self):
         fake = FakeTracker()
         with patch.object(tracking, 'SelectionResultTracker', return_value=fake), \
