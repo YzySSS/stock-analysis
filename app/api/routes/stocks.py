@@ -189,6 +189,63 @@ def _technical_summary(price_history: list[dict[str, Any]], realtime_price: floa
     }
 
 
+def _population_ranks(
+    cursor: Any,
+    *,
+    table: str,
+    fields: dict[str, str],
+    scope: str,
+    scope_params: tuple[Any, ...],
+    code: str,
+) -> tuple[int, dict[str, int | None]]:
+    # Internal constant identifiers only. Read the target and its peers in the
+    # SAME statement: production uses READ COMMITTED and may ingest a new quote
+    # after the overview's earlier individual quote read.
+    aggregates = ", ".join(
+        f"MAX(target.{field}) AS {key}_value, "
+        f"1 + COUNT(CASE WHEN population.{field} > target.{field} THEN 1 END) AS {key}"
+        for key, field in fields.items()
+    )
+    cursor.execute(
+        f"WITH population AS (SELECT code, {', '.join(fields.values())} FROM {table} WHERE {scope}) "
+        f"SELECT COUNT(*) AS total, {aggregates} FROM population "
+        f"LEFT JOIN (SELECT * FROM population WHERE code = %s) target ON TRUE",
+        (*scope_params, code),
+    )
+    row = cursor.fetchone() or {}
+    return int(row.get("total") or 0), {
+        key: int(row[key]) if row.get(key + "_value") is not None else None
+        for key in fields
+    }
+
+
+def _overview_rankings(
+    cursor: Any, code: str, factor: dict[str, Any],
+) -> tuple[dict[str, Any], int]:
+    realtime_total, realtime_ranks = _population_ranks(
+        cursor, table="stock_realtime_snapshot",
+        fields={"amount_rank": "amount", "pct_chg_rank": "pct_chg"},
+        scope="code REGEXP '^(sh|sz|bj)\\.'", scope_params=(), code=code,
+    )
+    ranks: dict[str, Any] = {"sample_size": realtime_total}
+    populations = [(realtime_total, realtime_ranks)]
+    factor_total = 0
+    if factor.get("trade_date"):
+        factor_total, factor_ranks = _population_ranks(
+            cursor, table="factor_input_daily",
+            fields={"total_mv_rank": "total_mv", "turnover_rank": "turnover_rate", "volume_ratio_rank": "volume_ratio"},
+            scope="trade_date = %s", scope_params=(factor["trade_date"],), code=code,
+        )
+        populations.append((factor_total, factor_ranks))
+    for total, population in populations:
+        for key, rank in population.items():
+            ranks[key] = rank
+            # Keep the existing denominator: all source rows, including rows
+            # whose value for this particular metric is NULL.
+            ranks[key.replace("_rank", "_percentile")] = _rank_percentile(rank, total)
+    return ranks, factor_total
+
+
 @router.get("/stocks/{code}/overview")
 def stock_overview(code: str) -> dict:
     with mysql_read_conn() as conn:
@@ -245,53 +302,11 @@ def stock_overview(code: str) -> dict:
             history_desc = cursor.fetchall()
             history = list(reversed(history_desc))
 
-            cursor.execute("SELECT COUNT(*) AS total FROM stock_realtime_snapshot WHERE code REGEXP '^(sh|sz|bj)\\.'")
-            realtime_total = int((cursor.fetchone() or {}).get("total") or 0)
-            rank_queries = {
-                "amount_rank": "amount",
-                "pct_chg_rank": "pct_chg",
-            }
-            ranks: dict[str, Any] = {"sample_size": realtime_total}
-            for key, field in rank_queries.items():
-                cursor.execute(
-                    f"""
-                    SELECT ranked.rank_no
-                    FROM (
-                        SELECT code, RANK() OVER (ORDER BY {field} DESC) AS rank_no
-                        FROM stock_realtime_snapshot
-                        WHERE code REGEXP '^(sh|sz|bj)\\.' AND {field} IS NOT NULL
-                    ) ranked
-                    WHERE ranked.code = %s
-                    """,
-                    (code,),
-                )
-                row = cursor.fetchone() or {}
-                rank = int(row.get("rank_no") or 0) or None
-                ranks[key] = rank
-                ranks[key.replace("_rank", "_percentile")] = _rank_percentile(rank, realtime_total)
-
+            # RANK() for one target is 1 + the count of strictly greater
+            # non-NULL values. Compute all metrics in a single pass per source
+            # rather than sorting the entire population once per metric.
+            ranks, factor_total = _overview_rankings(cursor, code, factor)
             latest_factor_date = factor.get("trade_date")
-            factor_total = 0
-            if latest_factor_date:
-                cursor.execute("SELECT COUNT(*) AS total FROM factor_input_daily WHERE trade_date = %s", (latest_factor_date,))
-                factor_total = int((cursor.fetchone() or {}).get("total") or 0)
-                for key, field in {"total_mv_rank": "total_mv", "turnover_rank": "turnover_rate", "volume_ratio_rank": "volume_ratio"}.items():
-                    cursor.execute(
-                        f"""
-                        SELECT ranked.rank_no
-                        FROM (
-                            SELECT code, RANK() OVER (ORDER BY {field} DESC) AS rank_no
-                            FROM factor_input_daily
-                            WHERE trade_date = %s AND {field} IS NOT NULL
-                        ) ranked
-                        WHERE ranked.code = %s
-                        """,
-                        (latest_factor_date, code),
-                    )
-                    row = cursor.fetchone() or {}
-                    rank = int(row.get("rank_no") or 0) or None
-                    ranks[key] = rank
-                    ranks[key.replace("_rank", "_percentile")] = _rank_percentile(rank, factor_total)
 
             industry = basic.get("industry")
             industry_avg = {}
