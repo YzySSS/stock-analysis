@@ -119,6 +119,18 @@ return { posts, gets };
         self.assertEqual(result["posts"], 1)
         self.assertEqual(result["gets"], 2)
 
+    def test_cached_chip_reference_tracks_live_price_without_mutating_source(self):
+        result = self._run_javascript(
+            """
+const original={weight_avg:10,winner_rate:50,label:'中性',price_vs_weight_avg_pct:0};
+const live=chipWithPrice(original,11);
+return {live,original};
+"""
+        )
+        self.assertEqual(result['live']['price_vs_weight_avg_pct'], 10)
+        self.assertEqual(result['live']['label'], '价格高于平均成本')
+        self.assertEqual(result['original']['price_vs_weight_avg_pct'], 0)
+
     def test_initial_history_keeps_previous_visible_month_window_and_full_bounds(self):
         result = self._run_javascript(
             """

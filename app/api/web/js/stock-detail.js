@@ -136,6 +136,19 @@ function renderOverviewConsole(overview) {
   });
 }
 
+function chipWithPrice(chip, price) {
+  if (!chip || price == null) return chip;
+  const ratio = chip.weight_avg ? (Number(price) - chip.weight_avg) / chip.weight_avg * 100 : null;
+  let label = '中性';
+  if (chip.winner_rate != null) {
+    if (chip.winner_rate >= 70) label = '获利盘偏高';
+    else if (chip.winner_rate <= 35) label = '套牢盘偏多';
+    else if (ratio != null && ratio > 5) label = '价格高于平均成本';
+    else if (ratio != null && ratio < -5) label = '价格低于平均成本';
+  }
+  return { ...chip, price_vs_weight_avg_pct: ratio == null ? null : Math.round(ratio * 100) / 100, label };
+}
+
 function renderChipPanel(chip) {
   const container = qs('#stock-detail-chip');
   if (!container) return;
@@ -1056,7 +1069,7 @@ function renderStockContext(data, overview = {}) {
     qs('#stock-stat-date').textContent = escapeHtml(realtime.quote_time || data.latest_kline?.trade_date || '-');
 
     renderFactorScorePills(factorScores, latestSelection);
-    renderChipPanel(data.chip);
+    renderChipPanel(chipWithPrice(data.chip, realtime.latest_price ?? data.latest_kline?.close));
     renderMoneyflowPanel(data.moneyflow, data.realtime_moneyflow);
 
     qs('#stock-detail-basic').innerHTML = `
@@ -1226,7 +1239,7 @@ async function renderStockIntraday(data, code) {
     }
 }
 
-const stockPage = { code: '', context: null, contextAt: 0, dynamic: null, overview: {}, revision: '', historyRevision: '', busy: false, intradayBusy: false };
+const stockPage = { code: '', context: null, contextAt: 0, news: null, newsAt: 0, dynamic: null, overview: {}, revision: '', historyRevision: '', busy: false, intradayBusy: false };
 function renderStockQuote(data) {
   const realtime = data.realtime || {};
   qs('#stock-detail-title').textContent = `${data.name || data.code} (${data.code})`;
@@ -1253,13 +1266,16 @@ async function loadStockContext(refresh = false) {
       stockPage.historyRevision = data.history_revision;
     }
     renderStockContext(stockPage.context, stockPage.overview);
+    if (stockPage.news) renderRecentNews(stockPage.news.recent_news || [], stockPage.context.latest_selection || {});
   } catch (error) {
     ['#stock-detail-basic','#stock-detail-factors','#stock-detail-fundamentals','#stock-detail-selection','#stock-detail-chip','#stock-detail-history'].forEach((selector) => stockSectionError(selector, error));
   }
 }
 async function loadStockNews(refresh = false) {
   try {
-    const data = await fetchReadJson(`/api/stocks/${encodeURIComponent(stockPage.code)}?section=news`, { ttl: 60000, refresh });
+    const data = await fetchReadJson(`/api/stocks/${encodeURIComponent(stockPage.code)}?section=news`, { ttl: 300000, refresh });
+    stockPage.news = data;
+    stockPage.newsAt = Date.now();
     renderRecentNews(data.recent_news || [], stockPage.context?.latest_selection || {});
   } catch (error) { stockSectionError('#stock-detail-news', error); }
 }
@@ -1276,6 +1292,7 @@ async function loadStockOverview() {
   try {
     stockPage.overview = await fetchJson(`/api/stocks/${encodeURIComponent(stockPage.code)}/overview`);
     renderOverviewConsole(stockPage.overview);
+    if (!stockPage.context) renderStockQuote({code: stockPage.code, name: stockPage.overview.name, realtime: stockPage.overview.quote});
     if (stockPage.context) renderStockContext(stockPage.context, stockPage.overview);
   } catch (error) { stockSectionError('#stock-overview-status', error); }
 }
@@ -1304,6 +1321,7 @@ async function loadStockDetail({ initial = false } = {}) {
     // never fetched once per quote tick unless a relevant source changed.
     const work = [loadStockOverview()];
     if (!stockPage.context || contextChanged || Date.now() - stockPage.contextAt >= 300000) work.push(loadStockContext());
+    if (contextChanged || Date.now() - stockPage.newsAt >= 300000) work.push(loadStockNews(contextChanged));
     if (historyChanged) work.push(loadStockHistory({ range: true }));
     if (qs('.stock-intraday-disclosure')?.open) work.push(loadStockIntraday());
     await Promise.allSettled(work);
