@@ -71,7 +71,7 @@ class SentimentV06UiCompatibilityTests(unittest.TestCase):
         )
         self.assertIn("a_share_sentiment_v05", script)
         self.assertIn("a_share_sentiment_v06", script)
-        self.assertIn("backtest.js?v=20261114read3", page)
+        self.assertIn("backtest.js?v=20261114read3identity", page)
 
     def test_t16_stock_detail_and_tracking_keep_shadow_research_semantics(self):
         stock_script = (

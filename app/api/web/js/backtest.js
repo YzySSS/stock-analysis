@@ -6,12 +6,23 @@ let currentBacktestReturnMode = '1d';
 let currentBacktestTradesPage = 1;
 let currentBacktestTradesTotalPages = 0;
 let currentBacktestTradesLimit = 10;
-const backtestRead = { generation: 0, trades: 0, runs: 0, polling: false, pending: 0, items: new Map(), detail: null, resultKey: null, tradeKey: null };
+const backtestRead = { generation: 0, trades: 0, runs: 0, polling: false, pending: 0, identity: getCookieValue('stock_analysis_csrf'), items: new Map(), detail: null, resultKey: null, tradeKey: null };
 function backtestResultKey(run) {
   // Writer saves one completed day before publishing progress. Heartbeat-only
   // changes must not cause unchanged curves/trades to be downloaded again.
   return run ? JSON.stringify([run.run_id, run.status, run.attempt_count, run.started_at, run.finished_at,
     run.progress_done_days, run.total_trades, run.sample_days]) : null;
+}
+
+function backtestIdentity() {
+  const identity = getCookieValue('stock_analysis_csrf');
+  if (identity !== backtestRead.identity) {
+    backtestRead.identity = identity;
+    backtestRead.items.clear(); backtestRead.detail = null;
+    backtestRead.resultKey = null; backtestRead.tradeKey = null;
+    backtestRead.runs += 1; backtestRead.trades += 1; backtestRead.generation += 1;
+  }
+  return identity;
 }
 
 
@@ -640,9 +651,16 @@ function pickDefaultBacktestRun(items = []) {
 }
 
 async function loadRuns({ autoLoadLatest = false } = {}) {
+  const identity = backtestIdentity();
   const token = ++backtestRead.runs;
-  const data = await fetchJson('/api/backtest/runs?limit=20&compact=true&display=true');
-  if (token !== backtestRead.runs) return;
+  let data;
+  try {
+    data = await fetchJson('/api/backtest/runs?limit=20&compact=true&display=true');
+  } catch (error) {
+    if (token === backtestRead.runs && identity === getCookieValue('stock_analysis_csrf')) throw error;
+    return;
+  }
+  if (token !== backtestRead.runs || identity !== getCookieValue('stock_analysis_csrf')) return;
   const items = data.items || [];
   backtestRead.items = new Map(items.map((row) => [row.run_id, row]));
   renderRuns(items);
@@ -653,7 +671,9 @@ async function loadRuns({ autoLoadLatest = false } = {}) {
   }
 }
 
-async function loadTrades(runId, page = currentBacktestTradesPage || 1, revision = backtestResultKey(backtestRead.items.get(runId))) {
+async function loadTrades(runId, page = currentBacktestTradesPage || 1, revision = undefined) {
+  const identity = backtestIdentity();
+  if (revision === undefined) revision = backtestResultKey(backtestRead.items.get(runId));
   const token = ++backtestRead.trades;
   const generation = backtestRead.generation;
   if (!runId) {
@@ -662,15 +682,15 @@ async function loadTrades(runId, page = currentBacktestTradesPage || 1, revision
   }
   const returnMode = currentBacktestReturnMode || qs('#backtest-return-mode')?.value || '1d';
   const limit = currentBacktestTradesLimit || 10;
-  const key = JSON.stringify([runId, page, limit, returnMode, revision, getCookieValue('stock_analysis_csrf')]);
+  const key = JSON.stringify([runId, page, limit, returnMode, revision, identity]);
   backtestRead.pending += 1;
   try {
     const data = await fetchJson(`/api/backtest/trades?run_id=${encodeURIComponent(runId)}&limit=${encodeURIComponent(limit)}&page=${encodeURIComponent(page)}&return_mode=${encodeURIComponent(returnMode)}`);
-    if (token !== backtestRead.trades || generation !== backtestRead.generation || runId !== currentBacktestRunId || returnMode !== currentBacktestReturnMode) return;
+    if (token !== backtestRead.trades || generation !== backtestRead.generation || runId !== currentBacktestRunId || returnMode !== currentBacktestReturnMode || identity !== getCookieValue('stock_analysis_csrf')) return;
     renderTrades(data.items || [], returnMode, data);
     backtestRead.tradeKey = key;
   } catch (error) {
-    if (token === backtestRead.trades && generation === backtestRead.generation) {
+    if (token === backtestRead.trades && generation === backtestRead.generation && runId === currentBacktestRunId && returnMode === currentBacktestReturnMode && identity === getCookieValue('stock_analysis_csrf')) {
       backtestRead.tradeKey = null;
       qs('#backtest-trades-body').innerHTML = renderEmptyRow(9, `交易明细加载失败：${error.message}`);
     }
@@ -679,11 +699,11 @@ async function loadTrades(runId, page = currentBacktestTradesPage || 1, revision
 
 async function loadBacktestResult(runId, options = {}) {
   if (!runId) return;
+  const identity = backtestIdentity();
   backtestRead.pending += 1;
   try {
     const known = backtestRead.items.get(runId);
     const revision = backtestResultKey(known);
-    const identity = getCookieValue('stock_analysis_csrf');
     const resultKey = JSON.stringify([runId, revision, identity]);
     const changedRun = currentBacktestRunId !== runId;
     if (changedRun) {
@@ -712,7 +732,7 @@ async function loadBacktestResult(runId, options = {}) {
         backtestRead.resultKey = resultKey;
         if (!known && !skipTrades) tradeWork = loadTrades(runId, currentBacktestTradesPage, revision);
       } catch (error) {
-        if (generation === backtestRead.generation) {
+        if (generation === backtestRead.generation && runId === currentBacktestRunId && identity === getCookieValue('stock_analysis_csrf')) {
           backtestRead.resultKey = null;
           qs('#backtest-equity-chart').innerHTML = `<text x="24" y="50" fill="#EF7279" font-size="14">回测结果加载失败：${escapeHtml(error.message)}</text>`;
           qs('#backtest-curve-body').innerHTML = renderEmptyRow(4, `回测结果加载失败：${error.message}`);
@@ -720,7 +740,7 @@ async function loadBacktestResult(runId, options = {}) {
       }
     }
     if (tradeWork) await tradeWork;
-    if (generation === backtestRead.generation && options.scroll !== false) {
+    if (generation === backtestRead.generation && identity === getCookieValue('stock_analysis_csrf') && options.scroll !== false) {
       qs('#backtest-detail-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   } finally { backtestRead.pending -= 1; }
@@ -728,13 +748,14 @@ async function loadBacktestResult(runId, options = {}) {
 
 async function refreshBacktestPage() {
   // Three independent regions; a failed coverage request cannot hide history.
+  const identity = backtestIdentity();
   const selected = currentBacktestRunId;
   await Promise.allSettled([
-    loadBacktestStrategies().catch((error) => { const message=qs('#backtest-form-message'); if(message) { message.textContent=`策略加载失败：${error.message}`; const shell=message.closest('.backtest-terminal-foot'); if(shell) shell.hidden=false; } }),
+    loadBacktestStrategies().catch((error) => { const message=qs('#backtest-form-message'); if(identity === getCookieValue('stock_analysis_csrf') && message) { message.textContent=`策略加载失败：${error.message}`; const shell=message.closest('.backtest-terminal-foot'); if(shell) shell.hidden=false; } }),
     loadFactorStatus(),
-    loadRuns({ autoLoadLatest: true }).catch((error) => renderError(qs('#backtest-runs-list'), `历史任务加载失败：${error.message}`)),
+    loadRuns({ autoLoadLatest: true }).catch((error) => { if (identity === getCookieValue('stock_analysis_csrf')) renderError(qs('#backtest-runs-list'), `历史任务加载失败：${error.message}`); }),
   ]);
-  if (selected && selected === currentBacktestRunId) await loadBacktestResult(selected, { scroll: false, keepTradePage: true });
+  if (identity === getCookieValue('stock_analysis_csrf') && selected && selected === currentBacktestRunId) await loadBacktestResult(selected, { scroll: false, keepTradePage: true });
 }
 
 async function runBacktest(event) {

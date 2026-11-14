@@ -78,3 +78,72 @@ const ctx={console,Map,JSON,Promise,Date,URLSearchParams,window:{addEventListene
 })().catch(e=>{console.error(e);process.exitCode=1});
 '''.replace('STATE',json.dumps(state)).replace('LOADERS',json.dumps(loaders))
         subprocess.run(['node','-e',harness],check=True,capture_output=True,text=True)
+
+    def _assert_identity_switch_drops_deferred_responses(self, kind):
+        source=Path('app/api/web/js/backtest.js').read_text()
+        state=source[:source.index('const BACKTEST_STRATEGY_LABELS')]
+        loaders=source[source.index('function pickDefaultBacktestRun'):source.index('async function runBacktest')]
+        harness=r'''
+const vm=require('vm'),assert=require('assert');
+const tick=()=>new Promise(r=>setImmediate(r));
+(async()=>{
+ for(const fails of [false,true]) {
+  let identity='identity-old';
+  const queue=[],renders=[],elements=new Map();
+  const ctx={console,Map,JSON,Promise,Date,URLSearchParams,document:{hidden:false},window:{addEventListener(){}},
+   getCookieValue:()=>identity,escapeHtml:x=>x,
+   qs:(s)=>{if(!elements.has(s))elements.set(s,{value:'1d',innerHTML:'unchanged',textContent:'unchanged',scrollIntoView(){renders.push('scroll')}});return elements.get(s)},
+   renderRuns:(items)=>renders.push(['runs',items]),updatePolling(){},
+   setBacktestStats:(data)=>renders.push(['result',data]),renderCurve(){},
+   renderTrades:(items)=>renders.push(['trades',items]),renderEmptyRow:(n,m)=>m,
+   renderError:(el,msg)=>{el.innerHTML=msg},
+   loadBacktestStrategies:async()=>{},loadFactorStatus:async()=>{},
+   fetchJson:(url)=>new Promise((resolve,reject)=>queue.push({url,resolve,reject})),
+  };
+  vm.createContext(ctx);vm.runInContext(STATE+LOADERS,ctx);
+  vm.runInContext("currentBacktestRunId='A';currentBacktestReturnMode='1d'",ctx);
+  const start=()=>KIND==='runs'?ctx.loadRuns():KIND==='trades'?ctx.loadTrades('A'):ctx.loadBacktestResult('A',{scroll:false});
+  const oldWork=start();await tick();assert.equal(queue.length,1);
+  identity='identity-new';
+  const deferred=queue.shift();
+  if(fails)deferred.reject(Error('old identity error'));
+  else deferred.resolve(KIND==='runs'?{items:[{run_id:'old-private'}]}:KIND==='trades'?{items:[{private:'old'}],page:1}:{run_id:'A',private:'old',curve:[],return_mode:'1d'});
+  await oldWork;await tick();
+  assert.equal(queue.length,0,'stale result must not chain additional reads');
+  assert.equal(renders.length,0,'old success/error must not render');
+  assert.equal(vm.runInContext('backtestRead.items.size',ctx),0,'old list must not publish its map');
+  assert.equal(vm.runInContext('backtestRead.detail',ctx),null);
+  assert.equal(vm.runInContext('backtestRead.resultKey',ctx),null);
+  assert.equal(vm.runInContext('backtestRead.tradeKey',ctx),null);
+  for(const el of elements.values())assert.equal(el.innerHTML,'unchanged','old error must not replace current UI');
+  // A fresh load must clear old-identity reuse markers and may publish normally.
+  vm.runInContext("backtestRead.items.set('old-private',{run_id:'old-private'});backtestRead.resultKey='old marker';backtestRead.tradeKey='old marker'",ctx);
+  const fresh=start();await tick();
+  for(let n=0;n<6&&queue.length;n++) {
+   const pending=queue.splice(0);
+   for(const request of pending)request.resolve(request.url.includes('/runs?')?{items:[{run_id:'new-private',status:'success'}]}:request.url.includes('/trades')?{run_id:'A',items:[{private:'new'}],page:1}:{run_id:'A',private:'new',curve:[],return_mode:'1d'});
+   await tick();
+  }
+  await fresh;assert(renders.length>0,'new identity can load successfully');
+  assert.equal(vm.runInContext("backtestRead.items.has('old-private')",ctx),false);
+  if(KIND==='runs')assert(vm.runInContext("backtestRead.items.has('new-private')",ctx));
+  if(KIND==='trades')assert(vm.runInContext("backtestRead.tradeKey.includes('identity-new')",ctx));
+  if(KIND==='results') {
+   assert.equal(vm.runInContext('backtestRead.detail.private',ctx),'new');
+   assert(vm.runInContext("backtestRead.resultKey.includes('identity-new')",ctx));
+  }
+  assert.equal(vm.runInContext('backtestRead.pending',ctx),0);
+ }
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''.replace('STATE',json.dumps(state)).replace('LOADERS',json.dumps(loaders)).replace('KIND',json.dumps(kind))
+        result=subprocess.run(['node','-e',harness],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_runs_deferred_success_and_error_do_not_publish_after_identity_switch(self):
+        self._assert_identity_switch_drops_deferred_responses('runs')
+
+    def test_trades_deferred_success_and_error_do_not_publish_after_identity_switch(self):
+        self._assert_identity_switch_drops_deferred_responses('trades')
+
+    def test_results_deferred_success_and_error_do_not_publish_after_identity_switch(self):
+        self._assert_identity_switch_drops_deferred_responses('results')

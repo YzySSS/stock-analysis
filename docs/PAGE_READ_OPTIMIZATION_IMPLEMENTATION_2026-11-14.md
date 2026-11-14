@@ -211,3 +211,14 @@
 ### 回滚
 
 本批无DDL。`rollback-files.tar`保存固定基线文件；按依赖反向撤销本批应用提交并发布新JS版本、只重启API即可恢复旧读取。保留第二批0040和writer合同，不reset生产工作树或修改既有研究历史。默认full/compact API始终兼容。
+
+## 第三批根复核补充：在途回测响应的身份隔离（已修正）
+
+根独立复核发现：初版结果成功分支已有身份校验，但交易页、任务列表和结果错误分支在await后只校验请求序号，另一tab登录/退出使CSRF身份变化时，旧在途响应仍可能覆盖当前UI或发布成功复用标记。本次仅修复这一竞态，**没有改API、研究、数据库或布局，无需重启API/Worker**。
+
+- 每次runs/trades/results读取捕获当前身份；成功、错误、额外链式读取/滚动发布前同时检查身份与请求序号。旧身份的runs错误不再冒泡到新身份的页面错误区。
+- 新身份开始读取时清除旧items/detail/成功标记并推进各在途generation，避免从旧身份的Map预填新请求；交易页默认revision在清理后才计算。新身份仍可正常重试/读取，不把身份切换当永久失败。
+- `backtest.js`资源版本提升到 `20261114read3identity`。3个新增延迟Node测试分别覆盖runs/trades/results的旧身份成功与失败、无旧UI/Map/标记发布，以及新身份重新读取成功；原乱序/失败重试/未变版本测试继续通过。
+- `identity-focused.log`：12项通过；`unittest-identity-fix.log`：**759项执行、758通过、1既有skip**，JS语法通过。
+- `identity-browser.json`：单Chromium真实公网仅做新资源加载复核，不重复完整旧新测速；真实加载新版本与身份helper、10条交易、无JS错误/整页溢出、pending回零、无写请求。前节三组截图属于初版第三批视觉基线，本次不拿旧截图冒充重新截图。
+- `identity-deployment.json`记录修正后最终SHA、新HTML/JS磁盘/本地/公网哈希、认证readiness/匿名401及五服务/四队列；旧`deployment.json`保留先前第三批验证记录，**修正后的最终版本以identity-deployment记录为准**。无新性能收益宣称，请求者端仍未验证。
