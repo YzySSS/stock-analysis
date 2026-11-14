@@ -4,7 +4,7 @@ import json
 import re
 import threading
 import time
-from typing import Annotated, Any
+from typing import Literal, Annotated, Any
 
 from fastapi import APIRouter, Query
 
@@ -1304,7 +1304,7 @@ def _dashboard_hot_themes(limit: int = 8) -> dict:
     }
 
 
-def _build_dashboard_summary(limit: int, *, compact: bool) -> dict:
+def _build_dashboard_summary(limit: int, *, compact: bool, include_research: bool = True) -> dict:
     tracker = SelectionResultTracker()
 
     preview_records = tracker.build_latest_selection_snapshot(limit=limit, instrument_type="stock")
@@ -1338,9 +1338,9 @@ def _build_dashboard_summary(limit: int, *, compact: bool) -> dict:
     payload = {
         "latest_trade_date": latest_trade_date,
         "market_overview": market_overview,
-        "market_timing": build_market_timing_signal(market_overview),
-        "hot_themes": _dashboard_hot_themes(limit=8),
-        "emotion_board": _dashboard_emotion_board(limit=10),
+        "market_timing": build_market_timing_signal(market_overview) if include_research else None,
+        "hot_themes": _dashboard_hot_themes(limit=8) if include_research else None,
+        "emotion_board": _dashboard_emotion_board(limit=10) if include_research else None,
         "latest_tracking_count": len(preview_items),
         "latest_tracking_avg_price_change_pct": avg_price_change_pct,
         "latest_tracking_preview": preview_items,
@@ -1380,7 +1380,22 @@ def _start_dashboard_refresh(limit: int) -> bool:
 def dashboard_summary(
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
     compact: Annotated[bool, Query()] = False,
+    section: Literal["full", "summary", "timing", "emotion"] = "full",
 ) -> dict:
+    if section != "full":
+        from app.display_cache.service import entry
+        cached = entry('dashboard') if limit == 8 else None
+        if cached:
+            payload = cached['payload']
+        elif section == 'summary':
+            payload = _build_dashboard_summary(limit, compact=True, include_research=False)
+        elif section == 'timing':
+            payload = _compact_dashboard_payload({'market_timing': build_market_timing_signal(_dashboard_market_overview())})
+        else:
+            payload = _compact_dashboard_payload({'hot_themes': _dashboard_hot_themes(limit=8), 'emotion_board': _dashboard_emotion_board(limit=10)})
+        keys = {'summary': ('latest_trade_date', 'market_overview', 'latest_tracking_count', 'latest_tracking_avg_price_change_pct', 'latest_tracking_preview', 'latest_selection_summary'),
+                'timing': ('market_timing',), 'emotion': ('hot_themes', 'emotion_board')}[section]
+        return {key: payload.get(key) for key in keys}
     if not compact:
         return _build_dashboard_summary(limit, compact=False)
 

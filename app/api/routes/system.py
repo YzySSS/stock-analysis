@@ -856,10 +856,23 @@ def _market_opinion_update_status(task_runs: list[dict]) -> dict | None:
     }
 
 
-def _latest_task_runs() -> list[dict]:
+# Only fields actually used by the task cards; the full API remains available.
+TASK_CARD_METADATA_KEYS = ('rows', 'success_codes', 'requested_codes', 'limit', 'updated', 'scanned',
+    'updated_count', 'failed_count', 'rows_synced', 'failed', 'no_data', 'source_used', 'counts', 'source_errors', 'error')
+
+
+def _latest_task_runs(*, compact: bool = False) -> list[dict]:
     placeholders = ", ".join(["%s"] * len(TRACKED_TASKS))
+    metadata_column = "t1.metadata_json"
+    if compact:
+        pairs = ", ".join(f"'{key}', JSON_EXTRACT(t1.metadata_json, '$.{key}')" for key in TASK_CARD_METADATA_KEYS)
+        # DQ and opinion have separate visible summaries. Preserve their source
+        # metadata to derive those summaries, not every other task's large logs.
+        metadata_column = ("CASE WHEN NOT JSON_VALID(t1.metadata_json) THEN NULL "
+            "WHEN t1.task_name IN ('data_quality_audit', 'market_opinion_update') THEN t1.metadata_json "
+            f"ELSE JSON_OBJECT({pairs}) END AS metadata_json")
     sql = f"""
-    SELECT t1.task_name, t1.run_id, t1.status, t1.started_at, t1.finished_at, t1.message, t1.metadata_json,
+    SELECT t1.task_name, t1.run_id, t1.status, t1.started_at, t1.finished_at, t1.message, {metadata_column},
            CASE
              WHEN t1.status = 'running' THEN TIMESTAMPDIFF(SECOND, t1.started_at, NOW())
              ELSE NULL
@@ -1238,10 +1251,14 @@ def _market_opinion_storage_summary() -> dict:
 
 
 @router.get("/system/status")
-def system_status() -> dict:
+def system_status(compact: bool = False) -> dict:
     from app.display_cache.service import get, entry, TTLS
-    payload = dict(get('system'))
     cached = entry('system')
+    if compact:
+        payload = _compact_system_payload(cached['payload'] if cached else _build_system_status(compact=True))
+    else:
+        payload = dict(get('system'))
+        cached = entry('system')
     payload['cache'] = {
         'hit': cached is not None,
         'ttl_seconds': TTLS['system'],
@@ -1250,9 +1267,9 @@ def system_status() -> dict:
     return payload
 
 
-def _build_system_status() -> dict:
+def _build_system_status(*, compact: bool = False) -> dict:
     mysql_info = ping_mysql()
-    task_runs = _latest_task_runs()
+    task_runs = _latest_task_runs(compact=True) if compact else _latest_task_runs()
     readiness = build_operational_readiness()
     latest = _latest_dates()
     sentiment_quality = _sentiment_quality_stats()
@@ -1292,4 +1309,26 @@ def _build_system_status() -> dict:
         },
         "market_opinion_update": _market_opinion_update_status(task_runs),
     }
+    return payload
+
+
+def _compact_system_payload(source: dict) -> dict:
+    """Exact visible task/DQ data, without hidden per-task diagnostic payloads."""
+    payload = dict(source)
+    payload['task_runs'] = [{**run, 'metadata': {key: (run.get('metadata') or {})[key]
+        for key in TASK_CARD_METADATA_KEYS if key in (run.get('metadata') or {})}}
+        for run in source.get('task_runs', [])]
+    quality = dict(source.get('data_quality') or {})
+    checks = []
+    for check in quality.get('checks') or []:
+        if check.get('status') == 'pass':
+            continue
+        samples = check.get('samples') or []
+        actionable = [sample for sample in samples if sample.get('classification') == 'actionable_missing']
+        checks.append({key: value for key, value in check.items() if key in ('label', 'check_id', 'status', 'message')}
+                      | {'samples': (actionable or samples)[:5]})
+    payload['data_quality'] = {key: value for key, value in quality.items() if key in
+        ('health', 'status', 'generated_at', 'counts', 'reference_trade_date', 'audit_version',
+         'history_lookback_trade_days', 'run_id', 'task_status', 'started_at', 'finished_at', 'message')}
+    payload['data_quality']['checks'] = checks
     return payload

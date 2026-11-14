@@ -763,12 +763,9 @@ async function loadHomePage() {
   const trackingPreview = qs('#home-tracking-preview');
 
   try {
-    const data = await fetchJson('/api/dashboard/summary?limit=8&compact=true');
+    const data = await fetchJson('/api/dashboard/summary?limit=8&compact=true&section=summary');
     const items = data.latest_tracking_preview || [];
     renderMarketOverview(data.market_overview);
-    renderMarketTiming(data.market_timing);
-    renderHotThemes(data.hot_themes || {});
-    renderEmotionBoard(data.emotion_board || {});
 
     const avgText = data.latest_tracking_avg_price_change_pct == null
       ? '平均涨跌幅 -'
@@ -875,4 +872,32 @@ document.addEventListener('DOMContentLoaded',()=>{
     qsa('[data-index-period]').forEach(b=>{const active=b===button;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
     showHomeIndexSeries();
   }));
+});
+
+
+const homeResearchReads = new Map();
+async function loadHomeResearch(section) {
+  const day = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Shanghai'}).format(new Date());
+  const previous = homeResearchReads.get(section);
+  if (previous && previous.day === day && (previous.pending || Date.now() - previous.at < 60000)) return previous.promise;
+  const promise = (async () => {
+    try {
+      const data = await fetchJson(`/api/dashboard/summary?limit=8&compact=true&section=${section}`);
+      if (section === 'timing') renderMarketTiming(data.market_timing);
+      else { renderHotThemes(data.hot_themes || {}); renderEmotionBoard(data.emotion_board || {}); }
+      homeResearchReads.set(section, {day, at: Date.now(), promise, pending: false});
+    } catch (error) {
+      homeResearchReads.delete(section);
+      const targets = section === 'timing' ? ['#home-market-timing-signals'] : ['#home-hot-themes', '#home-limit-up-pool', '#home-reversal-watch-pool'];
+      for (const target of targets) { const el = qs(target); if (el) el.innerHTML = `<div class="error-box">${escapeHtml(error.message)} · 重新展开可重试</div>`; }
+    }
+  })();
+  homeResearchReads.set(section, {day, at: Date.now(), promise, pending: true});
+  return promise;
+}
+document.addEventListener('DOMContentLoaded', () => {
+  qsa('[data-home-research-section]').forEach(disclosure => {
+    disclosure.addEventListener('toggle', () => { if (disclosure.open) loadHomeResearch(disclosure.dataset.homeResearchSection); });
+    if (disclosure.open) loadHomeResearch(disclosure.dataset.homeResearchSection);
+  });
 });

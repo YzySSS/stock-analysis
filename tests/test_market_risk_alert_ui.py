@@ -37,9 +37,9 @@ class MarketRiskAlertUiTests(unittest.TestCase):
 
         self.assertIn("pages.css?v=20260819marketalert1", home)
         self.assertIn("pages.css?v=20260819marketalert1", selection)
-        self.assertIn("common.js?v=20261114readbatch1", home)
-        self.assertIn("common.js?v=20261114readbatch1", selection)
-        self.assertIn("home.js?v=20260819marketalert1", home)
+        self.assertIn("common.js?v=20261114readbatch1b", home)
+        self.assertIn("common.js?v=20261114readbatch1b", selection)
+        self.assertIn("home.js?v=20261114readbatch1b", home)
         self.assertIn("selection.js?v=20260915sentimentv06", selection)
 
 

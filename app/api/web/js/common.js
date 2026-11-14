@@ -73,6 +73,7 @@ async function fetchReadJson(url, { ttl = 60000, revision = '', refresh = false 
   const parsed = new URL(url, window.location.href);
   const cacheable = parsed.origin === window.location.origin && (
     parsed.pathname === '/api/tracking/filters'
+    || (parsed.pathname === '/api/etf-rotation/spec' && /^[a-f0-9]{64}$/.test(parsed.searchParams.get('spec_hash') || ''))
     || /^\/api\/stocks\/[^/]+\/history$/.test(parsed.pathname)
     || (/^\/api\/stocks\/[^/]+$/.test(parsed.pathname) && ['context', 'news'].includes(parsed.searchParams.get('section')))
   );

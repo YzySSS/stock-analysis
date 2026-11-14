@@ -122,14 +122,24 @@ function renderContract(spec = {}) {
   if (!list) return;
   const data = spec.data_contract || {};
   const rules = [
-    `固定 ${spec.sectors?.length || 0} 个行业篮子，每个篮子只映射 1 只 ETF`,
+    `固定 ${spec.sector_count ?? spec.sectors?.length ?? 0} 个行业篮子，每个篮子只映射 1 只 ETF`,
     `行业至少 ${data.minimum_sector_history_days || '-'} 个交易日，ETF 至少 ${data.minimum_etf_history_days || '-'} 个交易日`,
     `行业周期至少 ${data.minimum_sector_cycle_history_days || '-'} 个交易日；只允许启动、主升或主升回踩`,
     `20 日平均成交额不低于 ${moneyText(data.minimum_average_amount_20d_yuan)}`,
     `收盘决策，下一交易日开盘开始观察；最多 ${spec.maximum_selections || 0} 只`,
     '零候选是合法结果；缺数据不补值、不自动调参、不自动交易',
   ];
-  list.innerHTML = rules.slice(0, 2).map(text=>`<li>${escapeHtml(text)}</li>`).join('') + `<li><details><summary>完整固定口径</summary><ul>${rules.slice(2).map(text=>`<li>${escapeHtml(text)}</li>`).join('')}</ul></details></li>`;
+  list.innerHTML = rules.slice(0, 2).map(text=>`<li>${escapeHtml(text)}</li>`).join('') + `<li><details id="etf-contract-detail"><summary>完整固定口径</summary><ul>${spec.maximum_selections == null ? '<li>展开后加载完整口径…</li>' : rules.slice(2).map(text=>`<li>${escapeHtml(text)}</li>`).join('')}</ul></details></li>`;
+  const disclosure = qs('#etf-contract-detail');
+  disclosure?.addEventListener('toggle', async () => {
+    if (!disclosure.open || spec.maximum_selections != null) return;
+    try {
+      const full = await fetchReadJson(`/api/etf-rotation/spec?spec_hash=${encodeURIComponent(spec.spec_hash)}`, {ttl: 86400000, revision: spec.spec_hash});
+      const stillOpen = disclosure.open;
+      renderContract(full);
+      qs('#etf-contract-detail').open = stillOpen;
+    } catch (error) { disclosure.querySelector('ul').innerHTML = `<li>${escapeHtml(error.message)} · 重新展开可重试</li>`; }
+  });
 }
 
 function renderSignal(item, spec) {
@@ -148,14 +158,14 @@ function renderSignal(item, spec) {
   qs('#etf-callout-title').textContent=item.selected_count ? '已有影子候选' : item.status === 'blocked' ? '数据待补证，暂无合格候选' : '暂无合格候选';
   qs('#etf-callout-note').textContent=`信号 ${item.trade_date || '-'} · ${item.status === 'blocked' ? '数据阻断，保留空仓；不填补证据' : '允许空仓，等待条件满足'}`;
   renderCandidates(item.candidates || []);
-  renderOutcomes(item.outcomes || []);
+  if (item.outcomes) renderOutcomes(item.outcomes);
   renderDiagnostics(item);
   renderContract(spec);
 }
 
 async function loadEtfRotation() {
   try {
-    const data = await fetchJson('/api/etf-rotation/latest');
+    const data = await fetchJson('/api/etf-rotation/latest?compact=true');
     const spec = data.spec || {};
     const badge = qs('#etf-rotation-model-badge');
     badge.textContent = `${spec.model_name || 'ETF 轮动'} · ${spec.version || '-'}`;
@@ -165,7 +175,9 @@ async function loadEtfRotation() {
       renderContract(spec);
       return;
     }
+    etfPage.runId = data.item.run_id;
     renderSignal(data.item, spec);
+    observeEtfOutcomes();
   } catch (error) {
     const empty = qs('#etf-rotation-empty');
     empty.hidden = false;
@@ -175,4 +187,42 @@ async function loadEtfRotation() {
 
 document.addEventListener('DOMContentLoaded', loadEtfRotation);
 
-document.addEventListener('DOMContentLoaded',()=>{qs('#etf-show-evidence')?.addEventListener('change',e=>qs('.etf-compact-table')?.classList.toggle('show-evidence',e.target.checked));});
+const etfPage = {runId: '', details: null, outcomes: null};
+async function loadEtfEvidence() {
+  if (!etfPage.runId) return;
+  if (!etfPage.details) etfPage.details = fetchJson(`/api/etf-rotation/runs/${encodeURIComponent(etfPage.runId)}/candidates`)
+    .then(data => renderCandidates(data.items || []))
+    .catch(error => { etfPage.details = null; throw error; });
+  return etfPage.details;
+}
+async function loadEtfOutcomes() {
+  if (!etfPage.runId) return;
+  if (!etfPage.outcomes) etfPage.outcomes = fetchJson(`/api/etf-rotation/runs/${encodeURIComponent(etfPage.runId)}/outcomes`)
+    .then(data => renderOutcomes(data.items || []))
+    .catch(error => {
+      etfPage.outcomes = null;
+      qs('#etf-outcome-list').innerHTML = `<div class="error-box">${escapeHtml(error.message)} <button type="button" id="etf-retry-outcomes" class="btn btn-secondary">重试</button></div>`;
+      qs('#etf-retry-outcomes')?.addEventListener('click', loadEtfOutcomes);
+    });
+  return etfPage.outcomes;
+}
+function observeEtfOutcomes() {
+  const target = qs('#etf-outcome-list');
+  if (!target) return;
+  target.textContent = '观察证据待加载…';
+  if (!window.IntersectionObserver) { loadEtfOutcomes(); return; }
+  const observer = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); loadEtfOutcomes(); }
+  }, {rootMargin: '150px'});
+  observer.observe(target);
+}
+document.addEventListener('DOMContentLoaded', () => {
+  qs('#etf-show-evidence')?.addEventListener('change', async event => {
+    const checkbox = event.target;
+    if (!checkbox.checked) { qs('.etf-compact-table')?.classList.remove('show-evidence'); return; }
+    checkbox.disabled = true;
+    try { await loadEtfEvidence(); qs('.etf-compact-table')?.classList.toggle('show-evidence', checkbox.checked); }
+    catch (error) { checkbox.checked = false; window.alert(`评分明细加载失败：${error.message}`); }
+    finally { checkbox.disabled = false; }
+  });
+});

@@ -1,4 +1,7 @@
+let systemPageLoading = false;
 async function loadSystemPage() {
+  if (systemPageLoading) return;
+  systemPageLoading = true;
   const started = performance.now();
   const panels = {
     api: qs('#system-api-panel'),
@@ -21,7 +24,7 @@ async function loadSystemPage() {
   };
 
   try {
-    const data = await fetchJson('/api/system/status');
+    const data = await fetchJson('/api/system/status?compact=true');
     const elapsedMs = Math.round(performance.now() - started);
     const latest = data.latest || {};
     const sentimentQuality = data.sentiment_quality || {};
@@ -65,7 +68,7 @@ async function loadSystemPage() {
     Object.values(panels).forEach((panel) => {
       if (panel && panel !== panels.baselineOverall) panel.innerHTML = `<div class="error-box">加载系统状态失败: ${escapeHtml(error.message)}</div>`;
     });
-  }
+  } finally { systemPageLoading = false; }
 }
 
 function formatReadinessStatus(status) {
