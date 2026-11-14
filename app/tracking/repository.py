@@ -18,7 +18,9 @@ class TrackingRepository:
         self,
         connection_factory: ConnectionFactory | None = None,
         read_connection_factory: ConnectionFactory | None = None,
+        use_daily_model: bool = True,
     ) -> None:
+        self.use_daily_model = use_daily_model
         self._connection_factory = connection_factory or mysql_conn
         # Tests and custom repositories historically inject one factory; keep
         # that contract while using rollback-only pooled reads by default.
@@ -242,6 +244,40 @@ class TrackingRepository:
         """
         with self._read_connect() as conn:
             with conn.cursor() as cursor:
+                # The manifest and both branches share this repeatable-read
+                # transaction. Constant date exclusions permit indexed range
+                # seeks for fallback, rather than aggregating ready-day minutes.
+                from app.tracking.minute_daily import ready_dates
+                if self.use_daily_model:
+                    cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                dates = ready_dates(cursor) if self.use_daily_model else []
+                if dates:
+                    from pymysql import MySQLError
+                    placeholders = ",".join(["%s"] * len(dates))
+                    daily_sql = """
+                    SELECT sr_inner.id AS selection_result_id, d.trade_date,
+                           d.max_price AS high_price, d.min_price AS low_price
+                    FROM target_selection target
+                    INNER JOIN selection_result sr_inner ON sr_inner.id=target.id
+                    INNER JOIN tracking_minute_daily d
+                      ON d.code=sr_inner.code AND d.trade_date > sr_inner.trade_date
+                    INNER JOIN tracking_minute_daily_manifest m
+                      ON m.trade_date=d.trade_date AND m.source_revision=d.source_revision
+                     AND m.status='ready' AND m.source_scope='tracked_positive_price_v1'
+                    UNION ALL
+                    """
+                    optimized = sql.replace(
+                        "            SELECT\n                sr_inner.id AS selection_result_id,\n                ri.trade_date,",
+                        daily_sql + "            SELECT\n                sr_inner.id AS selection_result_id,\n                ri.trade_date,", 1)
+                    optimized = optimized.replace(
+                        "             AND ri.latest_price IS NOT NULL",
+                        f"             AND ri.trade_date NOT IN ({placeholders})\n             AND ri.latest_price IS NOT NULL", 1)
+                    try:
+                        cursor.execute(optimized, [*params, *dates])
+                        return cursor.fetchall() or []
+                    except MySQLError as exc:
+                        if not exc.args or exc.args[0] != 1146:
+                            raise
                 cursor.execute(sql, params)
                 return cursor.fetchall() or []
 

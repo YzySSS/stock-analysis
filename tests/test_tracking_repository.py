@@ -219,7 +219,7 @@ class TrackingRepositoryTests(unittest.TestCase):
 
     def test_expired_stats_update_uses_strict_fourteen_day_cutoff(self):
         factory = RecordingConnectionFactory()
-        repository = TrackingRepository(connection_factory=factory)
+        repository = TrackingRepository(connection_factory=factory, use_daily_model=False)
         as_of = datetime(2026, 7, 20, 12, 0, 0)
 
         changed = repository.exclude_expired_from_stats(
@@ -253,7 +253,7 @@ class TrackingRepositoryTests(unittest.TestCase):
 
     def test_enrichment_query_scopes_expensive_joins_to_target_page(self):
         factory = RecordingConnectionFactory()
-        repository = TrackingRepository(connection_factory=factory)
+        repository = TrackingRepository(connection_factory=factory, use_daily_model=False)
 
         rows = repository.list_selection_result_rows(
             limit=10,
@@ -277,7 +277,7 @@ class TrackingRepositoryTests(unittest.TestCase):
 
     def test_count_latest_scope_uses_one_query_without_recursive_run_lookup(self):
         factory = RecordingConnectionFactory()
-        repository = TrackingRepository(connection_factory=factory)
+        repository = TrackingRepository(connection_factory=factory, use_daily_model=False)
 
         count = repository.count_items(
             instrument_type="stock",

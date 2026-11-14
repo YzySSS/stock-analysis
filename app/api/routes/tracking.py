@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -21,7 +23,7 @@ _DEEP_REVIEW_SERVICE = DeepReviewJobService()
 
 
 _TRACKING_SUMMARY_CACHE_TTL_SECONDS = 60.0
-_TRACKING_SUMMARY_CACHE_PREFIX = "tracking:summary:v2"
+_TRACKING_SUMMARY_CACHE_PREFIX = "tracking:summary:v3"
 _TRACKING_SUMMARY_CACHE_GENERATION_KEY = f"{_TRACKING_SUMMARY_CACHE_PREFIX}:generation"
 
 
@@ -43,6 +45,8 @@ def _tracking_summary_cache_key(
             "instrument_type": instrument_type,
             "latest_only": latest_only,
             "market_revision": backend.get("display:v1:revision:market"),
+            "tracking_revision": backend.get("display:v1:revision:tracking"),
+            "day": datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat(),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -355,6 +359,45 @@ def _compact_tracking_item(item: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _full_tracking_summary(*, tracker, total, run_id, strategy_id, selection_date,
+                           instrument_type, latest_only) -> dict:
+    scope = dict(run_id=run_id, strategy_id=strategy_id, selection_date=selection_date,
+                 instrument_type=instrument_type, latest_only=latest_only)
+    cache_key = _tracking_summary_cache_key(**scope)
+    cached = _get_cached_tracking_summary(cache_key)
+    if cached is not None and cached.get('_total') == total:
+        return cached
+    records = tracker.build_latest_selection_snapshot(
+        limit=max(total, 1), offset=0, include_in_stats_only=True, **scope)
+    items = tracker.to_dict_list(records)
+    result = {'_total': total, '_revision': cache_key,
+        'filtered_summary': {**_build_tracking_summary(items), 'total_count': total,
+                             'excluded_count': total - len(items)},
+        'strategy_summaries': _build_strategy_summaries(items)}
+    # If a concurrent source/membership commit changed the revision, do not
+    # publish this build as current. A future request independently recomputes.
+    if cache_key == _tracking_summary_cache_key(**scope):
+        _cache_tracking_summary(cache_key, result)
+    return result
+
+
+@router.get('/tracking/summary')
+def get_tracking_summary(
+    run_id: Optional[str] = Query(default=None),
+    strategy_id: Optional[str] = Query(default=None),
+    selection_date: Optional[str] = Query(default=None),
+    instrument_type: str = Query(default='stock'),
+    latest_only: bool = Query(default=False),
+) -> dict:
+    scope = dict(run_id=run_id, strategy_id=strategy_id, selection_date=selection_date,
+                 instrument_type=instrument_type, latest_only=latest_only)
+    total = _count_tracking_items(**scope)
+    result = _full_tracking_summary(tracker=SelectionResultTracker(repository=_TRACKING_REPOSITORY),
+                                    total=total, **scope)
+    return {**{key: result[key] for key in ('filtered_summary', 'strategy_summaries')},
+            'revision': result['_revision']}
+
+
 def _tracking_payload(
     *,
     run_id: Optional[str] = None,
@@ -366,6 +409,7 @@ def _tracking_payload(
     latest_only: bool = False,
     compact: bool = False,
     include_runs: bool = True,
+    include_summary: bool = True,
 ) -> dict:
     tracker = SelectionResultTracker(repository=_TRACKING_REPOSITORY)
     # GET endpoints are strictly read-only. Statistical expiry is already
@@ -381,17 +425,6 @@ def _tracking_payload(
         run_id=resolved_run_id,
         latest_only=latest_only,
     )
-    cache_key = _tracking_summary_cache_key(
-        run_id=resolved_run_id,
-        strategy_id=strategy_id,
-        selection_date=selection_date,
-        instrument_type=instrument_type,
-        latest_only=latest_only,
-    )
-    cached_summary = _get_cached_tracking_summary(cache_key)
-    if cached_summary is not None and cached_summary.get("_total") != total:
-        cached_summary = None
-
     page_records = tracker.build_latest_selection_snapshot(
         limit=limit,
         instrument_type=instrument_type,
@@ -403,28 +436,11 @@ def _tracking_payload(
     )
     items = tracker.to_dict_list(page_records)
 
-    if cached_summary is None:
-        summary_records = tracker.build_latest_selection_snapshot(
-            limit=max(total, 1),
-            instrument_type=instrument_type,
-            run_id=resolved_run_id,
-            strategy_id=strategy_id,
-            selection_date=selection_date,
-            offset=0,
-            latest_only=latest_only,
-            include_in_stats_only=True,
-        )
-        stats_items = tracker.to_dict_list(summary_records)
-        cached_summary = {
-            "_total": total,
-            "filtered_summary": {
-                **_build_tracking_summary(stats_items),
-                "total_count": total,
-                "excluded_count": total - len(stats_items),
-            },
-            "strategy_summaries": _build_strategy_summaries(stats_items),
-        }
-        _cache_tracking_summary(cache_key, cached_summary)
+    cached_summary = _full_tracking_summary(
+        tracker=tracker, total=total, run_id=resolved_run_id,
+        strategy_id=strategy_id, selection_date=selection_date,
+        instrument_type=instrument_type, latest_only=latest_only,
+    ) if include_summary else None
 
     page_stats_items = _stats_items(items)
     response_items = [_compact_tracking_item(item) for item in items] if compact else items
@@ -433,8 +449,8 @@ def _tracking_payload(
         "strategy_id": strategy_id,
         "selection_date": selection_date,
         "summary": _build_tracking_summary(page_stats_items),
-        "filtered_summary": cached_summary["filtered_summary"],
-        "strategy_summaries": cached_summary["strategy_summaries"],
+        "filtered_summary": cached_summary["filtered_summary"] if cached_summary else None,
+        "strategy_summaries": cached_summary["strategy_summaries"] if cached_summary else [],
         "items": response_items,
         "stats_retention": {
             "max_age_days": TRACKING_STATS_MAX_AGE_DAYS,
@@ -449,6 +465,9 @@ def _tracking_payload(
             "has_more": offset + len(items) < total,
         },
     }
+    if not include_summary:
+        payload["summary_revision"] = _tracking_summary_cache_key(run_id=resolved_run_id, strategy_id=strategy_id,
+            selection_date=selection_date, instrument_type=instrument_type, latest_only=latest_only)
     if include_runs:
         payload["available_runs"] = _list_tracking_runs(instrument_type=instrument_type, strategy_id=strategy_id)
     return payload
@@ -554,6 +573,7 @@ def get_latest_tracking(
     selection_date: Optional[str] = Query(default=None),
     compact: bool = Query(default=False),
     include_runs: bool = Query(default=True),
+    include_summary: bool = Query(default=True),
 ) -> dict:
     return _tracking_payload(
         strategy_id=strategy_id,
@@ -564,6 +584,7 @@ def get_latest_tracking(
         latest_only=True,
         compact=compact,
         include_runs=include_runs,
+        include_summary=include_summary,
     )
 
 
@@ -577,10 +598,11 @@ def get_tracking_by_run(
     instrument_type: str = Query(default="stock"),
     compact: bool = Query(default=False),
     include_runs: bool = Query(default=True),
+    include_summary: bool = Query(default=True),
 ) -> dict:
     if (run_id is None and strategy_id is None and selection_date is None
             and limit == 10 and offset == 0 and instrument_type == 'stock'
-            and compact and not include_runs):
+            and compact and not include_runs and include_summary):
         from app.display_cache.service import get
         return get('tracking')
     return _tracking_payload(
@@ -592,6 +614,7 @@ def get_tracking_by_run(
         instrument_type=instrument_type,
         compact=compact,
         include_runs=include_runs,
+        include_summary=include_summary,
     )
 
 

@@ -863,6 +863,7 @@ def aggregate_trade_date(
 
 
 def copy_tracked_trade_date(trade_date: str | date | datetime) -> dict[str, Any]:
+    from app.tracking.minute_daily import lock_day, publish_day, invalidate_displays
     target = normalize_trade_date(trade_date)
     ensure_daily_partition("stock_realtime_intraday_tracked", target)
     columns = ", ".join(INTRADAY_COPY_COLUMNS)
@@ -870,6 +871,7 @@ def copy_tracked_trade_date(trade_date: str | date | datetime) -> dict[str, Any]
     update_sql = ", ".join(f"{column}=VALUES({column})" for column in update_columns)
     with mysql_conn(dict_cursor=False) as conn:
         with conn.cursor() as cursor:
+            lock_day(cursor, target)
             cursor.execute(
                 f"""
                 INSERT INTO stock_realtime_intraday_tracked ({columns})
@@ -885,6 +887,7 @@ def copy_tracked_trade_date(trade_date: str | date | datetime) -> dict[str, Any]
                 """,
                 (target,),
             )
+            publish_day(cursor, target)
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -894,6 +897,7 @@ def copy_tracked_trade_date(trade_date: str | date | datetime) -> dict[str, Any]
                 (target,),
             )
             row = cursor.fetchone() or (0, 0)
+    invalidate_displays()
     if isinstance(row, dict):
         rows_count = int(row.get("rows_count") or 0)
         code_count = int(row.get("code_count") or 0)
@@ -921,6 +925,9 @@ def _rollup_complete(trade_date: date, intervals: tuple[int, ...]) -> bool:
 def _delete_trade_date(table_name: str, trade_date: date) -> dict[str, Any]:
     if table_name not in PARTITIONED_TABLES:
         raise ValueError(f"unsupported retention table: {table_name}")
+    if table_name == "stock_realtime_intraday_tracked":
+        from app.tracking.minute_daily import withdraw_day
+        withdraw_day(trade_date)
     partition_name = partition_name_for_date(trade_date)
     partitions = table_partitions(table_name)
     names = {str(row.get("partition_name")) for row in partitions if row.get("partition_name")}

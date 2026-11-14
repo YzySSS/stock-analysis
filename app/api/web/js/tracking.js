@@ -453,11 +453,28 @@ async function loadTrackingFilters(strategyId, instrumentType = 'stock') {
   return fetchReadJson(`/api/tracking/filters?${query.toString()}`, { revision: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }) });
 }
 
+let trackingReadRequest = 0;
+let trackingSummaryState = null;
+window.addEventListener('pageshow', (event) => { if (event.persisted) trackingSummaryState = null; });
+
+function markTrackingSummaryPending(message = '统计计算中…') {
+  updateTrackingStats({}, []);
+  ['#tracking-stat-count', '#tracking-stat-active-count'].forEach((id) => { qs(id).textContent = '-'; });
+  for (const id of ['#tracking-review-summary', '#tracking-review-notes']) {
+    const element = qs(id);
+    if (element) element.textContent = message;
+  }
+}
+
 async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instrumentType = 'stock', selectionDate = '', offset = 0 } = {}) {
+  const request = ++trackingReadRequest;
+  const identity = getCookieValue('stock_analysis_csrf');
   const summaryText = qs('#tracking-summary-text');
   if (summaryText) summaryText.textContent = '加载中...';
+  markTrackingSummaryPending();
 
   const filters = await loadTrackingFilters(strategyId, instrumentType);
+  if (request !== trackingReadRequest || identity !== getCookieValue('stock_analysis_csrf')) return;
   renderStrategyOptions(filters.strategy_options || [], strategyId);
   const selectionDates = filters.selection_dates || [];
   const effectiveSelectionDate = selectionDate && selectionDates.includes(selectionDate)
@@ -471,16 +488,18 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
     instrument_type: instrumentType,
     compact: 'true',
     include_runs: 'false',
+    include_summary: 'false',
   });
   if (runId) query.set('run_id', runId);
   if (strategyId) query.set('strategy_id', strategyId);
   if (effectiveSelectionDate) query.set('selection_date', effectiveSelectionDate);
 
   const data = await fetchJson(`/api/tracking?${query.toString()}`);
+  if (request !== trackingReadRequest || identity !== getCookieValue('stock_analysis_csrf')) return;
   const items = data.items || [];
-  const filteredSummary = data.filtered_summary || data.summary || {};
+  let filteredSummary = {};
   const pageSummary = data.summary || {};
-  const strategySummaries = data.strategy_summaries || [];
+  let strategySummaries = [];
   const pagination = data.pagination || {};
   const statsRetention = data.stats_retention || {};
   lastTrackingState = {
@@ -493,10 +512,9 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
     deepReview: null,
     deepReviewAvailable: lastTrackingState.deepReviewAvailable,
   };
-  renderTrackingTable(items, filteredSummary);
-  updateTrackingStats(filteredSummary, items);
-  renderReviewSummary(filteredSummary, strategySummaries, items);
-  renderReviewNotes(filteredSummary, strategySummaries, items);
+  // The table uses only the unchanged benchmark from this page; global
+  // cards remain pending until the independently scoped summary arrives.
+  renderTrackingTable(items, pageSummary);
   renderPagination(pagination, limit);
   const modeText = runId
       ? '当前显示该轮选股的复盘结果'
@@ -505,12 +523,33 @@ async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instr
       : strategyId
         ? '当前显示该策略全部历史复盘列表'
         : '当前显示全部策略历史复盘列表';
-  const excludedText = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
   const retentionText = `；统计窗口为入选后 ${statsRetention.max_age_days || 14} 个自然日，覆盖窗口内全部策略版本`;
   const autoExcludedText = statsRetention.auto_excluded_count
     ? `，本次自动排除 ${statsRetention.auto_excluded_count} 条到期记录`
     : '';
-  if (summaryText) summaryText.textContent = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条${excludedText}${retentionText}${autoExcludedText}`;
+  const baseText = `${modeText}，本页 ${items.length} 条，共 ${pagination.total || pageSummary.count || 0} 条`;
+  if (summaryText) summaryText.textContent = `${baseText}${retentionText}${autoExcludedText}；统计计算中…`;
+  const summaryQuery = new URLSearchParams(query);
+  ['limit', 'offset', 'compact', 'include_runs', 'include_summary'].forEach((key) => summaryQuery.delete(key));
+  const url = `/api/tracking/summary?${summaryQuery.toString()}`;
+  try {
+    const cached = trackingSummaryState;
+    const reusable = cached && cached.identity === identity && cached.url === url && cached.revision === data.summary_revision && cached.expires > Date.now();
+    const result = reusable ? cached.data : await fetchJson(url);
+    if (request !== trackingReadRequest || identity !== getCookieValue('stock_analysis_csrf')) return;
+    trackingSummaryState = { identity, url, revision: result.revision, expires: reusable ? cached.expires : Date.now() + 60000, data: result };
+    filteredSummary = result.filtered_summary;
+    strategySummaries = result.strategy_summaries || [];
+    updateTrackingStats(filteredSummary, items);
+    renderReviewSummary(filteredSummary, strategySummaries, items);
+    renderReviewNotes(filteredSummary, strategySummaries, items);
+    const excluded = filteredSummary.excluded_count ? `；已排除 ${filteredSummary.excluded_count} 条不参与统计` : '';
+    if (summaryText) summaryText.textContent = `${baseText}${excluded}${retentionText}${autoExcludedText}`;
+  } catch (error) {
+    if (request !== trackingReadRequest || identity !== getCookieValue('stock_analysis_csrf')) return;
+    markTrackingSummaryPending(`统计加载失败：${error.message}，可点击刷新重试`);
+    if (summaryText) summaryText.textContent = `${baseText}${retentionText}；统计加载失败`;
+  }
 }
 
 function waitForMilliseconds(milliseconds) {
