@@ -943,11 +943,14 @@ def _delete_trade_date(table_name: str, trade_date: date) -> dict[str, Any]:
     return {"trade_date": trade_date.isoformat(), "method": "bounded_delete", "deleted_rows": deleted_rows}
 
 
-def apply_retention(policy: RealtimeLifecyclePolicy | None = None) -> dict[str, Any]:
+def apply_retention(policy: RealtimeLifecyclePolicy | None = None, *, protected_raw_dates: Iterable[date] = ()) -> dict[str, Any]:
+    protected = {normalize_trade_date(value) for value in protected_raw_dates}
     final_policy = (policy or RealtimeLifecyclePolicy()).validate()
     raw_actions = []
     for target in expired_trade_dates(_date_rows("stock_realtime_intraday"), final_policy.raw_trade_days):
-        if _rollup_complete(target, final_policy.intervals):
+        if target in protected:
+            raw_actions.append({"trade_date": target.isoformat(), "method": "protected_failed_tracked_copy"})
+        elif _rollup_complete(target, final_policy.intervals):
             raw_actions.append(_delete_trade_date("stock_realtime_intraday", target))
         else:
             raw_actions.append({"trade_date": target.isoformat(), "method": "protected_incomplete_rollup"})
@@ -1093,7 +1096,12 @@ def run_lifecycle(policy: RealtimeLifecyclePolicy | None = None) -> dict[str, An
                 tracked.append(failure)
 
         try:
-            retention = apply_retention(final_policy)
+            # A failed daily-model publication rolls the tracked copy back.
+            # Preserve its raw source for retry rather than deleting it merely
+            # because a separate 5m/15m rollup happened to succeed.
+            protected = {normalize_trade_date(item["trade_date"]) for item in tracked
+                         if item.get("status") == "failed"}
+            retention = apply_retention(final_policy, protected_raw_dates=protected)
         except Exception as exc:
             retention = {
                 "status": "failed",

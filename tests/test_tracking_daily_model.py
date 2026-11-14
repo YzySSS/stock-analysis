@@ -61,6 +61,16 @@ class DailyModelTests(unittest.TestCase):
             minute_daily.lock_day(cur, date(2026, 1, 1))
         minute_daily.lock_day(cur, date(2026, 1, 1), allow_retiring=True)
 
+    def test_failed_tracked_copy_protects_raw_source_from_retention(self):
+        from app.data_ingestion import realtime_lifecycle as lifecycle
+        days = [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3)]
+        with patch.object(lifecycle, '_date_rows', return_value=days), \
+             patch.object(lifecycle, '_rollup_complete', return_value=True), \
+             patch.object(lifecycle, '_delete_trade_date') as delete:
+            result = lifecycle.apply_retention(protected_raw_dates=[days[0]])
+        self.assertEqual(result['raw'][0]['method'], 'protected_failed_tracked_copy')
+        delete.assert_not_called()
+
     def test_split_list_never_computes_global_summary(self):
         fake = FakeTracker()
         with patch.object(tracking, 'SelectionResultTracker', return_value=fake), \
