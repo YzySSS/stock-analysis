@@ -342,15 +342,12 @@ function renderTimingV20(shadow) {
 function renderScenarioForecast(scenario) {
   const status = qs('#home-scenario-status');
   const container = qs('#home-scenario-forecast');
-  const leadershipStatus = qs('#home-leadership-status');
-  const leadershipContainer = qs('#home-leadership-grid');
-  if (!status || !container || !leadershipContainer) return;
+  renderMarketLeadership(scenario);
+  if (!status || !container) return;
   if (!scenario?.model_id) {
     status.textContent = '等待择时 V2.0 样本';
     status.className = 'research-status muted';
     container.innerHTML = '<div class="empty-state">尚无概率情景快照。模型不会使用大模型自由生成概率。</div>';
-    if (leadershipStatus) leadershipStatus.textContent = '市场主线：暂无';
-    leadershipContainer.innerHTML = '<div class="empty-state">尚无行业强度与价格周期快照。</div>';
     return;
   }
   const forecasts = scenario.forecasts || [];
@@ -383,6 +380,17 @@ function renderScenarioForecast(scenario) {
     `;
   }).join('') || '<div class="empty-state">暂无情景期限数据</div>';
 
+}
+
+function renderMarketLeadership(scenario) {
+  const leadershipStatus = qs('#home-leadership-status');
+  const leadershipContainer = qs('#home-leadership-grid');
+  if (!leadershipContainer) return;
+  if (!scenario?.model_id) {
+    if (leadershipStatus) leadershipStatus.textContent = '市场主线：暂无';
+    leadershipContainer.innerHTML = '<div class="empty-state">尚无行业强度与价格周期快照。</div>';
+    return;
+  }
   const leadership = scenario.leadership || [];
   const strengthClass = (state) => {
     const normalized = state === 'seed' ? 'watch' : state === 'decay' ? 'fading' : state;
@@ -766,6 +774,7 @@ async function loadHomePage() {
     const data = await fetchJson('/api/dashboard/summary?limit=8&compact=true&section=summary');
     const items = data.latest_tracking_preview || [];
     renderMarketOverview(data.market_overview);
+    renderMarketLeadership(data.market_leadership);
 
     const avgText = data.latest_tracking_avg_price_change_pct == null
       ? '平均涨跌幅 -'
@@ -774,6 +783,8 @@ async function loadHomePage() {
     trackingPreview.innerHTML = renderTrackingCards(items);
   } catch (error) {
     trackingSummary.textContent = '加载失败';
+    setText('#home-leadership-status', '市场主线：加载失败');
+    qs('#home-leadership-grid').innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
     trackingPreview.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     setText('#home-emotion-summary', '加载失败');
     setText('#home-hot-theme-summary', '加载失败');

@@ -1348,6 +1348,8 @@ def _build_dashboard_summary(limit: int, *, compact: bool, include_research: boo
     }
     if compact:
         payload = _compact_dashboard_payload(payload)
+    if not include_research:
+        payload['market_leadership'] = _dashboard_leadership()
     return payload
 
 
@@ -1376,6 +1378,28 @@ def _start_dashboard_refresh(limit: int) -> bool:
     return True
 
 
+def _compact_leadership(scenario: dict | None) -> dict | None:
+    if not scenario:
+        return None
+    result = {'model_id': scenario.get('model_id')}
+    result['leadership'] = []
+    for row in (scenario.get('leadership') or [])[:16]:
+        item = _project(row, ('sector_type', 'sector_name', 'leadership_state', 'state_label',
+            'cycle_state', 'cycle_label', 'leadership_score', 'confidence', 'price_evidence_status', 'contradictions'))
+        item['evidence'] = (row.get('evidence') or [])[:4]
+        item['breadth_metrics'] = _project(row.get('breadth_metrics') or {}, ('status',))
+        item['data_quality'] = _project(row.get('data_quality') or {}, ('market_confirmation_eligible',))
+        result['leadership'].append(item)
+    result['market_mainline'] = _project(scenario.get('market_mainline') or {},
+        ('status', 'sector', 'branches', 'price_strengthening_count', 'branch_count', 'startup_candidate_count', 'qualification_note'))
+    return result
+
+
+def _dashboard_leadership() -> dict | None:
+    from app.market_timing.scenario_forecast import MarketScenarioForecastRepository
+    return _compact_leadership(MarketScenarioForecastRepository().latest(include_forecasts=False))
+
+
 @router.get("/dashboard/summary")
 def dashboard_summary(
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
@@ -1386,14 +1410,16 @@ def dashboard_summary(
         from app.display_cache.service import entry
         cached = entry('dashboard') if limit == 8 else None
         if cached:
-            payload = cached['payload']
+            payload = dict(cached['payload'])
+            if section == 'summary':
+                payload['market_leadership'] = _compact_leadership((payload.get('market_timing') or {}).get('scenario_forecast'))
         elif section == 'summary':
             payload = _build_dashboard_summary(limit, compact=True, include_research=False)
         elif section == 'timing':
             payload = _compact_dashboard_payload({'market_timing': build_market_timing_signal(_dashboard_market_overview())})
         else:
             payload = _compact_dashboard_payload({'hot_themes': _dashboard_hot_themes(limit=8), 'emotion_board': _dashboard_emotion_board(limit=10)})
-        keys = {'summary': ('latest_trade_date', 'market_overview', 'latest_tracking_count', 'latest_tracking_avg_price_change_pct', 'latest_tracking_preview', 'latest_selection_summary'),
+        keys = {'summary': ('latest_trade_date', 'market_overview', 'market_leadership', 'latest_tracking_count', 'latest_tracking_avg_price_change_pct', 'latest_tracking_preview', 'latest_selection_summary'),
                 'timing': ('market_timing',), 'emotion': ('hot_themes', 'emotion_board')}[section]
         return {key: payload.get(key) for key in keys}
     if not compact:

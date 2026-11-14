@@ -1212,12 +1212,20 @@ class MarketScenarioForecastRepository:
             "outcomes_ready": len(updates),
         }
 
-    def latest(self) -> dict[str, Any] | None:
+    def latest(self, *, include_forecasts: bool = True) -> dict[str, Any] | None:
+        forecast_columns = "*" if include_forecasts else "trade_date, spec_hash, as_of_datetime"
+        leadership_columns = "*" if include_forecasts else """
+            sector_type, sector_name, leadership_state, state_label, cycle_state,
+            cycle_label, leadership_score, confidence, price_evidence_status,
+            JSON_OBJECT('status', JSON_EXTRACT(breadth_metrics_json, '$.status')) AS breadth_metrics_json,
+            evidence_json, contradiction_json,
+            data_quality_json
+        """
         with self._read_connection_factory() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    """
-                    SELECT *
+                    f"""
+                    SELECT {forecast_columns}
                     FROM market_scenario_forecast_daily
                     WHERE model_id=%s
                       AND trade_date=(
@@ -1247,8 +1255,8 @@ class MarketScenarioForecastRepository:
                     leadership_date = trade_date
                     leadership_model_id = MODEL_ID
                 cursor.execute(
-                    """
-                    SELECT *
+                    f"""
+                    SELECT {leadership_columns}
                     FROM market_leadership_state_daily
                     WHERE model_id=%s AND trade_date=%s
                     ORDER BY FIELD(
@@ -1262,7 +1270,7 @@ class MarketScenarioForecastRepository:
                 )
                 leadership_rows = cursor.fetchall() or []
         forecasts = []
-        for row in forecast_rows:
+        for row in (forecast_rows if include_forecasts else []):
             forecasts.append(
                 {
                     "forecast_id": row.get("forecast_id"),

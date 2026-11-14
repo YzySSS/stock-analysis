@@ -16,6 +16,7 @@ class DashboardSectionTests(unittest.TestCase):
         tracker.to_dict_list.return_value = []
         with patch('app.api.routes.dashboard.SelectionResultTracker', return_value=tracker), \
              patch.object(dashboard, '_dashboard_market_overview', return_value={'risk_alert': {'level': 'red'}}), \
+             patch.object(dashboard, '_dashboard_leadership', return_value={'model_id': 'm'}), \
              patch.object(dashboard, 'build_market_timing_signal') as timing, \
              patch.object(dashboard, '_dashboard_hot_themes') as themes, \
              patch.object(dashboard, '_dashboard_emotion_board') as emotion, \
@@ -23,6 +24,7 @@ class DashboardSectionTests(unittest.TestCase):
             result = dashboard.dashboard_summary(limit=8, compact=True, section='summary')
         self.assertEqual('red', result['market_overview']['risk_alert']['level'])
         self.assertNotIn('market_timing', result)
+        self.assertEqual({'model_id': 'm'}, result['market_leadership'])
         timing.assert_not_called(); themes.assert_not_called(); emotion.assert_not_called()
 
     def test_cached_research_sections_are_exact_and_do_not_mutate_cache(self):
@@ -33,6 +35,28 @@ class DashboardSectionTests(unittest.TestCase):
             self.assertEqual({'market_timing': payload['market_timing']}, dashboard.dashboard_summary(limit=8, section='timing'))
             self.assertEqual({'hot_themes': payload['hot_themes'], 'emotion_board': payload['emotion_board']}, dashboard.dashboard_summary(limit=8, section='emotion'))
         self.assertEqual(original, payload)
+
+    def test_visible_leadership_read_omits_hidden_forecast_json_without_changing_mainline(self):
+        from app.market_timing.scenario_forecast import MarketScenarioForecastRepository
+        context = MagicMock(); cursor = MagicMock()
+        context.__enter__.return_value.cursor.return_value.__enter__.return_value = cursor
+        cursor.fetchall.side_effect = [[{'trade_date': '2026-11-13'}], [{
+            'sector_name': 'x', 'sector_type': 'industry', 'leadership_state': 'confirmed',
+            'cycle_state': 'main_up', 'confidence': 0.9, 'leadership_score': 90,
+            'price_evidence_status': 'ready', 'breadth_metrics_json': '{"status":"ready"}',
+            'data_quality_json': '{}'}]]
+        cursor.fetchone.return_value = {'trade_date': '2026-11-13'}
+        result = MarketScenarioForecastRepository(read_connection_factory=lambda: context).latest(include_forecasts=False)
+        self.assertEqual([], result['forecasts'])
+        self.assertEqual('present', result['market_mainline']['status'])
+        sql = cursor.execute.call_args_list[0].args[0]
+        self.assertNotIn('SELECT *', sql)
+        self.assertNotIn('probabilities_json', sql)
+        self.assertNotIn('feature_json', sql)
+        leadership_sql = cursor.execute.call_args_list[2].args[0]
+        self.assertNotIn('SELECT *', leadership_sql)
+        self.assertIn('data_quality_json', leadership_sql)
+        self.assertIn('LIMIT 24', leadership_sql)
 
 
 class SystemSummaryTests(unittest.TestCase):
