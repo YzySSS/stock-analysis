@@ -2,7 +2,7 @@
 
 ## 状态与范围
 
-**第一批前四项已实施并上线；不是全页面方案全部完成。** 固定旧代码 SHA：`04a835cfbdeb132ca670f28864a842b53759711e`。实现 `2cb7778`，可见日期窗口兼容修正 `56b49f6`，隔离测试环境补齐 `901b2f1`，独立区域一致性及资源版本修正 `d9d0d5b`。生产路由代码于首提交只重启 API 加载；后续仅浏览器 JS/测试/版本变化，不重启四 Worker。
+**第一批五项已实施并上线；第二、三批仍未完成，不是全页面方案全部完成。** 固定旧代码 SHA：`04a835cfbdeb132ca670f28864a842b53759711e`。实现 `2cb7778`，可见日期窗口兼容修正 `56b49f6`，隔离测试环境补齐 `901b2f1`，独立区域一致性及资源版本修正 `d9d0d5b`。生产路由代码于首提交只重启 API 加载；后续仅浏览器 JS/测试/版本变化，不重启四 Worker。
 
 执行边界来自 [全页面审计](PAGE_READ_PERFORMANCE_AUDIT_2026-11-14.md) 第一批前四项：跟踪 filters、选股风险与初始化、个股分区读取与历史窗口、舆情匹配范围。没有 DDL、数据清理、研究重算或交易/自动选股改动。冻结研究源码/依赖双指纹与基线相同，migration 保持 39/39。
 
@@ -51,7 +51,7 @@
 
 ## 尚未完成的后续批次
 
-1. 第一批剩余：首页/system 摘要与隐藏证据拆分、ETF compact/spec/详情分层；策略/交易目录的跨页版本缓存。
+1. 第一批第五项已实施，见本文后附章节；静态ETF spec按hash缓存，小目录runtime能力不盲目长缓存。
 2. 第二批：带源 revision、完整性与迟到修订合同的 tracked 分钟日极值读模型；复盘分页与全范围统计解耦、影子等价及限速回填。
 3. 第三批：回测 N+1 批量化/轻状态轮询/投影、研究证据数据库分页与全协议累计指标分离、热点快照复用；持仓规模触发优化。
 4. 真正请求者设备首屏/返回/翻页分段验收。
@@ -61,3 +61,41 @@
 ## 回滚
 
 无新增表或业务写入。首轮前 `rollback-files.tar` 保存旧基线对应文件。优先反向撤销本轮应用提交并发布新的静态资源版本、重启 API，保留后续无关更改，不对生产工作树直接 reset。内存缓存可丢弃；默认旧 full 接口仍在，回滚前端即可回到宽读取。不能把存档恢复覆盖当作无需冲突检查的通用命令。
+
+## 第一批第五项：首页、系统、ETF 分层（已上线）
+
+基线 `b6ff9ff`；实现 `d80f11a`，可见主线兼容修正 `a39e691`。只重启 API 加载 Python display/read 路径，没有重启 Worker。无 DDL，保持 39/39；策略阈值、冻结研究源码/依赖指纹和既有不可变 ETF run 未改变。
+
+### 范围与结果
+
+| 页面/API | 原解压 JSON | 新首屏解压 JSON | 实际变化 |
+| --- | ---: | ---: | --- |
+| 首页 compact8 | 83,764B | **19,248B** | 保留风险、行情宽度、资金板块、近期跟踪、**可见市场主线**；隐藏择时/情景与热点/情绪按原 disclosure 展开分别读取 |
+| system status | 152,337B | **37,673B** | 保留全部 43 张任务卡、最新状态、readiness、原可见 DQ 告警/追溯；不传页面不用的任务 metadata 和通过规则明细 |
+| ETF latest | 46,214B | **11,502B** | 保留全部 14 候选、周期、条件、综合分与结论；不带完整 spec、源血缘、隐藏评分列和整段证据 |
+
+这是解压 body，不是公网压缩传输字节，也不是三个页面总传输量。旧默认 full API 均保持兼容，没有通过截断可见任务卡/候选条数来获得上述缩减。
+
+- **首页**：`section=summary/timing/emotion`，默认 full 不变。有效固定 dashboard Redis 投影命中时从同一快照投影；miss 的 summary 不构建隐藏 timing/hot-themes/emotion，独立读取可见主线。主线轻读只取 forecast 日期/spec 元数据与原排序最多24行必要 leadership 字段，仍先对24行按原规则算市场主线，再显示原16行；绝不先截16行再决定主线。隐藏 forecast JSON 不读取。原显式 `none`、父子去重、资格与顺序不变。原 disclosure 打开请求对应分区，同页面60秒/上海日期复用、单飞，失败重开可重试。
+- **修正记录**：首次拆分误把可见主线与隐藏情景的共享 render 一起延后。公网截图发现“加载中”后，已立即把可见主线独立保留在首屏并修复，新增合同与旧新 HTML 等价证据。`7,150B` 是这次修正前的中间值，**不能作为最终收益**。最终截图与旧首屏同视口逐区核对；主线正常显示。
+- **system**：前端用 `compact=true`，保留43卡不强加分页。缓存 hit 缩小展示投影；miss 在 SQL 用 JSON 字段投影读取卡片指标，DQ/舆情两行仍保留用于推导原可见摘要的数据。DQ仍显示原非pass规则及优先5条 actionable 样本，不把提示/失败过滤掉；原全量检查计数/证据日期保留。手动刷新单飞，失败不留下永久 busy。此处没有虚称为任务历史分页；本页面原来只展示每类任务最近一行，不是所有历史。
+- **ETF**：新只读 display 模块复用现有 run/candidate/outcome 表，latest 按当前 model/version 固定一批，candidate 先 `WHERE run_id` 再读必要列；周期只读 `evidence_json.sector_cycle_label`，不先 hydrate 整段 evidence。14候选本来全可见，因此仍全部展示。勾选“评分与明细”才取同 run 的评分列；完整固定口径在原 disclosure 展开时按 spec hash 加载，tab内存缓存，hash不符409提示重载，不把不同版本混用。前向观察进入视口附近再读同run结果（不读metadata）；本次1672×941视口该区域靠近首屏，故触发额外一个 outcomes GET，**不是所有视口都只发一个初始业务请求**。合法零候选/无成熟观察仍是真实空态，不补0收益。
+- **目录缓存边界**：本批仅新增不可变 ETF spec 的 hash 白名单，沿用 common 的身份/401/logout/写入/BFCache清理与最多64项tab内存缓存，不增加私有 localStorage/sessionStorage。小型交易目录仅约3.8KB、页面单次请求，动态选股目录混有runtime能力/可执行状态，未为凑缓存覆盖把它们长期缓存；没有新增同义表或扩大动态风险/readiness缓存。
+
+### 证据与验证
+
+证据目录 `/root/.openclaw/workspace/output/page-read-batch1b-20261114/`。
+
+- `comparison.json` / `compare.py`：固定基线用 `git show b6ff9ff:<path>` 加载，不移动HEAD。首页三个原分区重新合并（剔除新增独立主线投影）与旧 compact JSON 排序 SHA 相同；模拟cache miss summary也与原可见投影一致。ETF旧默认full的旧新SHA一致，14候选各可见字段、勾选评分列、前向结果与旧run对应字段相同。未伪造空缓存/冷库测量，未清Redis或buffer pool。
+- `render-equality.json`、`leadership-render-equality.json`：真实43任务卡/DQ HTML及可见主线 HTML/文案/title，与固定基线逐字相同。SQL轻读的mainline仍保留原data_quality语义，不能把缺失/NULL偷换为False或True。
+- `sql-profile.json`：系统最近任务同为43行，返回JSON度量约124,020→62,135B；可见主线的3条forecast行约8,631→456B，24条leadership行约160,022→85,726B。ETF compact仅两条SQL，分别1run/14candidate，候选普通EXPLAIN有界按run索引。以上是诊断序列化的**返回行/字节**，不是rows examined或磁盘IO；任务、DQ及主线冷路径仍有必要聚合/元数据读取，未声称全部SQL消失。
+- `unittest.log`：**743项执行，742通过，1个既有skip**；新合同覆盖隐藏builder不执行、可见主线保留/缺字段资格、SQL列和run范围、43卡与告警不丢、spec hash错配。四JS语法通过；旧资源版本固定断言已随真实版本更新。
+- `browser-before/after.json`、三页before/after截图：单Chromium、真实公网、同1672×941；初始GET全200、无未捕获JS错误、无整页横向溢出。初始首页没有timing/emotion GET且可见主线已完成；展开两个disclosure各出现对应请求。ETF勾选评分/完整口径各按需GET，14行不丢；前向观察使用独立run端点。所有非GET/HEAD均在发送前拦截，本轮没有写请求/供应商任务。
+- 本轮浏览器原始样本混有启动/静态资源冷暖，**不能宣称三页整页总时长稳定下降**：首页有减少，system有波动；ETF增加独立outcomes往返，该视口全部初始GET可能晚于原整包。可确证的是首屏传输范围、隐藏证据读取与冷读投影缩减。请求者电脑/P95仍未测。
+- `deployment.json` / `readiness-after.json`：本地/公网health/readiness200且真实ready/accepting_jobs=true；39/39、四队列queued/running0、五服务active/NRestarts0。匿名新路径401、非法section422、spec hash错配409；三HTML/四JS磁盘/本地/公网SHA一致。源码/依赖双研究指纹与基线一致。未探测有过期状态写副作用的持仓GET。
+
+### 后续与回滚
+
+第一批五项均已完成（小目录可执行状态不做盲目缓存）；**第二批复盘日极值读模型/全范围统计解耦、第三批回测/研究分页/热点复用，及请求者端验收仍未完成**。
+
+本批无新表或研究写入。`rollback-files.tar`保留基线文件；如需撤销，按依赖反向撤销本批应用提交、发布新静态版本并仅重启API，保留之后无关修改，不直接reset生产工作树。新完整默认接口仍可用；不要恢复首次主线缺失的中间版本。
