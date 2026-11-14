@@ -553,9 +553,10 @@ async function loadStockHistory({ initial = false, range = false } = {}) {
     if (!initial && followLatest) klineState.endDate = klineState.maxDate;
     if (initial || !klineState.endDate) {
       klineState.endDate = klineState.maxDate;
-      const date = new Date(`${klineState.endDate}T00:00:00Z`);
-      date.setUTCMonth(date.getUTCMonth() - 1);
-      klineState.startDate = data.max_date ? date.toISOString().slice(0,10) : '';
+      const date = new Date(`${klineState.endDate}T00:00:00`);
+      date.setMonth(date.getMonth() - 1);
+      const monthStart = data.max_date ? date.toISOString().slice(0,10) : '';
+      klineState.startDate = monthStart > klineState.minDate ? monthStart : klineState.minDate;
     }
     klineState.items = data.items || [];
     for (const [id, value] of [['#kline-start-date', klineState.startDate], ['#kline-end-date', klineState.endDate]]) {

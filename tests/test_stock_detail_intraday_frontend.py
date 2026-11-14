@@ -118,6 +118,21 @@ return { posts, gets };
         self.assertEqual(result["posts"], 1)
         self.assertEqual(result["gets"], 2)
 
+    def test_initial_history_keeps_previous_visible_month_window_and_full_bounds(self):
+        result = self._run_javascript(
+            """
+stockPage.code='sz.000725';
+fetchReadJson=async()=>({min_date:'2024-05-21',max_date:'2026-11-13',items:[{trade_date:'2026-11-13'}]});
+qs=()=>({});renderKlineState=()=>{};
+await loadStockHistory({initial:true});
+const date=new Date('2026-11-13T00:00:00');date.setMonth(date.getMonth()-1);
+return {start:klineState.startDate,legacyStart:date.toISOString().slice(0,10),min:klineState.minDate,end:klineState.endDate};
+"""
+        )
+        self.assertEqual(result['start'], result['legacyStart'])
+        self.assertEqual(result['min'], '2024-05-21')
+        self.assertEqual(result['end'], '2026-11-13')
+
     def test_page_uses_new_stock_detail_cache_buster(self):
         page = (PROJECT_ROOT / "app" / "api" / "web" / "pages" / "stock-detail.html").read_text(
             encoding="utf-8"
