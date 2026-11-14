@@ -54,6 +54,7 @@ from app.orchestration.strategy_factor_evaluation_performance_schema import (
     ensure_strategy_factor_evaluation_performance_index,
 )
 from app.orchestration.ths_concept_hot_schema import ensure_ths_concept_hot_schema
+from app.orchestration.tracking_read_performance_schema import ensure_tracking_minute_covering_index
 from app.orchestration.v2_schema import ensure_v2_schema
 from app.shared.db import mysql_conn, ping_mysql
 from app.shared.mysql_lock import acquire_mysql_advisory_lock, release_mysql_advisory_lock
@@ -150,6 +151,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         ensure_sentiment_v06_schema,
     ),
     Migration('0038', 'independent continuous observation cohorts', ensure_continuous_observation_schema),
+    Migration("0039", "tracking minute price covering read index", ensure_tracking_minute_covering_index),
 )
 
 
