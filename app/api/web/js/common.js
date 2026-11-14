@@ -38,8 +38,12 @@ function installAuthenticatedFetch() {
       requestOptions = { ...options, headers };
     }
 
+    const isMutation = requestUrl.origin === window.location.origin && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(requestMethod);
+    if (isMutation) clearReadCache();
     const response = await nativeFetch(input, requestOptions);
+    if (isMutation) clearReadCache();
     if (response.status === 401 && requestUrl.origin === window.location.origin) {
+      clearReadCache();
       window.location.replace(currentLoginUrl());
     }
     return response;
@@ -56,6 +60,42 @@ async function fetchJson(url, options) {
   }
   return response.json();
 }
+
+// Tab-memory only: never persist private responses or reuse across login/builds.
+const readCache = new Map();
+let readCacheIdentity = null;
+let readCacheGeneration = 0;
+function clearReadCache() {
+  readCache.clear();
+  readCacheGeneration += 1;
+}
+async function fetchReadJson(url, { ttl = 60000, revision = '', refresh = false } = {}) {
+  const parsed = new URL(url, window.location.href);
+  const cacheable = parsed.origin === window.location.origin && (
+    parsed.pathname === '/api/tracking/filters'
+    || /^\/api\/stocks\/[^/]+\/history$/.test(parsed.pathname)
+    || (/^\/api\/stocks\/[^/]+$/.test(parsed.pathname) && ['context', 'news'].includes(parsed.searchParams.get('section')))
+  );
+  if (!cacheable) return fetchJson(url);
+  const identity = getCookieValue('stock_analysis_csrf');
+  if (identity !== readCacheIdentity) { clearReadCache(); readCacheIdentity = identity; }
+  const key = `${url}|${revision}`;
+  const existing = readCache.get(key);
+  if (!refresh && existing && (existing.pending || existing.expires > Date.now())) return existing.promise;
+  const generation = readCacheGeneration;
+  const promise = fetchJson(url).then((data) => {
+    if (generation !== readCacheGeneration || identity !== getCookieValue('stock_analysis_csrf')) {
+      throw new Error('登录或数据已更新，请重新加载');
+    }
+    const entry = readCache.get(key);
+    if (entry?.promise === promise) { entry.pending = false; entry.expires = Date.now() + ttl; }
+    return data;
+  }).catch((error) => { if (readCache.get(key)?.promise === promise) readCache.delete(key); throw error; });
+  if (readCache.size >= 64) readCache.delete(readCache.keys().next().value);
+  readCache.set(key, { promise, pending: true, expires: Date.now() + ttl });
+  return promise;
+}
+window.addEventListener('pageshow', (event) => { if (event.persisted) clearReadCache(); });
 
 function qs(selector) {
   return document.querySelector(selector);
@@ -267,6 +307,7 @@ async function bindLogoutControl() {
     button.classList.add('is-busy');
     button.title = '正在退出';
     try {
+      clearReadCache();
       const response = await fetch('/logout', {
         method: 'POST',
         credentials: 'same-origin',

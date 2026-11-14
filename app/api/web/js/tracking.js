@@ -448,9 +448,9 @@ function renderPagination(pagination = {}, pageSize = 10) {
 }
 
 async function loadTrackingFilters(strategyId, instrumentType = 'stock') {
-  const query = new URLSearchParams({ instrument_type: instrumentType });
+  const query = new URLSearchParams({ instrument_type: instrumentType, include_runs: 'false' });
   if (strategyId) query.set('strategy_id', strategyId);
-  return fetchJson(`/api/tracking/filters?${query.toString()}`);
+  return fetchReadJson(`/api/tracking/filters?${query.toString()}`, { revision: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }) });
 }
 
 async function loadTrackingData({ runId = '', strategyId = '', limit = 10, instrumentType = 'stock', selectionDate = '', offset = 0 } = {}) {
@@ -709,6 +709,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   refreshBtn?.addEventListener('click', async () => {
+    clearReadCache();
     await loadTrackingData({
       strategyId: strategySelect?.value || lastTrackingState.strategyId,
       runId: lastTrackingState.runId,
@@ -732,7 +733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     if (pageSizeSelect) pageSizeSelect.value = '10';
-    await loadDeepReviewStatus();
+    loadDeepReviewStatus();
     const params = new URLSearchParams(window.location.search);
     await loadTrackingData({
       runId: params.get('run_id') || '',

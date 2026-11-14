@@ -1403,3 +1403,13 @@ def dashboard_summary(
         payload = _build_dashboard_summary(limit, compact=True)
         _cache_dashboard(limit, payload)
         return payload
+
+
+@router.get("/dashboard/risk-alert")
+def dashboard_risk_alert() -> dict:
+    from app.display_cache.service import entry
+    cached = entry('dashboard')
+    # On a miss only read the market/risk source. Do not hydrate themes,
+    # timing evidence, the emotion board or tracking just for this banner.
+    overview = (cached['payload'].get('market_overview') or {}) if cached else _dashboard_market_overview()
+    return {"risk_alert": overview.get("risk_alert")}

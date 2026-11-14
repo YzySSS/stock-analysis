@@ -533,72 +533,53 @@ function aggregateKlineHistory(history, period = 'day') {
   }));
 }
 
-function setupKlineTabs(history) {
-  const periodButtons = [...document.querySelectorAll('[data-kline-period]')];
-  const startInput = qs('#kline-start-date');
-  const endInput = qs('#kline-end-date');
-  const title = qs('#stock-kline-title');
-  if (!periodButtons.length) return;
-
-  const orderedHistory = [...(history || [])].sort((a, b) => String(a.trade_date || '').localeCompare(String(b.trade_date || '')));
-  const availableDates = orderedHistory.map((item) => String(item.trade_date || '').slice(0, 10)).filter(Boolean);
-  const minDate = availableDates[0] || '';
-  const maxDate = availableDates[availableDates.length - 1] || '';
-  const oneMonthAgo = maxDate ? (() => {
-    const date = new Date(`${maxDate}T00:00:00`);
-    date.setMonth(date.getMonth() - 1);
-    return date.toISOString().slice(0, 10);
-  })() : '';
-  const defaultStart = oneMonthAgo && oneMonthAgo > minDate ? oneMonthAgo : minDate;
-  const state = { period: 'day', startDate: defaultStart, endDate: maxDate };
-
-  if (startInput) {
-    startInput.min = minDate;
-    startInput.max = maxDate;
-    startInput.value = state.startDate;
-  }
-  if (endInput) {
-    endInput.min = minDate;
-    endInput.max = maxDate;
-    endInput.value = state.endDate;
-  }
-
-  const render = () => {
-    if (state.startDate && state.endDate && state.startDate > state.endDate) {
-      [state.startDate, state.endDate] = [state.endDate, state.startDate];
-      if (startInput) startInput.value = state.startDate;
-      if (endInput) endInput.value = state.endDate;
+const klineState = { period: 'day', startDate: '', endDate: '', minDate: '', maxDate: '', items: [], request: 0 };
+function renderKlineState() {
+  qsa('[data-kline-period]').forEach((button) => button.classList.toggle('active', button.dataset.klinePeriod === klineState.period));
+  qs('#stock-kline-title').textContent = ({ day: '日K走势', week: '周K走势', month: '月K走势' })[klineState.period];
+  renderPriceChart(klineState.items.filter((item) => (!klineState.startDate || item.trade_date >= klineState.startDate) && (!klineState.endDate || item.trade_date <= klineState.endDate)), klineState.period);
+}
+async function loadStockHistory({ initial = false, range = false } = {}) {
+  const request = ++klineState.request;
+  const query = new URLSearchParams({ limit: range ? '600' : '35' });
+  if (range && klineState.startDate) query.set('start', klineState.startDate);
+  const followLatest = klineState.endDate === klineState.maxDate;
+  if (range && klineState.endDate && !followLatest) query.set('end', klineState.endDate);
+  try {
+    const data = await fetchReadJson(`/api/stocks/${encodeURIComponent(stockPage.code)}/history?${query}`, { ttl: 900000, revision: stockPage.historyRevision });
+    if (request !== klineState.request) return;
+    klineState.minDate = data.min_date || '';
+    klineState.maxDate = data.max_date || '';
+    if (!initial && followLatest) klineState.endDate = klineState.maxDate;
+    if (initial || !klineState.endDate) {
+      klineState.endDate = klineState.maxDate;
+      const date = new Date(`${klineState.endDate}T00:00:00Z`);
+      date.setUTCMonth(date.getUTCMonth() - 1);
+      klineState.startDate = data.max_date ? date.toISOString().slice(0,10) : '';
     }
-    periodButtons.forEach((button) => button.classList.toggle('active', button.dataset.klinePeriod === state.period));
-    const titleMap = { day: '日K走势', week: '周K走势', month: '月K走势' };
-    if (title) title.textContent = titleMap[state.period] || 'K线走势';
-    const filtered = orderedHistory.filter((item) => {
-      const date = String(item.trade_date || '').slice(0, 10);
-      return (!state.startDate || date >= state.startDate) && (!state.endDate || date <= state.endDate);
-    });
-    renderPriceChart(filtered, state.period);
-  };
-
-  window.addEventListener('resize', render);
-  periodButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      state.period = button.dataset.klinePeriod || 'day';
-      render();
-    });
-  });
-  if (startInput) {
-    startInput.addEventListener('change', () => {
-      state.startDate = startInput.value || minDate;
-      render();
-    });
-  }
-  if (endInput) {
-    endInput.addEventListener('change', () => {
-      state.endDate = endInput.value || maxDate;
-      render();
+    klineState.items = data.items || [];
+    for (const [id, value] of [['#kline-start-date', klineState.startDate], ['#kline-end-date', klineState.endDate]]) {
+      const input = qs(id);
+      input.min = klineState.minDate;
+      input.max = klineState.maxDate;
+      input.value = value;
+    }
+    renderKlineState();
+  } catch (error) { if (request === klineState.request) stockSectionError('#stock-price-chart', error); }
+}
+function bindKlineControls() {
+  window.addEventListener('resize', renderKlineState);
+  qsa('[data-kline-period]').forEach((button) => button.addEventListener('click', () => {
+    klineState.period = button.dataset.klinePeriod || 'day';
+    renderKlineState();
+  }));
+  for (const [id, key] of [['#kline-start-date','startDate'], ['#kline-end-date','endDate']]) {
+    qs(id)?.addEventListener('change', async () => {
+      klineState[key] = qs(id).value || (key === 'startDate' ? klineState.minDate : klineState.maxDate);
+      if (klineState.startDate > klineState.endDate) { [klineState.startDate, klineState.endDate] = [klineState.endDate, klineState.startDate]; }
+      await loadStockHistory({ range: true });
     });
   }
-  render();
 }
 
 function renderPriceChart(history, period = 'day') {
@@ -1056,15 +1037,8 @@ function credibilityBadgeClass(level) {
   return 'status-muted';
 }
 
-async function loadStockDetail() {
-  const code = decodeURIComponent(window.location.pathname.split('/').pop() || 'UNKNOWN');
-  qs('#stock-detail-title').textContent = `个股详情: ${code}`;
-
-  try {
-    const [data, overview] = await Promise.all([
-      fetchJson(`/api/stocks/${encodeURIComponent(code)}`),
-      fetchJson(`/api/stocks/${encodeURIComponent(code)}/overview`),
-    ]);
+function renderStockContext(data, overview = {}) {
+    const code = data.code;
     const latestSelection = data.latest_selection || {};
     const factorScores = latestSelection.factor_scores || {};
     const realtime = data.realtime || {};
@@ -1079,7 +1053,7 @@ async function loadStockDetail() {
     }
     qs('#stock-stat-score').textContent = formatNumber(latestSelection.score, 4);
     qs('#stock-stat-date').textContent = escapeHtml(realtime.quote_time || data.latest_kline?.trade_date || '-');
-    renderOverviewConsole(overview);
+
     renderFactorScorePills(factorScores, latestSelection);
     renderChipPanel(data.chip);
     renderMoneyflowPanel(data.moneyflow, data.realtime_moneyflow);
@@ -1192,7 +1166,11 @@ async function loadStockDetail() {
       trackingLink.href = `/tracking?run_id=${encodeURIComponent(latestSelection.run_id)}`;
     }
 
-    setupKlineTabs(data.price_history || []);
+    renderSelectionHistory(data.selection_history || []);
+}
+
+async function renderStockIntraday(data, code) {
+    const realtime = data.realtime || {};
     const intradayChartMeta = {
       prevClose: realtime.pre_close || data.latest_kline?.prev_close || null,
     };
@@ -1219,7 +1197,7 @@ async function loadStockDetail() {
           ? `分钟线 · 缓存 ${cachedIntradayItems.length} 点 + 实时尾段`
           : '实时采样线 · 正在按需补全完整分钟线',
       });
-      refreshAndLoadIntradayBars(
+      await refreshAndLoadIntradayBars(
         code,
         realtime.trade_date || data.latest_kline?.trade_date || '',
         latestRealtimeMinute,
@@ -1245,18 +1223,97 @@ async function loadStockDetail() {
         })
         .catch(() => renderIntradayChart(mergedIntradayItems, { ...intradayChartMeta, label: '完整分钟线补全失败，已展示实时尾段' }));
     }
-    renderRecentNews(data.recent_news || [], latestSelection);
-    renderSelectionHistory(data.selection_history || []);
+}
+
+const stockPage = { code: '', context: null, contextAt: 0, dynamic: null, overview: {}, revision: '', historyRevision: '', busy: false, intradayBusy: false };
+function renderStockQuote(data) {
+  const realtime = data.realtime || {};
+  qs('#stock-detail-title').textContent = `${data.name || data.code} (${data.code})`;
+  qs('#stock-stat-close').textContent = formatPrice(realtime.latest_price ?? data.latest_kline?.close);
+  qs('#stock-stat-change').textContent = formatPercent(realtime.pct_chg ?? data.latest_kline?.intraday_change_pct);
+  qs('#stock-stat-change').classList.remove('up', 'down');
+  const cls = getPctClass(realtime.pct_chg ?? data.latest_kline?.intraday_change_pct);
+  if (cls) qs('#stock-stat-change').classList.add(cls);
+  qs('#stock-stat-date').textContent = realtime.quote_time || data.latest_kline?.trade_date || '-';
+}
+function stockSectionError(selector, error) {
+  const container = qs(selector);
+  if (container) container.innerHTML = container.namespaceURI === 'http://www.w3.org/2000/svg'
+    ? `<text x="18" y="28" fill="#EF7279" font-size="13">${escapeHtml(error.message)}</text>`
+    : `<div class="error-box">${escapeHtml(error.message)}</div>`;
+}
+async function loadStockContext(refresh = false) {
+  try {
+    const data = await fetchReadJson(`/api/stocks/${encodeURIComponent(stockPage.code)}?section=context`, { ttl: 300000, revision: stockPage.revision, refresh });
+    stockPage.contextAt = Date.now();
+    stockPage.context = { ...data, ...(stockPage.dynamic || {}) };
+    if (!stockPage.dynamic) {
+      stockPage.revision = data.revision;
+      stockPage.historyRevision = data.history_revision;
+    }
+    renderStockContext(stockPage.context, stockPage.overview);
   } catch (error) {
-    ['#stock-detail-basic', '#stock-detail-factors', '#stock-detail-fundamentals', '#stock-detail-chip', '#stock-detail-moneyflow', '#stock-detail-selection', '#stock-detail-reasons', '#stock-detail-tracking-summary', '#stock-detail-news', '#stock-detail-history'].forEach((selector) => {
-      qs(selector).innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
-    });
+    ['#stock-detail-basic','#stock-detail-factors','#stock-detail-fundamentals','#stock-detail-selection','#stock-detail-chip','#stock-detail-history'].forEach((selector) => stockSectionError(selector, error));
   }
+}
+async function loadStockNews(refresh = false) {
+  try {
+    const data = await fetchReadJson(`/api/stocks/${encodeURIComponent(stockPage.code)}?section=news`, { ttl: 60000, refresh });
+    renderRecentNews(data.recent_news || [], stockPage.context?.latest_selection || {});
+  } catch (error) { stockSectionError('#stock-detail-news', error); }
+}
+async function loadStockIntraday() {
+  if (stockPage.intradayBusy) return;
+  stockPage.intradayBusy = true;
+  try {
+    const data = await fetchJson(`/api/stocks/${encodeURIComponent(stockPage.code)}?section=intraday`);
+    await renderStockIntraday(data, stockPage.code);
+  } catch (error) { stockSectionError('#stock-intraday-chart', error); }
+  finally { stockPage.intradayBusy = false; }
+}
+async function loadStockOverview() {
+  try {
+    stockPage.overview = await fetchJson(`/api/stocks/${encodeURIComponent(stockPage.code)}/overview`);
+    renderOverviewConsole(stockPage.overview);
+    if (stockPage.context) renderStockContext(stockPage.context, stockPage.overview);
+  } catch (error) { stockSectionError('#stock-overview-status', error); }
+}
+async function loadStockDetail({ initial = false } = {}) {
+  if (stockPage.busy) return;
+  stockPage.busy = true;
+  try {
+    if (initial) {
+      // Independent regions: context renders the quote without waiting for
+      // market-wide ranks, news, or a chart. No redundant initial quote GET.
+      await Promise.allSettled([loadStockContext(), loadStockHistory({ initial: true }), loadStockNews(), loadStockOverview()]);
+      return;
+    }
+    const data = await fetchJson(`/api/stocks/${encodeURIComponent(stockPage.code)}?section=dynamic`);
+    stockPage.dynamic = data;
+    renderStockQuote(data);
+    const contextChanged = stockPage.revision !== data.revision;
+    const historyChanged = stockPage.historyRevision !== data.history_revision;
+    stockPage.revision = data.revision;
+    stockPage.historyRevision = data.history_revision;
+    if (stockPage.context) {
+      stockPage.context = { ...stockPage.context, ...data };
+      renderMoneyflowPanel(stockPage.context.moneyflow, data.realtime_moneyflow);
+    }
+    // Context is memory-cached for five minutes and source-versioned. It is
+    // never fetched once per quote tick unless a relevant source changed.
+    const work = [loadStockOverview()];
+    if (!stockPage.context || contextChanged || Date.now() - stockPage.contextAt >= 300000) work.push(loadStockContext());
+    if (historyChanged) work.push(loadStockHistory({ range: true }));
+    if (qs('.stock-intraday-disclosure')?.open) work.push(loadStockIntraday());
+    await Promise.allSettled(work);
+  } catch (error) { qs('#stock-stat-date').textContent = `行情加载失败: ${error.message}`; }
+  finally { stockPage.busy = false; }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadStockDetail();
-  window.setInterval(() => {
-    if (!document.hidden) loadStockDetail();
-  }, 60 * 1000);
+  stockPage.code = decodeURIComponent(window.location.pathname.split('/').pop() || 'UNKNOWN');
+  bindKlineControls();
+  qs('.stock-intraday-disclosure')?.addEventListener('toggle', (event) => { if (event.target.open) loadStockIntraday(); });
+  loadStockDetail({ initial: true });
+  window.setInterval(() => { if (!document.hidden) loadStockDetail(); }, 60 * 1000);
 });

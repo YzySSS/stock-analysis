@@ -737,11 +737,16 @@ def get_tracking_deep_review_job(review_job_id: str) -> dict:
 def get_tracking_filters(
     instrument_type: str = Query(default="stock"),
     strategy_id: Optional[str] = Query(default=None),
+    include_runs: bool = True,
 ) -> dict:
     if instrument_type == 'stock' and strategy_id is None:
         from app.display_cache.service import get
-        return get('tracking-filters')
-    return _build_tracking_filters(instrument_type, strategy_id)
+        payload = get('tracking-filters')
+    else:
+        payload = _build_tracking_filters(instrument_type, strategy_id)
+    if include_runs:
+        return payload
+    return {key: value for key, value in payload.items() if key != 'available_runs'}
 
 
 def _build_tracking_filters(instrument_type: str, strategy_id: Optional[str]) -> dict:

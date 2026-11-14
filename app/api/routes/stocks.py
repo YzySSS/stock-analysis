@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
-from typing import Any
+from datetime import date, datetime, time
+from typing import Any, Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -472,13 +472,54 @@ def stock_realtime_rollups(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _display_revision() -> str:
+    from app.display_cache.service import revisions, _day
+    return json.dumps([_day(), revisions('tracking-filters')], sort_keys=True, default=str)
+
+
+@router.get("/stocks/{code}/history")
+def stock_price_history(
+    code: str,
+    limit: Annotated[int, Query(ge=5, le=600)] = 35,
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+) -> dict:
+    # Preserve the former 600-session browsing horizon, but read only the
+    # requested visible window. The code/date index bounds both SQL scans.
+    with mysql_read_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT MIN(trade_date) AS min_date, MAX(trade_date) AS max_date, MAX(updated_at) AS revision FROM (SELECT trade_date, updated_at FROM daily_kline WHERE code=%s ORDER BY trade_date DESC LIMIT 600) horizon", (code,))
+            bounds = cursor.fetchone() or {}
+            minimum = str(bounds['min_date']) if bounds.get('min_date') else None
+            maximum = str(bounds['max_date']) if bounds.get('max_date') else None
+            if not maximum:
+                return {'code': code, 'items': [], 'min_date': None, 'max_date': None, 'revision': _display_revision()}
+            clauses = ["code=%s", "trade_date >= %s"]
+            params = [code, minimum]
+            if start:
+                clauses.append("trade_date >= %s")
+                params.append(start)
+            if end:
+                clauses.append("trade_date <= %s")
+                params.append(end)
+            cursor.execute("SELECT trade_date,open,high,low,close FROM daily_kline WHERE " + " AND ".join(clauses) + " ORDER BY trade_date DESC LIMIT %s", (*params, limit))
+            rows = cursor.fetchall() or []
+    return {'code': code, 'items': [{k: str(v) if k == 'trade_date' else _to_float(v) for k, v in row.items()} for row in reversed(rows)],
+            'min_date': minimum, 'max_date': maximum, 'revision': str(bounds.get('revision'))}
+
+
 @router.get("/stocks/{code}")
 def stock_detail(
     code: str,
     history_limit: int = Query(default=600, ge=5, le=1000),
     news_limit: int = Query(default=12, ge=0, le=50),
     intraday_limit: int = Query(default=240, ge=0, le=400),
+    section: Literal["full", "context", "dynamic", "news", "intraday"] = "full",
 ) -> dict:
+    context = section in ("full", "context")
+    news = section in ("full", "news")
+    dynamic = section in ("full", "context", "dynamic", "intraday")
+    intraday_enabled = section in ("full", "intraday")
     with mysql_read_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -535,44 +576,48 @@ def stock_detail(
             )
             latest_kline = cursor.fetchone()
 
-            cursor.execute(
-                """
-                SELECT
-                    trade_date,
-                    open,
-                    high,
-                    low,
-                    close
-                FROM daily_kline
-                WHERE code = %s
-                ORDER BY trade_date DESC
-                LIMIT %s
-                """,
-                (code, history_limit),
-            )
-            price_history_rows = cursor.fetchall()
+            price_history_rows = []
+            if section == "full":
+                cursor.execute(
+                    """
+                    SELECT
+                        trade_date,
+                        open,
+                        high,
+                        low,
+                        close
+                    FROM daily_kline
+                    WHERE code = %s
+                    ORDER BY trade_date DESC
+                    LIMIT %s
+                    """,
+                    (code, history_limit),
+                )
+                price_history_rows = cursor.fetchall()
 
-            cursor.execute(
-                """
-                SELECT
-                    run_id,
-                    trade_date,
-                    strategy_id,
-                    score,
-                    rank_no,
-                    metadata_json,
-                    created_at
-                FROM selection_result
-                WHERE code = %s
-                ORDER BY created_at DESC, id DESC
-                LIMIT 10
-                """,
-                (code,),
-            )
-            selection_rows = cursor.fetchall()
+            selection_rows = []
+            if context or news:
+                cursor.execute(
+                    """
+                    SELECT
+                        run_id,
+                        trade_date,
+                        strategy_id,
+                        score,
+                        rank_no,
+                        metadata_json,
+                        created_at
+                    FROM selection_result
+                    WHERE code = %s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 10
+                    """,
+                    (code,),
+                )
+                selection_rows = cursor.fetchall()
 
             news_rows = []
-            if news_limit > 0:
+            if news and news_limit > 0:
                 cursor.execute(
                     """
                     SELECT
@@ -599,109 +644,117 @@ def stock_detail(
                 )
                 news_rows = cursor.fetchall()
 
-            cursor.execute(
-                """
-                SELECT
-                    latest_price,
-                    change_amount,
-                    pct_chg,
-                    bid_price,
-                    ask_price,
-                    pre_close,
-                    open_price,
-                    high_price,
-                    low_price,
-                    volume,
-                    amount,
-                    trade_date,
-                    quote_time,
-                    updated_at
-                FROM stock_realtime_snapshot
-                WHERE code = %s
-                LIMIT 1
-                """,
-                (code,),
-            )
-            realtime_snapshot = cursor.fetchone()
+            realtime_snapshot = None
+            if dynamic:
+                cursor.execute(
+                    """
+                    SELECT
+                        latest_price,
+                        change_amount,
+                        pct_chg,
+                        bid_price,
+                        ask_price,
+                        pre_close,
+                        open_price,
+                        high_price,
+                        low_price,
+                        volume,
+                        amount,
+                        trade_date,
+                        quote_time,
+                        updated_at
+                    FROM stock_realtime_snapshot
+                    WHERE code = %s
+                    LIMIT 1
+                    """,
+                    (code,),
+                )
+                realtime_snapshot = cursor.fetchone()
 
-            cursor.execute(
-                """
-                SELECT
-                    trade_date,
-                    his_low,
-                    his_high,
-                    cost_5pct,
-                    cost_15pct,
-                    cost_50pct,
-                    cost_85pct,
-                    cost_95pct,
-                    weight_avg,
-                    winner_rate,
-                    updated_at
-                FROM stock_chip_daily
-                WHERE code = %s
-                ORDER BY trade_date DESC
-                LIMIT 1
-                """,
-                (code,),
-            )
-            chip_row = cursor.fetchone()
+            chip_row = None
+            if context:
+                cursor.execute(
+                    """
+                    SELECT
+                        trade_date,
+                        his_low,
+                        his_high,
+                        cost_5pct,
+                        cost_15pct,
+                        cost_50pct,
+                        cost_85pct,
+                        cost_95pct,
+                        weight_avg,
+                        winner_rate,
+                        updated_at
+                    FROM stock_chip_daily
+                    WHERE code = %s
+                    ORDER BY trade_date DESC
+                    LIMIT 1
+                    """,
+                    (code,),
+                )
+                chip_row = cursor.fetchone()
 
-            cursor.execute(
-                """
-                SELECT
-                    trade_date,
-                    buy_sm_amount,
-                    sell_sm_amount,
-                    buy_md_amount,
-                    sell_md_amount,
-                    buy_lg_amount,
-                    sell_lg_amount,
-                    buy_elg_amount,
-                    sell_elg_amount,
-                    net_mf_amount,
-                    net_mf_vol,
-                    source,
-                    updated_at
-                FROM stock_moneyflow_daily
-                WHERE code = %s
-                ORDER BY trade_date DESC
-                LIMIT 1
-                """,
-                (code,),
-            )
-            moneyflow_row = cursor.fetchone()
+            moneyflow_row = None
+            if context:
+                cursor.execute(
+                    """
+                    SELECT
+                        trade_date,
+                        buy_sm_amount,
+                        sell_sm_amount,
+                        buy_md_amount,
+                        sell_md_amount,
+                        buy_lg_amount,
+                        sell_lg_amount,
+                        buy_elg_amount,
+                        sell_elg_amount,
+                        net_mf_amount,
+                        net_mf_vol,
+                        source,
+                        updated_at
+                    FROM stock_moneyflow_daily
+                    WHERE code = %s
+                    ORDER BY trade_date DESC
+                    LIMIT 1
+                    """,
+                    (code,),
+                )
+                moneyflow_row = cursor.fetchone()
 
-            cursor.execute(
-                """
-                SELECT
-                    trade_date,
-                    quote_time,
-                    latest_price,
-                    pct_chg,
-                    turnover_rate,
-                    inflow_amount,
-                    outflow_amount,
-                    net_amount,
-                    amount,
-                    source,
-                    source_unit,
-                    updated_at
-                FROM stock_realtime_moneyflow_snapshot
-                WHERE code = %s
-                  AND trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
-                  AND quote_time >= DATE_SUB(
-                      (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
-                      INTERVAL 20 MINUTE
-                  )
-                LIMIT 1
-                """,
-                (code,),
-            )
-            realtime_moneyflow_row = cursor.fetchone()
+            realtime_moneyflow_row = None
+            if dynamic:
+                cursor.execute(
+                    """
+                    SELECT
+                        trade_date,
+                        quote_time,
+                        latest_price,
+                        pct_chg,
+                        turnover_rate,
+                        inflow_amount,
+                        outflow_amount,
+                        net_amount,
+                        amount,
+                        source,
+                        source_unit,
+                        updated_at
+                    FROM stock_realtime_moneyflow_snapshot
+                    WHERE code = %s
+                      AND trade_date = (SELECT MAX(trade_date) FROM stock_realtime_moneyflow_snapshot)
+                      AND quote_time >= DATE_SUB(
+                          (SELECT MAX(quote_time) FROM stock_realtime_moneyflow_snapshot),
+                          INTERVAL 20 MINUTE
+                      )
+                    LIMIT 1
+                    """,
+                    (code,),
+                )
+                realtime_moneyflow_row = cursor.fetchone()
 
             intraday_rows = []
-            if intraday_limit > 0:
+            if intraday_enabled and intraday_limit > 0:
                 intraday_trade_date = realtime_snapshot.get("trade_date") if realtime_snapshot else None
                 if not intraday_trade_date:
                     cursor.execute(
@@ -720,6 +773,14 @@ def stock_detail(
                     (code, intraday_trade_date, intraday_limit),
                 )
                 intraday_rows = cursor.fetchall()
+            source_revisions = {}
+            if section in ('dynamic', 'context'):
+                cursor.execute("""
+                    SELECT (SELECT MAX(updated_at) FROM daily_kline WHERE code=%s) AS history_revision,
+                           (SELECT updated_at FROM stock_chip_daily WHERE code=%s ORDER BY trade_date DESC LIMIT 1) AS chip_revision,
+                           (SELECT updated_at FROM stock_moneyflow_daily WHERE code=%s ORDER BY trade_date DESC LIMIT 1) AS moneyflow_revision
+                """, (code, code, code))
+                source_revisions = cursor.fetchone() or {}
 
     selection_history = []
     latest_selection = None
@@ -818,7 +879,7 @@ def stock_detail(
         })
     sector_opinion_news = []
     latest_sentiment_context = (latest_selection or {}).get("sentiment_context") or {}
-    if not latest_sentiment_context:
+    if news and not latest_sentiment_context:
         with mysql_read_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -832,8 +893,19 @@ def stock_detail(
                     """
                 )
                 sector_rows = cursor.fetchall() or []
-        hydrate_sector_opinion_rows(sector_rows)
+        normalized = [int(row['id']) for row in sector_rows if row.get('id') is not None and
+                      (int(row.get('payload_version') or 1) >= 2 or (row.get('top_stocks_json') is None and row.get('top_news_json') is None))]
+        matched = set()
+        if normalized:
+            with mysql_read_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT snapshot_id FROM sector_opinion_stock WHERE code=%s AND snapshot_id IN (" + ",".join(["%s"] * len(normalized)) + ")", (code, *normalized))
+                    matched = {int(row['snapshot_id']) for row in cursor.fetchall() or []}
         for sector_row in sector_rows:
+            if sector_row.get('id') in normalized:
+                if int(sector_row['id']) not in matched:
+                    continue
+                hydrate_sector_opinion_rows([sector_row])
             try:
                 top_stocks = json.loads(sector_row.get("top_stocks_json") or "[]")
             except Exception:
@@ -1018,9 +1090,9 @@ def stock_detail(
     full_intraday_trade_date = (
         realtime.get("trade_date") if realtime else None
     ) or (str(latest_kline.get("trade_date")) if latest_kline and latest_kline.get("trade_date") else None)
-    full_intraday_items = cached_bars(str(basic.get("code")), full_intraday_trade_date) if full_intraday_trade_date else []
+    full_intraday_items = cached_bars(str(basic.get("code")), full_intraday_trade_date) if intraday_enabled and full_intraday_trade_date else []
 
-    return {
+    payload = {
         "code": basic.get("code"),
         "name": basic.get("name"),
         "market": basic.get("market"),
@@ -1080,3 +1152,15 @@ def stock_detail(
         "sector_opinion_news": sector_opinion_news,
         "updated_at": str(basic.get("updated_at")) if basic.get("updated_at") else None,
     }
+
+    if section == 'full':
+        return payload
+    keys = {
+        'context': ('code','name','market','industry','instrument_type','listing_date','flags','valuation','fundamentals','latest_kline','realtime','chip','moneyflow','realtime_moneyflow','latest_selection','selection_history','updated_at'),
+        'dynamic': ('code','name','latest_kline','realtime','realtime_moneyflow'),
+        'news': ('code','recent_news','sector_opinion_news'),
+        'intraday': ('code','realtime','latest_kline','realtime_intraday','intraday_bars'),
+    }[section]
+    revision = json.dumps([_display_revision(), basic.get('updated_at'), source_revisions], sort_keys=True, default=str)
+    return {**{key: payload[key] for key in keys}, 'revision': revision,
+            'history_revision': str(source_revisions.get('history_revision'))}

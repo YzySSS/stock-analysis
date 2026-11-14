@@ -11,10 +11,10 @@ async function loadSelectionMarketRiskAlert() {
   const container = qs('#selection-market-risk-alert');
   if (!container) return;
   try {
-    const dashboard = await fetchJson('/api/dashboard/summary?limit=8&compact=true');
+    const dashboard = await fetchJson('/api/dashboard/risk-alert');
     renderMarketRiskAlert(
       '#selection-market-risk-alert',
-      dashboard.market_overview?.risk_alert || null,
+      dashboard.risk_alert || null,
     );
   } catch (error) {
     container.hidden = false;
@@ -1518,9 +1518,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncScoreInputs(qs('#selection-min-score'));
     syncInstrumentSegments();
     syncMarketBoardSegments();
-    await loadSelectionMarketRiskAlert();
-    await loadStrategies();
-    await loadRecentSelectionRuns();
+    loadSelectionMarketRiskAlert();
+    await Promise.allSettled([
+      loadStrategies().catch((error) => { qs('#selection-summary-line').textContent = `策略加载失败: ${error.message}`; }),
+      loadRecentSelectionRuns(),
+    ]);
     renderSelectionPlaceholder();
     bindTooltips();
   } catch (error) {

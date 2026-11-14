@@ -23,7 +23,7 @@ class MarketRiskAlertUiTests(unittest.TestCase):
         self.assertIn('id="home-market-risk-alert"', home_html)
         self.assertIn('id="selection-market-risk-alert"', selection_html)
         self.assertIn("renderMarketRiskAlert('#home-market-risk-alert'", home_js)
-        self.assertIn("/api/dashboard/summary?limit=8&compact=true", selection_js)
+        self.assertIn("/api/dashboard/risk-alert", selection_js)
         self.assertIn("renderMarketRiskAlert(", common_js)
         self.assertIn("选股功能仍可正常使用", common_js)
         self.assertIn(".market-risk-alert.red", pages_css)
@@ -37,8 +37,8 @@ class MarketRiskAlertUiTests(unittest.TestCase):
 
         self.assertIn("pages.css?v=20260819marketalert1", home)
         self.assertIn("pages.css?v=20260819marketalert1", selection)
-        self.assertIn("common.js?v=20260819marketalert1", home)
-        self.assertIn("common.js?v=20260819marketalert1", selection)
+        self.assertIn("common.js?v=20261114readbatch1", home)
+        self.assertIn("common.js?v=20261114readbatch1", selection)
         self.assertIn("home.js?v=20260819marketalert1", home)
         self.assertIn("selection.js?v=20260915sentimentv06", selection)
 
