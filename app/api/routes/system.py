@@ -57,6 +57,7 @@ TASK_SCHEDULES = [
     {"task_name": "market_opinion_update", "task_label": "热点舆情聚合", "schedule": "交易日 09:00-15:59 每 15 分钟"},
     {"task_name": "market_opinion_lifecycle", "task_label": "舆情快照去重与保留", "schedule": "交易日 16:05"},
     {"task_name": "sentiment_candidate_snapshot_materialize", "task_label": "舆情候选快照物化", "schedule": "交易时段约每 15 分钟；交易日 18:55"},
+    {"task_name": "sentiment_v06_postclose_refresh", "task_label": "盘中研究版收盘数据补齐", "schedule": "交易日 18:57；19:27、20:27 重验"},
     {"task_name": "operational_read_models_refresh", "task_label": "实时榜单、首页缓存与运维读模型刷新", "schedule": "交易时段每 5 分钟；交易日 19:00"},
     {"task_name": "automatic_strategy_observation", "task_label": "新策略五交易日配对前瞻观察", "schedule": "交易日 09:25；每个新策略仅前 5 个成功配对交易日"},
     {"task_name": "stock_realtime_snapshot_update", "task_label": "实时行情分钟快照", "schedule": "交易日 09:00-15:59 每分钟，脚本内判断交易时段"},
