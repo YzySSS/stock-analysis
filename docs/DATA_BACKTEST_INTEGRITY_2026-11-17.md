@@ -39,4 +39,9 @@
 
 ## 发布验收
 
-发布后补记。
+- 实现提交 `490c793` 已推送main，生产直接使用同一checkout；仅重启API及backtest Worker，其他3个Worker不重启。
+- 重启前四队列queued/running均0；API先等本地health成功再探测公网。五服务active/NRestarts=0。
+- 本地及公网认证readiness 200/ready，schema0040共40/40，四队列仍0；日线与因子最新11/16、独立日历缺日0。
+- 本地/公网回测HTML、JS与磁盘一致；JS SHA256 `3a0fce9f6d42afe6d827323c57ed4e2ee8e399b8d960aef884f893df0db20f09`。只验证HTTP内容与既有Node交互回归，未声称请求者设备渲染/视觉验收。
+- 本地/公网真实舆情POST均返回409 `STRATEGY_NOT_REPLAYABLE`，没有新入队任务；历史结果GET200且保留原legacy方法论，不以新版本重标旧结果。
+- 研究源码及依赖指纹发布后仍与发布前相同。

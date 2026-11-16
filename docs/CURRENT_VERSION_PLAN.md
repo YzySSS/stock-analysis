@@ -72,7 +72,7 @@ Research Baseline 2026.07
 | 部署形态 | 单机模块化单体；FastAPI + MySQL + Nginx + Redis + 4 类独立 worker |
 | 数据库 | migration `0040`，生产库已验收 `40/40` |
 | 自动回归 | 785 项执行（784 通过，1 skip；2026-11-17 数据/回测完整性） |
-| 运行状态 | 2026-11-12 代码级 readiness `ready / accepting_jobs=true`；migration `38/38`；以每次验收实时输出为准 |
+| 运行状态 | 2026-11-17 本地/公网认证 readiness `ready / accepting_jobs=true`；migration `40/40`、四队列0；以每次验收实时输出为准 |
 | 公网边界 | `/api/health` 公开；其余页面/API 由应用登录、签名会话与 CSRF 保护；重型入口限流 |
 | TLS | Let’s Encrypt + Certbot 自动续期；有效期以实际 TLS 探针为准，不沿用历史到期日 |
 | 数据真相 | DQ1～DQ5 已完成：行情、历史股票状态、公告日基本面、历史指数成分均按 point-in-time 使用 |
