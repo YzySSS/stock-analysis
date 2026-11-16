@@ -33,7 +33,7 @@ class RecordingCursor:
                 {"code": "sh.600000", "latest_price": 10.2},
                 {"code": "sz.000001", "latest_price": 11.3},
             ]
-        elif "ROW_NUMBER() OVER" in normalized:
+        elif "FROM daily_kline" in normalized:
             self._rows = [
                 {"code": "sh.600000", "trade_date": "2026-07-14", "close": 10.0},
                 {"code": "sh.600000", "trade_date": "2026-07-15", "close": 10.2},
@@ -134,6 +134,32 @@ class PortfolioRepositoryBatchTests(unittest.TestCase):
         repository.load_market_contexts(["sh.600000"])
 
         self.assertEqual(len(factory.executions), 6)
+
+    def test_history_limits_each_unique_code_before_combining_and_keeps_old_minimum(self):
+        factory = RecordingConnectionFactory()
+        PortfolioRepository(connection_factory=factory).load_market_contexts(
+            ["sh.600000", "sz.000001", "sh.600000", ""], history_limit=0,
+        )
+        sql, params = factory.executions[2]
+        self.assertEqual(params, ["sh.600000", 1, "sz.000001", 1])
+        self.assertEqual(sql.count("ORDER BY trade_date DESC LIMIT %s)"), 2)
+        self.assertIn("UNION ALL", sql)
+        self.assertNotIn("ROW_NUMBER", sql)
+
+    def test_large_portfolio_bounds_union_size_without_losing_codes(self):
+        factory = RecordingConnectionFactory()
+        codes = [f"sh.fixture{i}" for i in range(101)]
+        result = PortfolioRepository(connection_factory=factory).load_market_contexts(codes)
+        history_queries = [(sql, params) for sql, params in factory.executions if "FROM daily_kline" in sql]
+        self.assertEqual(len(history_queries), 3)
+        self.assertEqual([sql.count("LIMIT %s") for sql, _ in history_queries], [50, 50, 1])
+        self.assertEqual([code for _, params in history_queries for code in params[::2]], codes)
+        self.assertEqual(set(result), set(codes))
+
+    def test_empty_portfolio_has_no_database_work(self):
+        factory = RecordingConnectionFactory()
+        self.assertEqual(PortfolioRepository(connection_factory=factory).load_market_contexts([]), {})
+        self.assertEqual(factory.executions, [])
 
     def test_service_loads_all_position_contexts_in_one_batch(self):
         repository = StubPortfolioRepository()

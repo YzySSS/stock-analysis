@@ -20,6 +20,33 @@ PICK_COLUMNS = '''id, observation_id, campaign_id, observation_source, source_sn
 ACTION_COLUMNS = 'id, observation_id, code, action_type, action_at, action_price, note, source'
 
 
+def _small_protocol_summary(cursor, protocol, observations, picks, actions_by_id, strategy_id):
+    """Only use recent rows as totals when all three LIMITs prove completeness.
+
+    No COUNT probe or full outcome payload is needed. At any limit boundary,
+    including exact equality, callers retain the whole-protocol SQL path.
+    """
+    if len(observations) >= 20 or len(picks) >= 50 or len(actions_by_id) >= 100:
+        return None
+    if picks:
+        horizons = []
+        for h in HORIZONS:
+            maps = [f"'{kind}',JSON_EXTRACT(outcome_json,'$.horizons.\"{h}\".{kind}')"
+                    for kind in ('benchmark_returns_pct', 'excess_returns_pct')]
+            horizons.append(f"'{h}',JSON_OBJECT({','.join(maps)})")
+        outcome = "JSON_OBJECT('horizons',JSON_OBJECT(" + ','.join(horizons) + '))'
+        placeholders = ','.join(['%s'] * len(picks))
+        cursor.execute(f'''SELECT id,price_adjustment_mode,{','.join(RISK_FIELDS)},
+            {outcome} AS outcome_json FROM strategy_forward_pick
+            WHERE protocol_id=%s AND id IN ({placeholders})''',
+            [protocol['protocol_id'], *[row['id'] for row in picks]])
+        details = {row['id']: row for row in cursor.fetchall() or []}
+        picks = [{**row, **details[row['id']]} for row in picks]
+    actions = sorted(actions_by_id.values(), key=lambda row: (row['action_at'], row['id']))
+    repository = SimpleNamespace(evidence_rows=lambda _: (protocol, observations, picks, actions))
+    return ForwardObservationService(repository=repository).evidence_summary(strategy_id)
+
+
 def _rounded_average(cursor, value, query, params):
     if value is None:
         return None
@@ -58,6 +85,9 @@ def evidence_summary(strategy_id: str) -> dict:
             cursor.execute(f'''SELECT {ACTION_COLUMNS} FROM strategy_forward_action WHERE protocol_id=%s
                 ORDER BY action_at DESC,id DESC LIMIT 100''', (protocol_id,))
             actions_by_id = {row['id']: row for row in cursor.fetchall() or []}
+            small = _small_protocol_summary(cursor, protocol, observations, picks, actions_by_id, strategy_id)
+            if small is not None:
+                return small
             # The old payload exposes every action type for the 50 visible
             # picks. Keep that exact contract, but never hydrate metadata_json.
             if picks:

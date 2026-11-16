@@ -172,24 +172,27 @@ class PortfolioRepository:
                     if code in contexts:
                         contexts[code]["quote"] = row
 
-                cursor.execute(
-                    f"""
-                    SELECT code, trade_date, open, high, low, close, volume, amount
-                    FROM (
-                        SELECT code, trade_date, open, high, low, close, volume, amount,
-                               ROW_NUMBER() OVER (PARTITION BY code ORDER BY trade_date DESC) AS row_no
-                        FROM daily_kline
-                        WHERE code IN ({placeholders})
-                    ) ranked
-                    WHERE row_no <= %s
-                    ORDER BY code, trade_date
-                    """,
-                    [*final_codes, max(1, int(history_limit))],
-                )
-                for row in cursor.fetchall() or []:
-                    code = str(row["code"])
-                    if code in contexts:
-                        contexts[code]["history"].append(row)
+                # LIMIT each indexed code range before combining it. A window
+                # function would sort every historical bar for these codes.
+                # Cap SQL size for unusually large portfolios without turning
+                # ordinary portfolios into per-position database round trips.
+                normalized_history_limit = max(1, int(history_limit))
+                for start in range(0, len(final_codes), 50):
+                    batch = final_codes[start:start + 50]
+                    branches = ["""(SELECT code, trade_date, open, high, low, close, volume, amount
+                        FROM daily_kline WHERE code=%s
+                        ORDER BY trade_date DESC LIMIT %s)""" for _ in batch]
+                    history_params = [value for code in batch
+                                      for value in (code, normalized_history_limit)]
+                    cursor.execute(
+                        "SELECT * FROM (" + " UNION ALL ".join(branches)
+                        + ") recent_history ORDER BY code, trade_date",
+                        history_params,
+                    )
+                    for row in cursor.fetchall() or []:
+                        code = str(row["code"])
+                        if code in contexts:
+                            contexts[code]["history"].append(row)
 
                 cursor.execute(
                     f"""
