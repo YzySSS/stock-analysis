@@ -40,7 +40,7 @@
 <div>
 <p class="eyebrow">Backtest</p>
 <h1>回测中心</h1>
-<p class="page-desc">固定规则，检验历史表现。</p></div>
+<p class="page-desc">固定规则，检验历史表现；曲线不代表账户净值。</p></div>
 <div class="header-actions">
 <button class="btn btn-secondary" id="refresh-backtest-page" type="button">刷新最近结果</button>
 </div>
@@ -152,7 +152,7 @@
 <span class="muted backtest-run-id-inline" hidden="" id="backtest-run-id"></span>
 <section class="stat-grid compact-stats backtest-metric-strip">
 <article class="stat-card">
-<div class="stat-label">总收益率</div>
+<div class="stat-label">累计诊断收益</div>
 <div class="stat-value" id="backtest-stat-total-return">-</div>
 </article><article class="stat-card">
 <div class="stat-label">最大回撤</div>
@@ -170,10 +170,10 @@
 <div class="card-header with-actions">
 <div>
 <p class="card-kicker">Equity</p>
-<h3>每日净值曲线</h3>
+<h3>信号收益诊断曲线</h3>
 </div>
 <div class="chart-tabs" id="backtest-chart-tabs">
-<button class="active" data-backtest-chart-mode="equity" type="button">净值</button>
+<button class="active" data-backtest-chart-mode="equity" type="button">诊断曲线</button>
 <button data-backtest-chart-mode="return" type="button">收益率</button>
 </div>
 </div>
@@ -264,6 +264,6 @@
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
 <script src="/static/js/common.js?v=20261114readbatch1b"></script>
-<script src="/static/js/backtest.js?v=20261114read3identity&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/backtest.js?v=20261117data6&amp;ui=20261113fidelity2"></script>
 </body>
 </html>

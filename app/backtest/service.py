@@ -8,7 +8,7 @@ import re
 import socket
 import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -140,7 +140,11 @@ class BacktestService:
                 if indexed_universe
                 else None
             ),
+            "data_policy": "independent_calendar_95pct_signal_coverage_complete_holding_path_v6",
+            "performance_basis": "signal_cohort_diagnostic_not_funded_portfolio",
             "known_limitations": [
+                "累计曲线为信号组收益诊断，不是资金账户净值；重叠持有期未做组合资金分配",
+                "日OHLC无法证明盘中成交顺序、成交量分配；涨跌停采用保守开盘约束",
                 "历史状态、退市股票行情、公告日基本面与指数月度成分覆盖必须以 DQ5 审计结果为准",
                 "DQ5 未覆盖的历史名称/ST、基本面或所选指数快照按未知处理并 fail-closed",
                 "公告日只有日期粒度，按公告日不晚于信号日视为可在下一交易日开盘前获知",
@@ -392,8 +396,15 @@ class BacktestService:
                 raise ValueError("validation_implementation_hash 仅允许用于已分组的系统验证任务")
             if not re.fullmatch(r"[0-9a-f]{64}", request.validation_implementation_hash):
                 raise ValueError("validation_implementation_hash 必须是 64 位小写 SHA-256")
-        # V2.1 supports adjusted return calculation when adj_factor_daily has
-        # coverage for the requested date range.
+        try:
+            start, end = date.fromisoformat(request.start_date), date.fromisoformat(request.end_date)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("回测日期必须为 YYYY-MM-DD") from exc
+        if end < start or (end - start).days > 550:
+            raise ValueError("回测区间需顺序正确，且不超过550个自然日")
+        for value in (request.commission_bps, request.stamp_tax_bps, request.slippage_bps):
+            if not math.isfinite(value):
+                raise ValueError("交易费用必须为有限数值")
 
     def run(self, request: BacktestRequest, save: bool = True) -> Dict[str, Any]:
         self._validate_request(request)
@@ -530,11 +541,36 @@ class BacktestService:
         summary = self._build_run_summary(daily_summaries, all_trades, request.return_mode, rejection_counts, len(all_picks), request)
         self._finish_run(run_id, "success", len(trade_dates), len(all_picks), len(all_trades), summary)
 
+    @staticmethod
+    def _validated_calendar(rows: Sequence[dict], start_date: str, end_date: str) -> List[str]:
+        start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+        expected = [str(start + timedelta(days=i)) for i in range((end-start).days+1)]
+        if [str(row.get("cal_date")) for row in rows] != expected or any(
+            row.get("source") != "tushare.trade_cal" or row.get("is_open") not in (0, 1)
+            for row in rows
+        ):
+            raise ValueError("独立交易日历缺失或来源异常，请先补齐后回测")
+        return [str(row["cal_date"]) for row in rows if row["is_open"]]
+
     def _fetch_trade_dates(self, start_date: str, end_date: str) -> List[str]:
-        return [
-            str(row["trade_date"])
-            for row in self.repository.fetch_trade_dates(start_date, end_date)
-        ]
+        dates = self._validated_calendar(self.repository.fetch_calendar_rows(start_date, end_date),
+                                         start_date, end_date)
+        if len(dates) > self.MAX_BACKTEST_DAYS:
+            raise ValueError(f"单次最多回测 {self.MAX_BACKTEST_DAYS} 个交易日")
+        coverage = {}
+        chunk_start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+        while chunk_start <= end:
+            chunk_end = min(end, chunk_start + timedelta(days=13))
+            coverage.update({str(row["trade_date"]): row for row in
+                             self.repository.fetch_trade_dates(str(chunk_start), str(chunk_end))})
+            chunk_start = chunk_end + timedelta(days=1)
+        for day in dates:
+            row = coverage.get(day) or {}
+            universe, daily, factor = (int(row.get(key) or 0)
+                                      for key in ("universe_rows", "daily_rows", "factor_rows"))
+            if not universe or daily/universe < .95 or not daily or factor/daily < .95:
+                raise ValueError(f"{day} 历史数据覆盖不足（日线 {daily}/{universe}，输入 {factor}/{daily}），请先补齐")
+        return dates
 
     def _ensure_index_universe_snapshot(self, universe_code: str, trade_date: str) -> None:
         if universe_code == ALL_A_UNIVERSE_CODE:
@@ -624,8 +660,13 @@ class BacktestService:
         for pick in picks:
             code = pick["code"]
             bars = future.get(code, [])
+            required = 1 if request.return_mode == "triple_barrier_5d" else lookahead
+            issue = self._path_issue(bars, required, request.use_adjusted_price) if request.return_mode != "turtle_selection_risk_v1" else None
+            if issue:
+                self._count_reason(rejection_counts, issue)
+                continue
             if request.return_mode == "turtle_selection_risk_v1":
-                turtle_trade, turtle_rejection = self._resolve_turtle_trade(
+                turtle_trade, turtle_rejection = self._resolve_turtle_trade_v6(
                     run_id=run_id,
                     strategy_id=strategy_id,
                     signal_date=trade_date,
@@ -644,7 +685,7 @@ class BacktestService:
                 continue
             pick["entry_price"] = entry_price
             pick["entry_price_type"] = "next_open"
-            buy_block_reason = self._execution_block_reason(entry_bar, "buy") if request.apply_execution_constraints else None
+            buy_block_reason = self._execution_block_reason_v6(entry_bar, "buy") if request.apply_execution_constraints else None
             if buy_block_reason:
                 self._count_reason(rejection_counts, buy_block_reason)
                 continue
@@ -663,27 +704,36 @@ class BacktestService:
                     stop_loss_pct=-3.0,
                     max_holding_days=5,
                 )
+                if triple_exit_price is None:
+                    self._count_reason(rejection_counts, triple_exit_reason or "incomplete_holding_path")
+                    continue
             exit_price_1d = _to_float(one_day_bar.get("close" if request.return_mode == "observe_t3_daily" else "open")) if one_day_bar else None
             exit_price_3d = _to_float(three_day_bar.get("close")) if three_day_bar else None
             entry_factor = _to_float(entry_bar.get("adj_factor")) if entry_bar else None
             one_day_factor = _to_float(one_day_bar.get("adj_factor")) if one_day_bar else None
             three_day_factor = _to_float(three_day_bar.get("adj_factor")) if three_day_bar else None
-            if request.return_mode == "triple_barrier_5d" and request.apply_execution_constraints and self._is_limit_blocked(triple_exit_bar, "sell"):
-                triple_exit_price = None
-                triple_exit_factor = None
-                triple_exit_reason = "sell_blocked_limit_down"
-                self._count_reason(rejection_counts, "sell_blocked_limit_down")
-            one_day_block_reason = self._execution_block_reason(one_day_bar, "sell") if request.apply_execution_constraints and one_day_bar else None
+            if request.return_mode == "triple_barrier_5d" and request.apply_execution_constraints:
+                reason = self._execution_block_reason_v6(triple_exit_bar, "sell")
+                if reason:
+                    triple_exit_price = None
+                    triple_exit_factor = None
+                    triple_exit_reason = reason
+                    self._count_reason(rejection_counts, reason)
+            one_day_block_reason = self._execution_block_reason_v6(one_day_bar, "sell") if request.apply_execution_constraints and one_day_bar else None
             if one_day_block_reason:
                 exit_price_1d = None
                 one_day_factor = None
                 self._count_reason(rejection_counts, one_day_block_reason)
-            three_day_block_reason = self._execution_block_reason(three_day_bar, "sell") if request.apply_execution_constraints and three_day_bar else None
+            three_day_block_reason = self._execution_block_reason_v6(three_day_bar, "sell") if request.apply_execution_constraints and three_day_bar else None
             if three_day_block_reason:
                 exit_price_3d = None
                 three_day_factor = None
                 self._count_reason(rejection_counts, three_day_block_reason)
-            price_path = bars[:lookahead]
+            exit_bar = triple_exit_bar or three_day_bar or one_day_bar
+            price_path = [bar for bar in bars[:lookahead]
+                          if exit_bar is None or str(bar.get("trade_date")) <= str(exit_bar.get("trade_date"))]
+            if request.return_mode == "1d" and price_path:
+                price_path[-1] = {**price_path[-1], "high": exit_price_1d, "low": exit_price_1d}
             if request.use_adjusted_price and entry_factor:
                 high_values = [self._adjusted_compare_price(_to_float(b.get("high")), _to_float(b.get("adj_factor")), entry_factor) for b in price_path]
                 low_values = [self._adjusted_compare_price(_to_float(b.get("low")), _to_float(b.get("adj_factor")), entry_factor) for b in price_path]
@@ -713,6 +763,24 @@ class BacktestService:
                 }
             )
         return trades, rejection_counts
+
+    def _resolve_turtle_trade_v6(self, **kwargs: Any) -> tuple[dict | None, str | None]:
+        trade, reason = self._resolve_turtle_trade(**kwargs)
+        if trade is None:
+            return trade, reason
+        bars, request = kwargs["bars"], kwargs["request"]
+        exit_date = str(trade.get("exit_date_3d") or "")
+        used = [bar for bar in bars if str(bar.get("trade_date")) <= exit_date]
+        issue = self._path_issue(used, len(used), request.use_adjusted_price)
+        if issue:
+            return None, issue
+        if request.apply_execution_constraints:
+            for day, side in ((str(trade["entry_date"]), "buy"), (exit_date, "sell")):
+                bar = next((bar for bar in used if str(bar.get("trade_date")) == day), None)
+                issue = self._execution_block_reason_v6(bar, side)
+                if issue:
+                    return None, issue
+        return trade, reason
 
     def _resolve_turtle_trade(
         self,
@@ -1223,6 +1291,9 @@ class BacktestService:
         stop_loss_price = entry_price * (1 + stop_loss_pct / 100)
         future_bars = list(bars[1 : max_holding_days + 1])
         for bar in future_bars:
+            issue = self._path_issue([bar], 1, request.use_adjusted_price)
+            if issue:
+                return None, None, issue, None
             factor = _to_float(bar.get("adj_factor"))
             high = _to_float(bar.get("high"))
             low = _to_float(bar.get("low"))
@@ -1230,23 +1301,54 @@ class BacktestService:
                 high = self._adjusted_compare_price(high, factor, entry_factor)
                 low = self._adjusted_compare_price(low, factor, entry_factor)
             if low is not None and low <= stop_loss_price:
-                return bar, stop_loss_price, "stop_loss", factor
+                op = self._adjusted_compare_price(_to_float(bar.get("open")), factor, entry_factor) if request.use_adjusted_price else _to_float(bar.get("open"))
+                fill = min(stop_loss_price, op) if op is not None else stop_loss_price
+                raw = self._raw_price_from_comparable(fill, factor=factor, entry_factor=entry_factor, adjusted=request.use_adjusted_price)
+                return bar, raw, "stop_loss", factor
             if high is not None and high >= take_profit_price:
-                return bar, take_profit_price, "take_profit", factor
+                raw = self._raw_price_from_comparable(take_profit_price, factor=factor, entry_factor=entry_factor, adjusted=request.use_adjusted_price)
+                return bar, raw, "take_profit", factor
         final_bar = future_bars[-1] if future_bars else (bars[-1] if bars else None)
         if not final_bar:
             return None, None, "missing_exit", None
+        if len(future_bars) < max_holding_days:
+            return None, None, "incomplete_holding_path", None
         return final_bar, _to_float(final_bar.get("close")), "time_exit", _to_float(final_bar.get("adj_factor"))
 
     def _fetch_future_bars(self, codes: Sequence[str], trade_date: str, lookahead: int) -> Dict[str, List[Dict[str, Any]]]:
         if not codes:
             return {}
-        grouped: Dict[str, List[Dict[str, Any]]] = {code: [] for code in codes}
-        for row in self.repository.fetch_future_bar_rows(codes, trade_date):
-            code = row["code"]
-            if len(grouped.setdefault(code, [])) < lookahead:
-                grouped[code].append(row)
-        return grouped
+        start = str(date.fromisoformat(trade_date) + timedelta(days=1))
+        end = str(date.fromisoformat(trade_date) + timedelta(days=370))
+        rows = self.repository.fetch_calendar_rows(start, end)
+        opens = [row for row in rows if row.get("is_open") == 1][:lookahead]
+        if len(opens) < lookahead:
+            raise ValueError("独立交易日历未覆盖完整持有期，请先补齐")
+        end = str(opens[-1]["cal_date"])
+        rows = [row for row in rows if str(row["cal_date"]) <= end]
+        dates = self._validated_calendar(rows, start, end)
+        bars = {(row["code"], str(row["trade_date"])): row for row in
+                self.repository.fetch_future_bar_rows(codes, trade_date, end)}
+        # Preserve every exchange session. Missing/suspended bars never shift a
+        # later resumption bar into T+1 or change the holding-period clock.
+        return {code: [bars.get((code, day), {"code": code, "trade_date": day,
+                      "missing_bar": True}) for day in dates] for code in codes}
+
+    @staticmethod
+    def _path_issue(bars: Sequence[dict], required: int, adjusted: bool) -> str | None:
+        if len(bars) < required:
+            return "incomplete_holding_path"
+        for bar in bars[:required]:
+            prices = [_to_float(bar.get(key)) for key in ("open", "high", "low", "close")]
+            if bar.get("missing_bar") or any(value is None or not math.isfinite(value) or value <= 0 for value in prices):
+                return "missing_or_invalid_holding_bar"
+            op, high, low, close = prices
+            if low > min(op, close) or high < max(op, close) or low > high:
+                return "invalid_ohlc_path"
+            factor = _to_float(bar.get("adj_factor")) or 0
+            if adjusted and (not math.isfinite(factor) or factor <= 0):
+                return "incomplete_adjustment_path"
+        return None
 
     @staticmethod
     def _adjusted_compare_price(price: float | None, factor: float | None, entry_factor: float | None) -> float | None:
@@ -1274,6 +1376,19 @@ class BacktestService:
         if side == "sell":
             return "sell_blocked_limit_down" if pct <= -BacktestService._limit_rate_for_bar(bar) + 0.2 else None
         return None
+
+    @staticmethod
+    def _execution_block_reason_v6(bar: Dict[str, Any] | None, side: str) -> str | None:
+        if not bar:
+            return "missing_bar"
+        if bar.get("pit_status_available") is not None and not bar["pit_status_available"]:
+            return "unknown_execution_status"
+        if bar.get("volume") is not None and (_to_float(bar.get("volume")) or 0) <= 0:
+            return "suspended_or_no_volume"
+        prev_close = _to_float(bar.get("prev_close"))
+        if prev_close is None or not math.isfinite(prev_close) or prev_close <= 0:
+            return "missing_previous_close"
+        return BacktestService._execution_block_reason(bar, side)
 
     @staticmethod
     def _limit_rate_for_bar(bar: Dict[str, Any] | None) -> float:
@@ -1312,7 +1427,7 @@ class BacktestService:
         stamp_tax_rate = max(_to_float(getattr(request, "stamp_tax_bps", 0)) or 0, 0) / 10000 if request else 0.0
         slippage_rate = max(_to_float(getattr(request, "slippage_bps", 0)) or 0, 0) / 10000 if request else 0.0
         if use_adjusted_price:
-            if entry_factor is None or exit_factor is None or entry_factor <= 0:
+            if entry_factor is None or exit_factor is None or entry_factor <= 0 or exit_factor <= 0:
                 return None
             entry_value = entry * entry_factor
             exit_value = exit_price * exit_factor
@@ -1362,8 +1477,9 @@ class BacktestService:
         daily_field = "avg_return_1d_pct" if return_mode == "1d" else "avg_return_3d_pct"
         values = [t[field] for t in trades if t.get(field) is not None]
         daily_values = [row[daily_field] for row in daily if row.get(daily_field) is not None]
-        best = max(trades, key=lambda t: t.get(field) if t.get(field) is not None else -999999, default=None)
-        worst = min(trades, key=lambda t: t.get(field) if t.get(field) is not None else 999999, default=None)
+        eligible_trades = [trade for trade in trades if trade.get(field) is not None]
+        best = max(eligible_trades, key=lambda t: t.get(field) if t.get(field) is not None else -999999, default=None)
+        worst = min(eligible_trades, key=lambda t: t.get(field) if t.get(field) is not None else 999999, default=None)
         equity = 1.0
         peak = 1.0
         max_drawdown_pct = 0.0
@@ -1387,13 +1503,15 @@ class BacktestService:
         return {
             "methodology": self._methodology_metadata(request) if request else None,
             "return_mode": return_mode,
+            "performance_basis": "signal_cohort_diagnostic_not_funded_portfolio",
+            "data_notice": f"有效评价 {len(values)}/{total_picks if total_picks is not None else len(trades)} 条；缺失或未成熟路径不计收益。",
             "trade_days": len(daily),
             "trade_count": len(values),
             "total_picks": total_picks if total_picks is not None else len(trades),
-            "total_return_pct": round((equity - 1) * 100, 4),
+            "total_return_pct": round((equity - 1) * 100, 4) if values or not total_picks else None,
             "avg_return_pct": self._avg(values),
             "avg_daily_return_pct": self._avg(daily_values),
-            "max_drawdown_pct": round(max_drawdown_pct, 4),
+            "max_drawdown_pct": round(max_drawdown_pct, 4) if values or not total_picks else None,
             "win_rate_pct": self._win_rate(values),
             "sharpe_ratio": self._sharpe(daily_values),
             "sortino_ratio": self._sortino(daily_values),

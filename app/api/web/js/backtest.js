@@ -136,6 +136,13 @@ function formatRatio(value) {
 
 const BACKTEST_REJECTION_LABELS = {
   missing_entry_price: '缺少入场价',
+  incomplete_holding_path: '持有期尚未完整',
+  missing_or_invalid_holding_bar: '行情缺失/无效',
+  invalid_ohlc_path: '行情价格异常',
+  incomplete_adjustment_path: '复权数据不全',
+  unknown_execution_status: '历史状态未知',
+  missing_previous_close: '缺少前收盘价',
+  suspended_or_no_volume: '停牌/无成交量',
   missing_bar: '缺少行情',
   suspended_or_no_open: '停牌/无开盘价',
   buy_blocked_limit_up: '涨停买不进',
@@ -146,10 +153,15 @@ function renderExecutionSummary(data) {
   const container = qs('#backtest-execution-summary');
   if (!container) return;
   const summary = data?.summary || {};
+  if (summary.data_notice) {
+    container.hidden = false;
+    container.innerHTML = `<p class="muted">${escapeHtml(summary.data_notice)}</p>`;
+    return;
+  }
   const counts = summary.rejection_counts || {};
   const rules = summary.execution_rule_summary || {};
   const entries = Object.entries(counts).filter(([, value]) => Number(value || 0) > 0);
-  if (!entries.length && !rules.a_share_realistic) {
+  if (!entries.length && !rules.a_share_realistic && !summary.data_notice) {
     container.hidden = true;
     container.innerHTML = '';
     return;
@@ -172,6 +184,7 @@ function renderExecutionSummary(data) {
       <span class="badge status-muted">滑点 ${Number(rules.slippage_bps || 0)}bps</span>
       ${reasonText}
     </div>
+    <p class="muted">${escapeHtml(summary.data_notice || '')}</p>
     <p class="muted">${escapeHtml(rules.lot_size_rule || 'A 股整手规则将在仓位模型接入后影响交易数量。')}</p>
   `;
 }
@@ -273,7 +286,7 @@ function renderBacktestChart(curve = []) {
   const first = points[0];
   const stroke = last.value >= first.value ? '#ef4444' : '#22c55e';
   const fillId = stroke === '#ef4444' ? 'backtestPositiveFill' : 'backtestNegativeFill';
-  const valueLabel = currentBacktestChartMode === 'return' ? '日收益' : '净值';
+  const valueLabel = currentBacktestChartMode === 'return' ? '信号组收益' : '诊断曲线';
   const formatValue = (value) => currentBacktestChartMode === 'return' ? `${value.toFixed(2)}%` : value.toFixed(4);
   const yTicks = Array.from({ length: 5 }, (_, index) => min + (range * index / 4)).reverse();
   const xTickIndexes = [...new Set([0, Math.floor((points.length - 1) / 3), Math.floor((points.length - 1) * 2 / 3), points.length - 1])];

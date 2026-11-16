@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Optional
 from decimal import Decimal
 
@@ -24,10 +25,9 @@ SENTIMENT_STRATEGY_IDS = frozenset(
 def _to_float(value: object) -> float | None:
     if value is None:
         return None
-    if isinstance(value, Decimal):
-        return float(value)
     try:
-        return float(value)
+        result = float(value)
+        return result if math.isfinite(result) else None
     except (TypeError, ValueError):
         return None
 
@@ -41,8 +41,8 @@ def _pct(entry: float | None, price: float | None) -> float | None:
 def _adjust_price(price: float | None, factor: float | None, entry_factor: float | None) -> float | None:
     if price is None:
         return None
-    if factor is None or entry_factor is None or entry_factor <= 0:
-        return price
+    if factor is None or entry_factor is None or factor <= 0 or entry_factor <= 0:
+        return None
     return price * factor / entry_factor
 
 
@@ -300,14 +300,14 @@ def build_trade_horizon_rows(
         if not code or not trade_date or not entry_date or not entry_price:
             continue
         bars = bars_by_key.get((trade_date, code), [])
-        entry_factor = _to_float(bars[0].get("adj_factor")) if bars else None
+        entry_factor = _to_float(bars[0].get("adj_factor")) if bars and str(bars[0].get("trade_date")) == str(entry_date) else None
         items: list[dict] = []
         for day_no, bar in enumerate(bars[:5], start=0):
             factor = _to_float(bar.get("adj_factor")) if use_adjusted_price else None
             base_factor = entry_factor if use_adjusted_price else None
-            close = _adjust_price(_to_float(bar.get("close")), factor, base_factor)
-            high = _adjust_price(_to_float(bar.get("high")), factor, base_factor)
-            low = _adjust_price(_to_float(bar.get("low")), factor, base_factor)
+            close, high, low = (_to_float(bar.get(key)) for key in ("close", "high", "low"))
+            if use_adjusted_price:
+                close, high, low = (_adjust_price(value, factor, base_factor) for value in (close, high, low))
             items.append(
                 {
                     "day_no": day_no,

@@ -205,11 +205,15 @@ class BacktestRepository:
                     # Do not use one broad code/date window that scans history.
                     branches, bar_params = [], []
                     for index, (trade_code, entry_date) in enumerate(requests):
-                        branches.append("""(SELECT %s AS horizon_key, dk.trade_date, dk.close, dk.high, dk.low, af.adj_factor
-                            FROM daily_kline dk
-                            LEFT JOIN adj_factor_daily af ON af.code=dk.code AND af.trade_date=dk.trade_date
-                            WHERE dk.code=%s AND dk.trade_date >= %s ORDER BY dk.trade_date LIMIT 5)""")
-                        bar_params.extend((index, trade_code, entry_date))
+                        branches.append("""(SELECT %s AS horizon_key, c.cal_date AS trade_date,
+                            dk.close, dk.high, dk.low, af.adj_factor
+                            FROM (SELECT cal_date FROM etf_rotation_trade_calendar
+                                  WHERE exchange_code='SSE' AND is_open=1
+                                    AND source='tushare.trade_cal' AND cal_date >= %s
+                                  ORDER BY cal_date LIMIT 5) c
+                            LEFT JOIN daily_kline dk ON dk.code=%s AND dk.trade_date=c.cal_date
+                            LEFT JOIN adj_factor_daily af ON af.code=dk.code AND af.trade_date=dk.trade_date)""")
+                        bar_params.extend((index, entry_date, trade_code))
                     cursor.execute(" UNION ALL ".join(branches), bar_params)
                     grouped = {index: [] for index in range(len(requests))}
                     for bar in cursor.fetchall() or []:
@@ -299,21 +303,42 @@ class BacktestRepository:
                 )
                 return cursor.fetchone()
 
-    def fetch_trade_dates(self, start_date: str, end_date: str) -> list[Any]:
+    def fetch_calendar_rows(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT DISTINCT f.trade_date
-                    FROM factor_input_daily f
-                    INNER JOIN daily_kline dk ON dk.code = f.code AND dk.trade_date = f.trade_date
-                    WHERE f.trade_date BETWEEN %s AND %s
-                    ORDER BY f.trade_date
-                    """,
-                    (start_date, end_date),
-                )
+                cursor.execute("""SELECT cal_date, is_open, source
+                    FROM etf_rotation_trade_calendar
+                    WHERE exchange_code='SSE' AND cal_date BETWEEN %s AND %s
+                    ORDER BY cal_date""", (start_date, end_date))
                 return cursor.fetchall() or []
 
+    def fetch_trade_dates(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        # Date-led bounded aggregates; a completely missing day remains visible
+        # through the independent calendar, not hidden by an inner join.
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT c.cal_date AS trade_date,
+                      (SELECT COUNT(*) FROM stock_instrument_lifecycle sil
+                       WHERE sil.instrument_type='stock' AND sil.listing_date<=c.cal_date
+                         AND (sil.delisting_date IS NULL OR c.cal_date<sil.delisting_date)) AS universe_rows,
+                      COALESCE(k.daily_rows,0) AS daily_rows,
+                      COALESCE(k.factor_rows,0) AS factor_rows
+                    FROM etf_rotation_trade_calendar c
+                    LEFT JOIN (
+                      SELECT dk.trade_date, COUNT(*) AS daily_rows, COUNT(f.code) AS factor_rows
+                      FROM daily_kline dk FORCE INDEX (idx_trade_date)
+                      INNER JOIN stock_instrument_lifecycle sil ON sil.code=dk.code
+                        AND sil.instrument_type='stock' AND sil.listing_date<=dk.trade_date
+                        AND (sil.delisting_date IS NULL OR dk.trade_date<sil.delisting_date)
+                      LEFT JOIN factor_input_daily f FORCE INDEX (idx_factor_input_trade_code) ON f.code=dk.code AND f.trade_date=dk.trade_date
+                      WHERE dk.trade_date BETWEEN %s AND %s AND dk.close>0
+                      GROUP BY dk.trade_date
+                    ) k ON k.trade_date=c.cal_date
+                    WHERE c.exchange_code='SSE' AND c.is_open=1
+                      AND c.cal_date BETWEEN %s AND %s ORDER BY c.cal_date
+                """, (start_date, end_date, start_date, end_date))
+                return cursor.fetchall() or []
 
     @staticmethod
     def _universe_sql_parts(
@@ -580,36 +605,30 @@ class BacktestRepository:
                 return (cursor.fetchone() or {}).get("start_date")
 
     def fetch_future_bar_rows(
-        self,
-        codes: Sequence[str],
-        trade_date: str,
+        self, codes: Sequence[str], trade_date: str, end_date: str,
     ) -> list[dict[str, Any]]:
         if not codes:
             return []
-        placeholders = self._placeholders(codes)
         sql = f"""
-        SELECT dk.code, COALESCE(nh.name, sil.name) AS name,
-               dk.trade_date, dk.open, dk.high, dk.low, dk.close,
-               prev.close AS prev_close,
-               af.adj_factor
+        SELECT dk.code, nh.name AS name, dk.trade_date,
+               dk.open, dk.high, dk.low, dk.close, dk.volume,
+               prev.close AS prev_close, af.adj_factor,
+               CASE WHEN nh.code IS NULL THEN 0 ELSE 1 END AS pit_status_available
         FROM daily_kline dk
-        LEFT JOIN stock_instrument_lifecycle sil ON sil.code = dk.code
-        LEFT JOIN stock_name_history nh ON nh.code = dk.code
-          AND nh.start_date <= dk.trade_date
-          AND (nh.end_date IS NULL OR nh.end_date >= dk.trade_date)
-        LEFT JOIN adj_factor_daily af ON af.code = dk.code AND af.trade_date = dk.trade_date
-        LEFT JOIN daily_kline prev ON prev.code = dk.code
-          AND prev.trade_date = (
-            SELECT MAX(p.trade_date)
-            FROM daily_kline p
-            WHERE p.code = dk.code AND p.trade_date < dk.trade_date
-          )
-        WHERE dk.code IN ({placeholders}) AND dk.trade_date > %s
+        LEFT JOIN stock_name_history nh ON nh.code=dk.code
+          AND nh.start_date<=dk.trade_date
+          AND (nh.end_date IS NULL OR nh.end_date>=dk.trade_date)
+        LEFT JOIN adj_factor_daily af ON af.code=dk.code AND af.trade_date=dk.trade_date
+        LEFT JOIN daily_kline prev ON prev.code=dk.code
+          AND prev.trade_date=(SELECT MAX(p.trade_date) FROM daily_kline p
+                               WHERE p.code=dk.code AND p.trade_date<dk.trade_date)
+        WHERE dk.code IN ({self._placeholders(codes)})
+          AND dk.trade_date>%s AND dk.trade_date<=%s
         ORDER BY dk.code, dk.trade_date
         """
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, [*codes, trade_date])
+                cursor.execute(sql, [*codes, trade_date, end_date])
                 return cursor.fetchall() or []
 
     def create_run(self, values: dict[str, Any]) -> None:

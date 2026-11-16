@@ -103,7 +103,7 @@ class BacktestRepositoryTests(unittest.TestCase):
             trades_params,
             ["run-1", "2026-04-24", "sh.600000", 10, 20],
         )
-        self.assertEqual(cursor.executed[3][1], [0, "sh.600000", "2026-04-27"])
+        self.assertEqual(cursor.executed[3][1], [0, "2026-04-27", "sh.600000"])
 
     def test_window_start_rejects_dynamic_table_identifier(self):
         repository = BacktestRepository(connection_factory(FakeCursor()))

@@ -85,6 +85,33 @@ SELECT
 """
 
 
+# Compare the factor partition with actual stock daily rows on the independently
+# due day; MAX(date) alone cannot prove that an ingestion batch completed.
+FACTOR_PARTITION_COVERAGE_SQL = """
+SELECT COUNT(*) AS expected_rows,
+       COUNT(CASE WHEN f.total_mv>0 AND f.circ_mv>0 AND f.turnover_rate>=0
+                  THEN f.code END) AS covered_rows
+FROM daily_kline dk
+INNER JOIN stock_basic sb ON sb.code=dk.code AND sb.instrument_type='stock'
+LEFT JOIN factor_input_daily f ON f.code=dk.code AND f.trade_date=dk.trade_date
+WHERE dk.trade_date=%s AND dk.close > 0
+"""
+
+
+def _merge_factor_partition_coverage(data: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    expected = int(row.get("expected_rows") or 0)
+    covered = int(row.get("covered_rows") or 0)
+    ratio = covered / expected if expected else 0.0
+    valid = expected > 0 and ratio >= STOCK_DAILY_COMPLETENESS_RATIO
+    return {**data, "health": data.get("health") if valid else "error",
+            "factor_input_partition": {
+                "trade_date": data.get("expected_latest_trade_date"),
+                "expected_rows": expected, "covered_rows": covered,
+                "coverage_ratio": ratio, "minimum_coverage_ratio": STOCK_DAILY_COMPLETENESS_RATIO,
+                "health": "healthy" if valid else "error",
+            }}
+
+
 INDEPENDENT_CALENDAR_SNAPSHOT_SQL = f"""
 SELECT
     COUNT(*) AS calendar_row_count,
@@ -415,6 +442,12 @@ def _data_hard_reasons(data: dict[str, Any]) -> list[str]:
         reasons.extend(str(item) for item in (calendar.get("issues") or []))
         return reasons
 
+    partition = data.get("factor_input_partition")
+    if partition is not None and partition.get("health") != "healthy":
+        reasons.append(
+            f"历史输入层 {partition.get('trade_date')} 覆盖不足 "
+            f"（{partition.get('covered_rows', 0)}/{partition.get('expected_rows', 0)}），等待补齐"
+        )
     expected_date = data.get("expected_latest_trade_date")
     daily_missing = int(data.get("daily_kline_missing_trade_days") or 0)
     factor_missing = int(data.get("factor_input_missing_trade_days") or 0)
@@ -456,12 +489,15 @@ def _data_snapshots(now: datetime | None = None) -> dict[str, Any]:
                 ),
             )
             calendar_row = cursor.fetchone() or {}
+            cursor.execute(FACTOR_PARTITION_COVERAGE_SQL,
+                           (calendar_row.get("expected_latest_trade_date"),))
+            coverage_row = cursor.fetchone() or {}
     data = _serialize_data_snapshot(row)
     calendar = _serialize_independent_calendar_snapshot(
         calendar_row,
         reference=reference,
     )
-    return _merge_independent_freshness(data, calendar)
+    return _merge_factor_partition_coverage(_merge_independent_freshness(data, calendar), coverage_row)
 
 
 def _as_datetime(value: Any) -> datetime | None:

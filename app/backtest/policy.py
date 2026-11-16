@@ -5,7 +5,8 @@ LEGACY_BACKTEST_METHODOLOGY_VERSION = "legacy_pre_point_in_time_v1"
 PREVIOUS_BACKTEST_METHODOLOGY_VERSION = "close_signal_next_open_v2"
 PREVIOUS_PIT_UNIVERSE_METHODOLOGY_VERSION = "close_signal_next_open_pit_universe_v3"
 PREVIOUS_PIT_FUNDAMENTAL_METHODOLOGY_VERSION = "close_signal_next_open_pit_fundamentals_v4"
-BACKTEST_METHODOLOGY_VERSION = "close_signal_next_open_pit_index_universe_v5"
+PREVIOUS_PIT_INDEX_METHODOLOGY_VERSION = "close_signal_next_open_pit_index_universe_v5"
+BACKTEST_METHODOLOGY_VERSION = "close_signal_calendar_complete_adjusted_path_v6"
 LEGACY_BACKTEST_RISK_NOTICE = (
     "当前回测仍存在信号时点、非 point-in-time 基本面和幸存者偏差等待修复项；"
     "结果仅用于研究与排错，不可作为交易证据。"
@@ -24,10 +25,15 @@ PREVIOUS_PIT_FUNDAMENTAL_RISK_NOTICE = (
     "估值使用 T 日 daily_basic，财务指标只使用公告日不晚于信号日的 point-in-time 版本；"
     "完整性仍以 DQ4 审计为准，且尚未完成样本外验证，结果仅用于研究与排错。"
 )
-BACKTEST_RISK_NOTICE = (
+PREVIOUS_PIT_INDEX_RISK_NOTICE = (
     "当前回测采用 T 日收盘信号、T+1 开盘成交，并使用历史生命周期、公告日基本面；"
     "选择指数股票池时只使用信号日之前最近一次 Tushare 月度成分权重快照，默认历史全A口径不变；"
     "完整性仍以 DQ5 审计为准，且尚未完成样本外验证，结果仅用于研究与排错。"
+)
+
+BACKTEST_RISK_NOTICE = (
+    "按独立交易日历核验历史覆盖与完整持有路径，T+1模拟成交，使用历史状态、公告日基本面和月度成分权重快照；"
+    "缺失数据不计收益。累计曲线仅为信号收益诊断，不是账户净值；仅供研究，尚未完成样本外验证。"
 )
 
 
@@ -40,6 +46,8 @@ def research_disclosure(methodology_version: str | None = None) -> dict:
         "risk_notice": (
             BACKTEST_RISK_NOTICE
             if version == BACKTEST_METHODOLOGY_VERSION
+            else PREVIOUS_PIT_INDEX_RISK_NOTICE
+            if version == PREVIOUS_PIT_INDEX_METHODOLOGY_VERSION
             else PREVIOUS_PIT_FUNDAMENTAL_RISK_NOTICE
             if version == PREVIOUS_PIT_FUNDAMENTAL_METHODOLOGY_VERSION
             else PREVIOUS_PIT_UNIVERSE_RISK_NOTICE
