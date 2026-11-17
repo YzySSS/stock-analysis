@@ -262,6 +262,7 @@ class NewsAggregator:
         self.akshare = AkShareNewsProvider()
         self.duckduckgo = DuckDuckGoNewsProvider()
         self.rss = RSSNewsProvider()
+        self.news_archive_events = []
 
     def get_stock_news(self, stock_code: str, stock_name: str, sources: List[str] | None = None) -> List[Dict]:
         """
@@ -275,6 +276,7 @@ class NewsAggregator:
         all_news: List[Dict] = []
 
         for source in ordered_sources:
+            news = []
             if source == "akshare" and "akshare" in enabled:
                 news = self.akshare.get_stock_news(stock_code)
                 all_news.extend(news)
@@ -293,10 +295,22 @@ class NewsAggregator:
                 all_news.extend(news)
                 logger.info(f"RSS 获取 {len(news)} 条市场新闻")
 
+            if news:
+                from app.data_ingestion.news_history import capture_news
+                self.news_archive_events.append(capture_news(
+                    news, provider=source, code=stock_code))
+
             if len(all_news) >= 15:
                 return self._deduplicate(all_news)[:15]
 
         return self._deduplicate(all_news)[:15]
+
+    def archive_summary(self) -> dict:
+        return {"status": "warning" if any(e["status"] == "warning" for e in self.news_archive_events) else "sealed" if self.news_archive_events else "empty",
+                "batches": len(self.news_archive_events),
+                "rows": sum(e.get("rows", 0) for e in self.news_archive_events),
+                "warnings": sum(e["status"] == "warning" for e in self.news_archive_events),
+                "full_history_backtest_available": False}
 
     def _deduplicate(self, news_list: List[Dict]) -> List[Dict]:
         seen = set()

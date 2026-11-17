@@ -102,7 +102,8 @@ def main() -> None:
             except Exception:
                 failed += 1
         payload = {"trade_date": trade_date, "requested": len(codes), "updated": updated, "failed": failed, "raw_news": raw_total_news, "total_news": total_news, "filtered_out": filtered_out, "universe": args.universe, "akshare_runs": akshare_runs, "tavily_runs": tavily_runs, "tavily_top_n": args.tavily_top_n}
-        logger.finish(TASK_NAME, run_id, "success", f"stock sentiment updated, updated={updated}, news={total_news}, filtered={filtered_out}", payload)
+        payload["news_history_archive"] = aggregator.archive_summary()
+        logger.finish(TASK_NAME, run_id, "success", f"stock sentiment updated, updated={updated}, news={total_news}, filtered={filtered_out}" + (" 新闻版本封存告警" if payload["news_history_archive"]["status"] == "warning" else ""), payload)
         print(json.dumps(payload, ensure_ascii=False))
     except Exception as exc:
         logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], {"trade_date": trade_date, "limit": args.limit})

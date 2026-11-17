@@ -991,11 +991,23 @@ def main() -> None:
         fetched = saved = matched_stocks = matched_sectors = failed_sources = 0
         event_evidence_rows = event_relation_rows = 0
         errors: dict[str, str] = {}
+        news_archive_events = []
         cutoff = as_of - timedelta(days=args.lookback_days)
         for source_id in sources:
             try:
                 _, rows = client.fetch_source(source_id)
                 fetched += len(rows)
+                if rows and not args.dry_run:
+                    from app.data_ingestion.news_history import capture_news
+                    news_archive_events.append(capture_news([
+                        {"title": item.title, "summary": item.summary, "url": item.url,
+                         "source": item.source_name, "item_id": item.item_id,
+                         "source_id": item.source_id, "source_status": item.status,
+                         "source_column": item.source_column, "source_type": item.source_type,
+                         "rank_no": item.rank_no, "mobile_url": item.mobile_url,
+                         "published_at": item.published_at,
+                         "crawl_time": item.crawl_time, "raw": item.raw}
+                        for item in rows], provider="newsnow."+source_id))
                 upper_bound = as_of if args.as_of else datetime.now()
                 for item in rows:
                     if item.effective_time < cutoff or item.effective_time > upper_bound:
@@ -1097,11 +1109,18 @@ def main() -> None:
                 "top_sectors": summaries[:8],
                 "failed_sources": failed_sources,
                 "errors": errors,
+                "news_history_archive": {
+                    "status": "skipped_dry_run" if args.dry_run else "warning" if any(e["status"] == "warning" for e in news_archive_events) else "sealed" if news_archive_events else "empty",
+                    "batches": len(news_archive_events),
+                    "rows": sum(e.get("rows", 0) for e in news_archive_events),
+                    "warnings": sum(e["status"] == "warning" for e in news_archive_events),
+                    "full_history_backtest_available": False,
+                },
                 "elapsed_seconds": round(time.time() - started, 2),
                 "anti_lookahead_rule": "source_time and received_at must both be <= decision_as_of; available_at is their maximum; timeliness_score is recomputed by event type at aggregate time",
             }
         )
-        logger.finish(TASK_NAME, run_id, payload["status"], f"market opinion updated, saved={saved}, sectors={len(summaries)}", payload)
+        logger.finish(TASK_NAME, run_id, payload["status"], f"market opinion updated, saved={saved}, sectors={len(summaries)}" + (" 新闻版本封存告警" if payload["news_history_archive"]["status"] == "warning" else ""), payload)
         print(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception as exc:
         payload = {"run_id": run_id, "status": "failed", "error_type": type(exc).__name__, "error": str(exc)[:500]}

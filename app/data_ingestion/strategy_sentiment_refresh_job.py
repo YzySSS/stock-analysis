@@ -131,6 +131,7 @@ def refresh_pool(rows: List[Dict[str, Any]], trade_date: str, tavily_top_n: int,
         "akshare_runs": akshare_runs,
         "tavily_runs": tavily_runs,
         "errors": errors,
+        "news_history_archive": aggregator.archive_summary(),
     }
 
 
@@ -158,7 +159,7 @@ def main() -> None:
         pool = pool[: args.max_codes]
         result = refresh_pool(pool, trade_date, args.tavily_top_n, args.sleep_seconds, args.news_top_n)
         payload = {**result, "pool_size": len(pool), "strategies": strategies, "strategy_diagnostics": diagnostics, "codes": [row["code"] for row in pool]}
-        logger.finish(TASK_NAME, run_id, "success", f"strategy sentiment refreshed, updated={result['updated']}, news={result['total_news']}", payload)
+        logger.finish(TASK_NAME, run_id, "success", f"strategy sentiment refreshed, updated={result['updated']}, news={result['total_news']}" + (" 新闻版本封存告警" if result["news_history_archive"]["status"] == "warning" else ""), payload)
         print(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception as exc:
         logger.finish(TASK_NAME, run_id, "failed", str(exc)[:500], meta)
