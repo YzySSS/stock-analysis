@@ -116,6 +116,35 @@ def cancel_backtest_run(run_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/backtest/recorded-snapshots")
+def list_recorded_sentiment_snapshots(
+    strategy_id: str = Query(default="a_share_sentiment_v06"),
+    limit: int = Query(default=20, ge=1, le=50),
+) -> dict:
+    from app.backtest.sentiment_replay import SentimentReplayRepository
+    try:
+        rows = SentimentReplayRepository().list_snapshots(strategy_id=strategy_id, limit=limit)
+        return {"snapshots": rows, "selector_recomputed": False,
+                "full_history_backtest_available": False}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/backtest/snapshot-replay")
+def replay_recorded_sentiment_snapshot(
+    snapshot_id: str = Query(min_length=1, max_length=96),
+    holding_days: int = Query(default=3, ge=1, le=5),
+) -> dict:
+    """Bounded read-only recorded-decision diagnosis, not historical selection."""
+    from app.backtest.sentiment_replay import SentimentReplayRepository
+    try:
+        return SentimentReplayRepository().replay(snapshot_id, holding_days=holding_days)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": "SNAPSHOT_NOT_REPLAYABLE", "message": str(exc)}) from exc
+
+
 def strategy_display_name_for_run(strategy_id: str | None, strategy_version: str | None) -> str:
     """Build a run display name from the historical version stored on the run.
 

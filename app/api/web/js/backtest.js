@@ -7,6 +7,7 @@ let currentBacktestTradesPage = 1;
 let currentBacktestTradesTotalPages = 0;
 let currentBacktestTradesLimit = 10;
 const backtestRead = { generation: 0, trades: 0, runs: 0, polling: false, pending: 0, identity: getCookieValue('stock_analysis_csrf'), items: new Map(), detail: null, resultKey: null, tradeKey: null };
+const recordedSnapshotRead = { generation: 0, loadedStrategy: null };
 function backtestResultKey(run) {
   // Writer saves one completed day before publishing progress. Heartbeat-only
   // changes must not cause unchanged curves/trades to be downloaded again.
@@ -21,6 +22,7 @@ function backtestIdentity() {
     backtestRead.items.clear(); backtestRead.detail = null;
     backtestRead.resultKey = null; backtestRead.tradeKey = null;
     backtestRead.runs += 1; backtestRead.trades += 1; backtestRead.generation += 1;
+    invalidateRecordedSnapshot();
   }
   return identity;
 }
@@ -834,7 +836,112 @@ function applyAShareRealisticPreset() {
   if (message) message.textContent = '已应用 A 股真实化预设：不复权、成交约束、佣金2.5bps、印花5bps、滑点5bps。';
 }
 
+function invalidateRecordedSnapshot({ keepOptions = false } = {}) {
+  recordedSnapshotRead.generation += 1;
+  const result = qs('#recorded-snapshot-result');
+  const select = qs('#recorded-snapshot-id');
+  const button = qs('#recorded-snapshot-view');
+  if (result) result.textContent = '';
+  if (!keepOptions) {
+    recordedSnapshotRead.loadedStrategy = null;
+    if (select) { select.innerHTML = '<option value="">展开后读取</option>'; select.disabled = true; }
+  }
+  if (button) button.disabled = !select?.value;
+}
+
+function recordedSnapshotRequestCurrent(generation, identity, strategy, snapshot = null, holding = null) {
+  return generation === recordedSnapshotRead.generation
+    && identity === getCookieValue('stock_analysis_csrf')
+    && qs('#recorded-snapshot-diagnosis')?.open === true
+    && strategy === qs('#recorded-snapshot-strategy')?.value
+    && (snapshot === null || snapshot === qs('#recorded-snapshot-id')?.value)
+    && (holding === null || holding === qs('#recorded-snapshot-holding')?.value);
+}
+
+async function loadRecordedSnapshots() {
+  const details = qs('#recorded-snapshot-diagnosis');
+  if (!details?.open) return;
+  const identity = backtestIdentity();
+  const strategy = qs('#recorded-snapshot-strategy')?.value || 'a_share_sentiment_v06';
+  if (recordedSnapshotRead.loadedStrategy === strategy) return;
+  invalidateRecordedSnapshot();
+  const generation = recordedSnapshotRead.generation;
+  const select = qs('#recorded-snapshot-id');
+  const result = qs('#recorded-snapshot-result');
+  select.innerHTML = '<option value="">读取已发布选股...</option>';
+  try {
+    const data = await fetchJson(`/api/backtest/recorded-snapshots?strategy_id=${encodeURIComponent(strategy)}&limit=50`);
+    if (!recordedSnapshotRequestCurrent(generation, identity, strategy)) return;
+    const snapshots = data.snapshots || [];
+    select.innerHTML = snapshots.length ? snapshots.map((item) => (
+      `<option value="${escapeHtml(item.snapshot_id)}">${escapeHtml(String(item.published_at || '').replace('T', ' ').slice(0, 19))} · v${escapeHtml(item.strategy_version || '-')} · ${escapeHtml(item.candidate_count ?? 0)}只</option>`
+    )).join('') : '<option value="">暂无已发布选股</option>';
+    select.disabled = !snapshots.length;
+    qs('#recorded-snapshot-view').disabled = !snapshots.length;
+    recordedSnapshotRead.loadedStrategy = strategy;
+    if (!snapshots.length) result.textContent = '暂无可诊断记录，未生成假设收益。';
+  } catch (error) {
+    if (!recordedSnapshotRequestCurrent(generation, identity, strategy)) return;
+    select.innerHTML = '<option value="">读取失败，重新展开重试</option>';
+    result.textContent = `读取失败：${error.message}`;
+  }
+}
+
+function renderRecordedSnapshotDiagnosis(data) {
+  const count = (value) => escapeHtml(Number.isFinite(Number(value)) ? Number(value) : 0);
+  const statuses = { ready: '可计算', pending: '未成熟', excluded: '已排除' };
+  const grades = { watch: '观察', observe: '观察', conditions_met: '研究候选', tradable: '原记录可交易' };
+  const rows = (data.labels || []).map((item) => {
+    const reason = item.reason === 'not_matured' ? '持有期未结束' : BACKTEST_REJECTION_LABELS[item.reason] || item.reason;
+    return `<li><strong>${escapeHtml(item.name || item.code)}</strong> · ${escapeHtml(grades[item.original_trade_grade] || item.original_trade_grade || '原级别未知')}`
+      + `<br>${escapeHtml(item.entry_date)} → ${escapeHtml(item.exit_date)} · ${escapeHtml(statuses[item.status] || item.status)}`
+      + ` · ${escapeHtml(formatPercent(item.return_pct))}${reason ? `（${escapeHtml(reason)}）` : ''}</li>`;
+  }).join('');
+  return `<p>可计算 ${count(data.ready_count)} · 未成熟 ${count(data.pending_count)} · 排除 ${count(data.excluded_count)}<br>平均假设收益：${escapeHtml(formatPercent(data.avg_return_pct))}</p>`
+    + (rows ? `<ul>${rows}</ul>` : '<p class="muted">该次为空选，不计为零收益。</p>')
+    + '<p class="muted">仅已记录决策的假设诊断；观察级不升级，不是账户收益或完整历史回测。</p>';
+}
+
+async function viewRecordedSnapshotDiagnosis() {
+  if (!qs('#recorded-snapshot-diagnosis')?.open) return;
+  const identity = backtestIdentity();
+  const strategy = qs('#recorded-snapshot-strategy')?.value;
+  const snapshot = qs('#recorded-snapshot-id')?.value;
+  const holding = qs('#recorded-snapshot-holding')?.value;
+  if (!snapshot) { await loadRecordedSnapshots(); return; }
+  const generation = ++recordedSnapshotRead.generation;
+  const button = qs('#recorded-snapshot-view');
+  const result = qs('#recorded-snapshot-result');
+  button.disabled = true;
+  result.textContent = '正在诊断已记录选股...';
+  try {
+    const data = await fetchJson(`/api/backtest/snapshot-replay?snapshot_id=${encodeURIComponent(snapshot)}&holding_days=${encodeURIComponent(holding)}`);
+    if (!recordedSnapshotRequestCurrent(generation, identity, strategy, snapshot, holding)) return;
+    result.innerHTML = renderRecordedSnapshotDiagnosis(data);
+  } catch (error) {
+    if (recordedSnapshotRequestCurrent(generation, identity, strategy, snapshot, holding)) result.textContent = `本次暂不可诊断：${error.message}`;
+  } finally {
+    if (recordedSnapshotRequestCurrent(generation, identity, strategy, snapshot, holding)) button.disabled = false;
+  }
+}
+
+function initRecordedSnapshotDiagnosis() {
+  qs('#recorded-snapshot-diagnosis')?.addEventListener('toggle', () => {
+    if (qs('#recorded-snapshot-diagnosis').open) loadRecordedSnapshots();
+    else invalidateRecordedSnapshot({ keepOptions: true });
+  });
+  qs('#recorded-snapshot-strategy')?.addEventListener('change', () => {
+    invalidateRecordedSnapshot();
+    loadRecordedSnapshots();
+  });
+  ['#recorded-snapshot-id', '#recorded-snapshot-holding'].forEach((selector) => {
+    qs(selector)?.addEventListener('change', () => invalidateRecordedSnapshot({ keepOptions: true }));
+  });
+  qs('#recorded-snapshot-view')?.addEventListener('click', viewRecordedSnapshotDiagnosis);
+}
+
 qs('#backtest-form')?.addEventListener('submit', runBacktest);
+initRecordedSnapshotDiagnosis();
 qs('#refresh-backtest-page')?.addEventListener('click', refreshBacktestPage);
 qs('#backtest-return-mode')?.addEventListener('change', () => {
   currentBacktestReturnMode = qs('#backtest-return-mode')?.value || '1d';

@@ -69,7 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     logger = TaskRunLogger()
     logger.start(TASK_NAME, run_id, metadata=metadata)
     try:
-        service = SentimentSnapshotMaterializationService()
+        from app.backtest.sentiment_evidence import archiving_materializer, seal_published_result
+        service = archiving_materializer()
         if args.dual_run:
             result = service.materialize_dual(max_picks=args.max_picks)
         else:
@@ -78,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
                 allow_shadow=bool(args.allow_shadow),
                 max_picks=args.max_picks,
             )
+        result["evidence_archive"] = seal_published_result(
+            result, input_events=service.evidence_archive_events)
         payload = {**metadata, **result}
         logger.finish(
             TASK_NAME,
@@ -86,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             message=(
                 f"snapshot={result.get('snapshot_id') or result.get('dual_input_hash')} "
                 f"coverage={result.get('coverage_ratio')}"
+                + (" 证据封存告警" if result['evidence_archive']['status'] == 'warning' else "")
             ),
             metadata=payload,
         )

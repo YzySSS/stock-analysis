@@ -47,7 +47,7 @@ class BatchedReadsTests(unittest.TestCase):
 class BacktestFrontendReadsTests(unittest.TestCase):
     def test_unchanged_poll_retries_failure_and_rejects_out_of_order_run(self):
         source=Path('app/api/web/js/backtest.js').read_text()
-        state=source[:source.index('const BACKTEST_STRATEGY_LABELS')]
+        state=source[:source.index('const BACKTEST_STRATEGY_LABELS')]+source[source.index('function invalidateRecordedSnapshot'):source.index('function recordedSnapshotRequestCurrent')]
         loaders=source[source.index('function pickDefaultBacktestRun'):source.index('async function runBacktest')]
         harness=r'''
 const vm=require('vm'),assert=require('assert');
@@ -81,7 +81,7 @@ const ctx={console,Map,JSON,Promise,Date,URLSearchParams,window:{addEventListene
 
     def _assert_identity_switch_drops_deferred_responses(self, kind):
         source=Path('app/api/web/js/backtest.js').read_text()
-        state=source[:source.index('const BACKTEST_STRATEGY_LABELS')]
+        state=source[:source.index('const BACKTEST_STRATEGY_LABELS')]+source[source.index('function invalidateRecordedSnapshot'):source.index('function recordedSnapshotRequestCurrent')]
         loaders=source[source.index('function pickDefaultBacktestRun'):source.index('async function runBacktest')]
         harness=r'''
 const vm=require('vm'),assert=require('assert');

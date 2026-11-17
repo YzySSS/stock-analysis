@@ -74,9 +74,10 @@ def refresh_postclose(*, now: datetime | None = None, dry_run: bool = False,
     if chip_factory is None:
         from app.data_ingestion.chip_sync import ChipSync
         chip_factory = ChipSync
+    archive_enabled = materializer_factory is None
     if materializer_factory is None:
-        from app.stock_selection.sentiment_snapshot_materializer import SentimentSnapshotMaterializationService
-        materializer_factory = SentimentSnapshotMaterializationService
+        from app.backtest.sentiment_evidence import archiving_materializer
+        materializer_factory = archiving_materializer
     dependencies = {}
     for name, factory in [('moneyflow', moneyflow_factory), ('chip', chip_factory)]:
         result = factory().run(str(day), str(day), pause_seconds=0)
@@ -89,11 +90,16 @@ def refresh_postclose(*, now: datetime | None = None, dry_run: bool = False,
     covered = int(coverage.get('covered_rows') or 0)
     if expected <= 0 or covered / expected < 0.98:
         raise ValueError(f'target-day valid daily dependency coverage {covered}/{expected} below 98%')
-    snapshot = materializer_factory().materialize(
+    materializer = materializer_factory()
+    snapshot = materializer.materialize(
         strategy_id='a_share_sentiment_v06', allow_shadow=True)
     if (snapshot.get('snapshot_status') != 'ready' or snapshot.get('quality_status') != 'passed'
             or str(snapshot.get('trade_date')) != str(day)):
         raise ValueError('materializer did not return a ready/passed target-day snapshot')
+    if archive_enabled:
+        from app.backtest.sentiment_evidence import seal_published_result
+        snapshot['evidence_archive'] = seal_published_result(
+            snapshot, input_events=materializer.evidence_archive_events)
     return {'status': 'success', 'trade_date': str(day), 'dependencies': dependencies,
             'coverage': coverage, 'snapshot': snapshot, 'external_provider_calls': True}
 
@@ -118,7 +124,9 @@ def main() -> int:
         try:
             result = refresh_postclose(dry_run=args.dry_run)
             if not args.dry_run:
-                logger.finish(task_name, run_id, 'success', result['status'], result)
+                archive_warning = result.get('snapshot', {}).get('evidence_archive', {}).get('status') == 'warning'
+                message = result['status'] + (' 证据封存告警' if archive_warning else '')
+                logger.finish(task_name, run_id, 'success', message, result)
             print(json.dumps(result, ensure_ascii=False, default=str))
             return 0
         except Exception as exc:

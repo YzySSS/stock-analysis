@@ -145,6 +145,31 @@
 </div>
 </details>
 </form>
+<details class="backtest-advanced-settings" id="recorded-snapshot-diagnosis">
+<summary>已记录选股诊断</summary>
+<div class="backtest-advanced-grid">
+<p class="muted">仅诊断已发布的选股，不是完整历史回测。观察级仍为观察，不代表成交或交易资格。</p>
+<div class="terminal-form-field">
+<label for="recorded-snapshot-strategy">选股策略</label>
+<select id="recorded-snapshot-strategy">
+<option value="a_share_sentiment_v06">A股舆情选股 v0.6</option>
+<option value="a_share_sentiment_v05">A股舆情选股 v0.5</option>
+<option value="a_share_sentiment">A股舆情选股 v0.4</option>
+</select>
+</div>
+<div class="terminal-form-field">
+<label for="recorded-snapshot-id">已发布选股（最近50份）</label>
+<select disabled="" id="recorded-snapshot-id"><option value="">展开后读取</option></select>
+</div>
+<div class="terminal-form-field">
+<label for="recorded-snapshot-holding">假设持有期</label>
+<select id="recorded-snapshot-holding"><option value="1">1日 · 下一交易日开盘退出</option><option selected="" value="3">3日 · 收盘退出</option><option value="5">5日 · 收盘退出</option></select>
+</div>
+<p class="muted">统一从发布日之后的下一交易日开盘开始。1日遵守T+1，3/5日计入入场日；固定佣金每边3bps、滑点每边5bps、卖出印花税5bps。缺失、未成熟及受限样本不计收益。</p>
+<button class="btn btn-secondary" disabled="" id="recorded-snapshot-view" type="button">查看诊断</button>
+<div aria-live="polite" id="recorded-snapshot-result" role="status"></div>
+</div>
+</details>
 <div class="backtest-terminal-foot" hidden="">
 <span class="muted" id="backtest-form-message"></span>
 </div>
@@ -264,6 +289,6 @@
 <footer class="workspace-footer"><span>股票分析台 · 研究工作台</span><span>独立研究，辅助决策 · 不自动交易</span></footer></main>
 </div>
 <script src="/static/js/common.js?v=20261114readbatch1b"></script>
-<script src="/static/js/backtest.js?v=20261117data6&amp;ui=20261113fidelity2"></script>
+<script src="/static/js/backtest.js?v=20261117replay1&amp;ui=20261113fidelity2"></script>
 </body>
 </html>
