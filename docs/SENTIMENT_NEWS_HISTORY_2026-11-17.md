@@ -69,4 +69,12 @@ PYTHONPATH=. .venv/bin/python scripts/archive_sentiment_news_history.py inspect 
 - 11/15～16的8个6小时窗口受小时额度约束，最近失败发生16:10；**未连续重试，也未宣称补齐**。已创建上海时间17:15一次性续采 `69bbc09c-fca3-4e81-bdf8-cf55d2733fcc`，从上述manifest仅取缺窗，本次最多20调用，结果写新的output文件与新manifest；如再限流按新`retry_not_before`恢复同一任务，不覆盖旧证据。
 - 原manifest生成时尚未加入cooldown字段，所以首次恢复明确不早于17:15；之后的新manifest包含冷却时钟。
 
-生产发布与采集链路验收结果在根发布后补记。下一自然市场采集为下一交易日09:00、个股采集为次日03:50；不可把人工smoke当自然Cron验收。
+## 生产发布验收
+
+- 实现提交 `883b81a` 已推送GitHub main，服务器运行同份代码。当前checkout为 `codex/sentiment-v06-implementation`，本地main不是部署来源；通过非强制 `HEAD:main` 快进发布，远端hash已比对。
+- 发布前readiness ready、四队列queued/running均0；仅串行重启导入新闻聚合器的API、selection及backtest Worker，等待本地health成功后再验公网。portfolio/durable Worker未重启。
+- 正常舆情采集脚本人工运行 `--sources cls --lookback-days 30 --sleep-seconds 0`：success、failed_sources=0、封存1批30条、warnings=0、23.43秒。没有历史时点override，不写后补资料到生产策略表；本次是正常实时采集路径验证。证据 `output/sentiment-news-history-production-task-20261117.json`。
+- 根本地/公网14项HTTP检查通过：health/readiness 200、三版历史回测请求均为原409、记录快照列表200且保持`selector_recomputed=false / full_history_backtest_available=false`、匿名readiness401；40/40迁移，五服务active/NRestarts0，四队列queued/running均0。证据 `output/sentiment-news-history-root-http-20261117.json`，可复用probe同名前缀 `.py`；探针含合法内存CSRF会话，不输出凭证。
+- source/dependency双指纹与根复核前完全一致，无DDL、策略参数、历史研究cohort或交易权限改变；发布时工作树干净。最终文档提交仅补充上述验收，不需再重启。
+
+下一自然市场采集为下一交易日09:00、个股采集为次日03:50；不可把人工smoke当自然Cron验收。缺窗自动续采仍待17:15，正文权限及历史首次可见证明仍缺，不宣称完整历史回测可用。
