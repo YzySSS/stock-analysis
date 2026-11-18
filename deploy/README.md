@@ -23,16 +23,23 @@
 - Cron 为 `35 9 * * 1-5`，安装主机时区必须是 `Asia/Shanghai`。执行时仍检查现有 readiness 中独立 `tushare.trade_cal / SSE` 日历，休市跳过，日历缺失/陈旧、数据或 Worker 未 ready 均不提交。只在 `[09:35,09:40)` 新建任务，错过时窗不在下午补造早盘结果。
 - 先为 0.4.4 物化一份当前 ready/passed 本地候选快照，再固定该快照经原 `SelectionRunService` 入队，由原 selection Worker 执行。不使用正常调度的 09:22 旧快照来冒充 09:35。失败不回退旧数据，不改既有 09:25、09:37 或 v0.6 调度。
 - 全流程 MySQL advisory lock；独立的“日程/信号日/策略/版本/数量”幂等键保存在已有 `selection_run.idempotency_key`。终态（含零候选、失败、取消）仍去重；崩溃在提交后发生也能从数据库恢复原 run_id。Worker 原有失联恢复不变。无 schema migration。
-- 结果是普通选股**预览**，不自动写 `selection_result`、跟踪复盘、持仓或交易。选股中心“最近运行状态 → 查看最近任务（含自动选股）”读取既有任务 API，可查看结果后按条人工保存。提交日志在 `logs/daily_stock_selection.log`，系统任务日志名为 `daily_stock_selection`，提交成功不等于 Worker 计算成功。
+- **2026-11-18 用户更新：结果自动保存到跟踪复盘。** 入队仍使用原来的 `save=false`（普通接口明确禁止 `save=true`）；本脚本等待 Worker 完成，最多300秒，再复用人工 `save-item` 保存路径，包含分钟线补全持久任务与跟踪展示缓存失效。固定原任务 `run_id` 与原候选排名，以原快照 `explain.raw_metrics` 内已经记录的盘中报价/日期/时钟为跟踪基准，与09:35人工立即保存的语义一致；显式固定价格类型，避免晚间补存切成昨日收盘价，绝不取当前行情替代。数据库既有唯一键/跟踪去重保证重跑不重复建跟踪。失败/取消/空选不创建跟踪；保存或补全入队失败明确失败，不把“提交成功”冒充“已保存”。不写持仓，不自动交易。
+- 每交易日09:42、09:50另有两次**只补保存**：`--save-only --wait-seconds 0`。仅按当日独立调度键查已有自动任务，不读取/补跑研究任务，不创建快照或重算选择器；只补存成功结果，无任务则跳过，仍运行则报告 pending。没有无限轮询，最终仍失败需查看日志处理。原 `selection_run` 保留 Worker 计算状态，保存状态另见 `logs/daily_stock_selection.log` 与系统 `daily_stock_selection` 任务日志（`tracking_status/saved_count/tracking_errors`）；选股中心“查看最近任务（含自动选股）”仍可查看原始结果。
 - 调度逻辑放在 `scripts/`，不修改冻结的 `app/shared`、`app/strategies`、`app/stock_selection` 或依赖，避免使现有 09:25 研究 cohort 的双指纹漂移。09:35 普通任务不混入 09:25 前瞻实验。
 
 只读检查（不写任务日志、不物化、不入队）：
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/run_daily_stock_selection.py --dry-run
+
+# 只读核对当日是否已有自动任务，不提交、不保存
+PYTHONPATH=. .venv/bin/python scripts/run_daily_stock_selection.py --save-only --dry-run
+
+# 只补存当日已有成功结果；不会在下午补造09:35选股
+PYTHONPATH=. .venv/bin/python scripts/run_daily_stock_selection.py --save-only --wait-seconds 0
 ```
 
-`next_scheduled_at` 只从已预载的真实交易日历推导；无覆盖则返回空值，不猜节假日。安装时先备份完整旧 Cron，仅追加/替换该脚本的一行；不要为了这个任务覆盖其他手工任务。模板 `setup_kline_cron.sh --print-only` 也包含唯一一行，以便后续重装不丢失配置。
+`next_scheduled_at` 只从已预载的真实交易日历推导；无覆盖则返回空值，不猜节假日。安装时先备份完整旧 Cron，仅维护本脚本09:35提交与09:42/09:50补存的两行；不要为了这个任务覆盖其他手工任务。模板 `setup_kline_cron.sh --print-only` 也包含这两行，以便后续重装不丢失配置。
 
 `requirements.lock.txt` 是本次实际测试环境的版本锁，不要用不受控 `pip install -U` 改研究环境。它不是多平台 wheel hash 锁；本轮未升级生产依赖。
 

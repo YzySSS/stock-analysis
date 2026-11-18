@@ -66,7 +66,8 @@ REALTIME_MONEYFLOW_JOB="*/5 9-15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT
 STOCK_POPULARITY_JOB="*/5 9-15 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_stock_popularity_update.py --retention-days 3 >> $LOG_DIR/stock_popularity_update.log 2>&1"
 JOB_RETENTION_JOB="15 4 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_job_retention.py --apply >> $LOG_DIR/job_retention.log 2>&1"
 AUTOMATIC_OBSERVATION_JOB="25 9 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_automatic_strategy_observation.py >> $LOG_DIR/automatic_strategy_observation.log 2>&1"
-DAILY_SELECTION_JOB="35 9 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_daily_stock_selection.py >> $LOG_DIR/daily_stock_selection.log 2>&1"
+DAILY_SELECTION_JOB="35 9 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_daily_stock_selection.py >> $LOG_DIR/daily_stock_selection.log 2>&1
+42,50 9 * * 1-5 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_daily_stock_selection.py --save-only --wait-seconds 0 >> $LOG_DIR/daily_stock_selection.log 2>&1"
 RESEARCH_REVIEW_JOB="30 6 * * 6 cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_strategy_research_review.py --period weekly >> $LOG_DIR/strategy_research_review.log 2>&1
 40 6 1 * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_strategy_research_review.py --period monthly >> $LOG_DIR/strategy_research_review.log 2>&1"
 FORWARD_OUTCOME_JOB="10 5 * * * cd $PROJECT_ROOT && PYTHONPATH=$PROJECT_ROOT $PYTHON_BIN scripts/run_strategy_forward_outcomes.py >> $LOG_DIR/strategy_forward_outcomes.log 2>&1"

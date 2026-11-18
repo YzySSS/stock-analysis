@@ -23,6 +23,11 @@ class DailySelectionTests(unittest.TestCase):
         self.service.submit.return_value = {
             "run_id": "scheduled-run", "status": "queued", "input_snapshot_id": "new-snapshot",
         }
+        self.service.get_run.return_value = {
+            "run_id": "scheduled-run", "status": "success", "strategy_id": daily.STRATEGY_ID,
+            "request": {"strategy_version": "0.4.4"},
+            "result": {"count": 1, "results": [{"code": "sh.600000", "trade_date": "2026-11-13"}]},
+        }
         self.strategy = MagicMock()
         self.strategy.get_strategy_meta.return_value = {"version": "0.4.4"}
         self.strategy._sentiment_read_model_enabled.return_value = True
@@ -41,19 +46,26 @@ class DailySelectionTests(unittest.TestCase):
             patch.object(daily, "acquire_mysql_advisory_lock", return_value="lock"),
             patch.object(daily, "release_mysql_advisory_lock", return_value=None),
             patch.object(daily, "next_scheduled_at", return_value="2026-11-16T09:35:00+08:00"),
+            patch.object(daily, "save_tracking_item", return_value={"intraday_cache": {"status": "queued"}}),
         ]
         self.mocks = [p.start() for p in self.patches]
         self.addCleanup(lambda: [p.stop() for p in reversed(self.patches)])
 
     def test_submit_uses_current_snapshot_version_and_at_most_three(self):
         result = daily.run()
-        self.assertEqual(result["status"], "submitted")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["tracking_status"], "saved")
+        self.assertEqual(result["saved_codes"], ["sh.600000"])
         self.materializer.materialize.assert_called_once_with(strategy_id="a_share_sentiment", max_picks=3)
         request = self.service.submit.call_args.args[0]
         self.assertEqual((request["strategy_id"], request["max_picks"], request["limit"]),
                          ("a_share_sentiment", 3, 3))
         self.assertIs(request["save"], False)
         self.assertEqual(self.service.submission_snapshot["snapshot_id"], "new-snapshot")
+        self.mocks[8].assert_called_once_with(
+            run_id="scheduled-run", item={"code": "sh.600000", "trade_date": "2026-11-13"},
+            score_threshold=None,
+        )
         self.mocks[6].assert_called_once_with("lock")
 
     def test_holiday_on_weekday_skips_without_materializing_or_submitting(self):
@@ -83,12 +95,34 @@ class DailySelectionTests(unittest.TestCase):
             self.assertEqual(daily.run()["reason"], "outside_0935_submission_window")
         self.service.submit.assert_not_called()
 
-    def test_completed_failed_cancelled_and_empty_runs_are_not_repeated(self):
+    def test_existing_runs_are_never_reselected_even_outside_submission_window(self):
+        self.mocks[0].return_value = self.now.replace(hour=10)
         for status in ("success", "failed", "cancelled", "no_data", "queued", "running"):
             self.service.existing.return_value = {"run_id": "existing", "status": status}
-            self.assertEqual(daily.run()["status"], "deduplicated")
+            self.assertFalse(daily.run()["selection_task_submitted"])
         self.materializer.materialize.assert_not_called()
         self.service.submit.assert_not_called()
+
+    def test_save_only_never_creates_missing_daily_run_even_in_submission_window(self):
+        self.assertEqual(daily.run(save_only=True)["reason"], "no_daily_selection_run")
+        self.service.submit.assert_not_called()
+        self.materializer.materialize.assert_not_called()
+        self.mocks[4].assert_not_called()
+        self.mocks[8].assert_not_called()
+
+    def test_dry_run_existing_task_never_saves_or_waits(self):
+        self.service.existing.return_value = {"run_id": "existing", "status": "success"}
+        self.assertEqual(daily.run(dry_run=True)["status"], "deduplicated")
+        self.service.get_run.assert_not_called()
+        self.mocks[8].assert_not_called()
+
+    def test_save_only_reuses_existing_result_without_readiness_or_new_snapshot(self):
+        self.service.existing.return_value = {"run_id": "existing", "status": "success"}
+        self.mocks[4].side_effect = AssertionError("must not block saving an existing result")
+        self.assertEqual(daily.run(save_only=True)["tracking_status"], "saved")
+        self.service.submit.assert_not_called()
+        self.materializer.materialize.assert_not_called()
+        self.service.get_run.assert_called_once_with("existing")
 
     def test_concurrent_invocation_skips(self):
         self.mocks[5].return_value = None
@@ -103,6 +137,7 @@ class DailySelectionTests(unittest.TestCase):
         self.mocks[5].assert_not_called()
         self.materializer.materialize.assert_not_called()
         self.service.submit.assert_not_called()
+        self.mocks[8].assert_not_called()
 
     def test_version_drift_is_rejected(self):
         self.strategy.get_strategy_meta.return_value = {"version": "0.5.1"}
@@ -165,6 +200,127 @@ class DailySelectionIdentityTests(unittest.TestCase):
     def test_timezone_is_shanghai_not_process_or_utc(self):
         utc_now = datetime(2026, 11, 16, 1, 35, tzinfo=timezone.utc)
         self.assertEqual(daily.preflight(utc_now, readiness()), ("ready", None))
+
+
+class DailyTrackingSaveTests(unittest.TestCase):
+    def setUp(self):
+        self.item = {"code": "sh.600000", "trade_date": "2026-11-13", "selected_price": 12.34,
+                     "selected_price_type": "realtime", "selected_price_trade_date": "2026-11-16",
+                     "selected_price_quote_time": "09:35:01", "rank_no": 2}
+        self.run = {"status": "success", "strategy_id": daily.STRATEGY_ID,
+                    "request": {"strategy_version": "0.4.4"},
+                    "result": {"count": 1, "results": [self.item], "score_threshold": 60}}
+        self.service = MagicMock()
+        self.service.get_run.return_value = self.run
+        self.save = patch.object(daily, "save_tracking_item", return_value={
+            "intraday_cache": {"status": "queued"}}).start()
+        self.addCleanup(patch.stopall)
+
+    def test_original_result_run_id_price_time_rank_and_threshold_are_preserved(self):
+        result = daily.save_completed_run(self.service, "daily-run")
+        self.assertEqual(result["tracking_status"], "saved")
+        self.save.assert_called_once_with(run_id="daily-run", item=self.item, score_threshold=60)
+        self.assertEqual(self.item["selected_price_trade_date"], "2026-11-16")
+
+    def test_failed_cancelled_and_empty_tasks_do_not_create_tracking(self):
+        for status in ("failed", "cancelled", "no_data", "success"):
+            self.run.update(status=status, result={"count": 0, "results": []})
+            result = daily.save_completed_run(self.service, "daily-run")
+            self.assertEqual(result["tracking_status"], "empty" if status in {"success", "no_data"} else "not_saved")
+        self.save.assert_not_called()
+
+    def test_pending_run_timeout_does_not_save_and_is_not_success(self):
+        self.run["status"] = "running"
+        result = daily.save_completed_run(self.service, "daily-run", wait_seconds=0)
+        self.assertEqual(result["status"], "pending")
+        self.save.assert_not_called()
+
+    def test_waits_for_worker_before_saving(self):
+        self.service.get_run.side_effect = [{**self.run, "status": "queued"}, self.run]
+        with patch.object(daily.clock, "sleep") as sleep:
+            result = daily.save_completed_run(self.service, "daily-run")
+        sleep.assert_called_once()
+        self.assertEqual(result["saved_count"], 1)
+
+    def test_partial_save_failure_is_explicit_and_remaining_items_are_saved(self):
+        self.run["result"] = {"count": 2, "results": [self.item, {**self.item, "code": "sz.000001"}]}
+        self.save.side_effect = [RuntimeError("database unavailable"), {"intraday_cache": {"status": "queued"}}]
+        result = daily.save_completed_run(self.service, "daily-run")
+        self.assertEqual((result["status"], result["saved_count"]), ("failed", 1))
+        self.assertEqual(result["tracking_errors"][0]["code"], "sh.600000")
+        self.assertEqual(result["saved_codes"], ["sz.000001"])
+
+    def test_saved_but_enrichment_enqueue_failure_does_not_report_full_success(self):
+        self.save.return_value = {"intraday_cache": {"status": "degraded"}}
+        result = daily.save_completed_run(self.service, "daily-run")
+        self.assertEqual((result["status"], result["saved_count"]), ("failed", 1))
+        self.assertEqual(result["reason"], "tracking_save_failed")
+
+    def test_malformed_result_is_not_misreported_as_successful_empty_selection(self):
+        for bad_result in (None, {}, {"results": [self.item], "count": 2},
+                           {"results": [self.item, self.item], "count": 2}):
+            self.run["result"] = bad_result
+            with self.assertRaises(ValueError):
+                daily.save_completed_run(self.service, "daily-run")
+        self.save.assert_not_called()
+
+    def test_research_cohort_and_wrong_version_are_rejected_without_saving(self):
+        for request in ({"strategy_version": "0.5.1"},
+                        {"strategy_version": "0.4.4", "forward_observation_id": "09:25"}):
+            self.run["request"] = request
+            with self.assertRaisesRegex(ValueError, "not a research task"):
+                daily.save_completed_run(self.service, "daily-run")
+        self.save.assert_not_called()
+
+    def test_save_uses_existing_manual_contract_not_an_alternative_writer(self):
+        patch.stopall()
+        with patch("app.api.routes.selection.save_selection_item", return_value={"code": "sh.600000"}) as save:
+            daily.save_tracking_item(run_id="daily-run", item=self.item, score_threshold=60)
+        payload = save.call_args.args[0]
+        self.assertEqual((payload.run_id, payload.strategy_id), ("daily-run", daily.STRATEGY_ID))
+        self.assertEqual(payload.item["trade_date"], "2026-11-16")
+        self.assertEqual(payload.item["selected_price"], self.item["selected_price"])
+
+    def test_published_snapshot_pins_recorded_intraday_quote_not_yesterdays_close(self):
+        item = {"code": "sh.600206", "selected_price": "39.3300", "selected_price_source": "daily_kline",
+                "explain": {"raw_metrics": {"trade_date": "2026-11-17", "close": 39.33,
+                    "realtime_price": 39.74, "realtime_trade_date": "2026-11-18",
+                    "realtime_quote_time": "2026-11-18 09:33:54"}}}
+        normalized = daily.tracking_item(item)
+        self.assertEqual((normalized["selected_price"], normalized["selected_price_type"],
+                          normalized["trade_date"], normalized["selected_price_quote_time"]),
+                         (39.74, "realtime", "2026-11-18", "2026-11-18 09:33:54"))
+        self.assertNotIn("trade_date", item)
+        self.assertEqual(item["selected_price"], "39.3300")
+        # Existing frozen writer honors the pinned quote even after the close.
+        from app.stock_selection.selector import StockSelector
+        selector = object.__new__(StockSelector)
+        snapshot = selector._selection_price_snapshot(normalized, clock_mode="postclose")
+        self.assertEqual(snapshot["selected_price"], 39.74)
+        self.assertEqual(snapshot["selected_price_trade_date"], "2026-11-18")
+
+    def test_missing_recorded_quote_is_an_explicit_gap_not_save_time_or_current_market_data(self):
+        with self.assertRaisesRegex(ValueError, "recorded realtime"):
+            daily.tracking_item({"code": "sh.600000", "selected_price": 10, "trade_date": "2026-11-13"})
+
+
+class DailySelectionCliTests(unittest.TestCase):
+    def test_pending_or_failed_save_returns_nonzero_and_marks_task_log_failed(self):
+        for status in ("pending", "failed"):
+            with self.subTest(status=status), patch.object(daily, "TaskRunLogger") as logger, \
+                    patch.object(daily, "run", return_value={"status": status, "reason": "save_incomplete"}), \
+                    patch("builtins.print"):
+                self.assertEqual(daily.main(["--save-only", "--wait-seconds", "0"]), 2)
+            self.assertEqual(logger.return_value.finish.call_args.args[2], "failed")
+
+    def test_dry_run_never_starts_or_finishes_task_log(self):
+        with patch.object(daily, "TaskRunLogger") as logger, \
+                patch.object(daily, "run", return_value={"status": "deduplicated"}) as run, \
+                patch("builtins.print"):
+            self.assertEqual(daily.main(["--save-only", "--dry-run"]), 0)
+        run.assert_called_once_with(dry_run=True, save_only=True, wait_seconds=300)
+        logger.return_value.start.assert_not_called()
+        logger.return_value.finish.assert_not_called()
 
 
 if __name__ == "__main__":
